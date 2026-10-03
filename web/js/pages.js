@@ -20,6 +20,7 @@ let menuTitle;
 let contextId = "";
 let focusFromKeys = false;
 let onCommand = () => {};
+let drawnKey = "";
 
 function icon(id, extra) {
   const cls = extra ? `icon ${extra}` : "icon";
@@ -58,12 +59,20 @@ export function closeMenu() {
   return true;
 }
 
+function pageKey(pages) {
+  return pages.map((page) => `${page.id}\0${page.name}\0${page.chapter || ""}`).join("\n");
+}
+
 function render(current) {
   const pages = current.pages;
+  const key = pageKey(pages);
+  const nodes = [...list.querySelectorAll("[data-page-id]")];
+  const same = key === drawnKey && nodes.length === pages.length;
   if (!pages.length) {
     list.innerHTML = '<p class="pages__empty">Нет страниц</p>';
     list.tabIndex = 0;
-  } else {
+    drawnKey = "";
+  } else if (!same) {
     list.tabIndex = -1;
     const focusId = current.focusPageId || current.activePageId;
     const grouped = pages.some((page) => page.chapter);
@@ -77,6 +86,10 @@ function render(current) {
       }
       return heading + optionHtml(page, index, current, focusId);
     }).join("");
+    drawnKey = key;
+  } else {
+    const focusId = current.focusPageId || current.activePageId;
+    pages.forEach((page, index) => updateOption(nodes[index], page, current, focusId));
   }
   if (sum) sum.textContent = `${readyCount(pages)} из ${pages.length} готово`;
   if (focusFromKeys) {
@@ -94,13 +107,35 @@ function optionHtml(page, index, current, focusId) {
   const num = String(index + 1).padStart(2, "0");
   const label = statusText(page);
   const busy = status === "running" ? ' aria-busy="true"' : "";
-  return `<div class="page" role="option" data-page-id="${escapeAttr(page.id)}" aria-selected="${selected ? "true" : "false"}" tabindex="${tab}"${busy}>
+  return `<div class="page" role="option" data-page-id="${escapeAttr(page.id)}" data-status="${escapeAttr(status)}" aria-selected="${selected ? "true" : "false"}" tabindex="${tab}"${busy}>
     <img class="page__thumb" src="${imageUrl(page.id, "thumb", page.version)}" alt="">
     <span class="page__body">
       <span class="page__title"><span class="page__num">${num}</span> <span class="page__name">${escapeText(page.name)}</span></span>
       <span class="page__status ${meta[1]}">${icon(meta[0], meta[2])} <span>${escapeText(label)}</span></span>
     </span>
   </div>`;
+}
+
+function updateOption(node, page, current, focusId) {
+  if (!node) return;
+  const status = page.status || "idle";
+  const selected = current.selectedPageIds.includes(page.id);
+  node.setAttribute("aria-selected", selected ? "true" : "false");
+  node.tabIndex = page.id === focusId ? 0 : -1;
+  if (status === "running") node.setAttribute("aria-busy", "true");
+  else node.removeAttribute("aria-busy");
+  const label = statusText(page);
+  const statusNode = node.querySelector(".page__status");
+  const shown = statusNode?.querySelector("span")?.textContent || "";
+  if (statusNode && (node.dataset.status !== status || shown !== label)) {
+    const meta = ICONS[status] || ICONS.idle;
+    statusNode.className = `page__status ${meta[1]}`;
+    statusNode.innerHTML = `${icon(meta[0], meta[2])} <span>${escapeText(label)}</span>`;
+    node.dataset.status = status;
+  }
+  const img = node.querySelector(".page__thumb");
+  const src = imageUrl(page.id, "thumb", page.version);
+  if (img && img.getAttribute("src") !== src) img.setAttribute("src", src);
 }
 
 function onClick(event) {

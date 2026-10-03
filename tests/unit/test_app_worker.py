@@ -74,4 +74,66 @@ def test_stale_typeset_is_dropped(tmp_path, monkeypatch):
     assert kept.regions[0].translation == "новое"
     assert not store.image_path(project["id"], page_id, "result").is_file()
     assert store.page_status(project["id"], page_id)["status"] == "edited"
-    assert [event.type for event in ctx.events] == ["job.progress"]
+    updated = [event for event in ctx.events if event.type == "page.updated"]
+    assert [event.type for event in ctx.events] == ["job.progress", "page.updated"]
+    assert updated[0].payload["status"] == "edited"
+
+
+def test_paint_reports_done(tmp_path, monkeypatch):
+    store = ProjectStore(tmp_path)
+    project = store.create_project("Глава", "en", "ru")
+    source = tmp_path / "page.png"
+    Image.new("RGB", (40, 20), "white").save(source)
+    page = store.add_sources(project["id"], [source])[0]
+    page_id = page["id"]
+    document = store.read_document(project["id"], page_id)
+    document.regions = [
+        TextRegion(id=1, bbox=(0, 0, 20, 10), text="Hi", translation="новое"),
+    ]
+    store.save_image(project["id"], page_id, "clean", Image.new("RGB", (40, 20), "white"))
+
+    class _Pipe:
+        def typeset_image(self, image, regions, lang, warnings, progress_callback=None, cancel_check=None):
+            return image, []
+
+    class _Config:
+        target_lang = "ru"
+        translate_sfx = False
+
+    class _Ctx:
+        typeset_lock = threading.Lock()
+        events = []
+
+        def cancel_check(self, _job_id):
+            return lambda: False
+
+        def emit(self, event):
+            self.events.append(event)
+
+    monkeypatch.setattr(worker, "_pipeline", lambda *_args, **_kwargs: (_Pipe(), _Config()))
+    ctx = _Ctx()
+    job = {
+        "id": "job-2",
+        "project_id": project["id"],
+        "page_id": page_id,
+        "settings": {},
+        "payload": {},
+    }
+    worker._paint(
+        job,
+        ctx,
+        store,
+        document,
+        "typeset",
+        page_id,
+        str(source),
+        image=None,
+        snapshot=False,
+        base_version=None,
+    )
+
+    updated = [event for event in ctx.events if event.type == "page.updated"]
+    assert len(updated) == 1
+    assert updated[0].payload["status"] == "done"
+    assert updated[0].payload["progress"] == 100
+    assert store.page_status(project["id"], page_id)["status"] == "done"

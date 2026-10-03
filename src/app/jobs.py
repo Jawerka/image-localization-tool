@@ -203,15 +203,24 @@ class JobQueue:
         self._pump()
 
     def cancel(self, job_id: str | None = None) -> None:
-        """Поставить флаг, снять неначатые задания и вызвать ``worker.cancel``."""
+        """Снять задания и остановить воркер.
+
+        Без ``job_id`` это кнопка «Стоп»: очередь пустеет целиком, пауза
+        снимается, уже отданное задание тоже помечается отменённым.
+        """
         self.cancel_requested = True
         removed: list[Job] = []
+        full = job_id is None
         with self._lock:
-            if job_id is None:
+            if full:
                 removed.extend(self._batch)
                 removed.extend(self._edits)
                 self._batch.clear()
                 self._edits.clear()
+                removed.extend(self._inflight_jobs_locked())
+                self._inflight_batch = None
+                self._inflight_edits.clear()
+                self.paused = False
             else:
                 removed.extend(job for job in self._batch if job.id == job_id)
                 removed.extend(job for job in self._edits if job.id == job_id)
@@ -222,6 +231,8 @@ class JobQueue:
         for job in removed:
             self._events.put(WorkerEvent(JOB_CANCELLED, _job_payload(job)))
         self.worker.cancel(job_id)
+        if full:
+            _call_worker(self.worker, "resume")
 
     def shutdown(self) -> None:
         self._closed = True
@@ -365,6 +376,18 @@ class JobQueue:
                         if self._inflight_batch == job.id:
                             self._inflight_batch = None
                 self.push_event(WorkerEvent("job.failed", {**_job_payload(job), "error": str(exc)}))
+
+    def _inflight_jobs_locked(self) -> list[Job]:
+        found: list[Job] = []
+        if self._inflight_batch:
+            job = self._jobs.get(self._inflight_batch)
+            if job is not None:
+                found.append(job)
+        for job_id in self._inflight_edits:
+            job = self._jobs.get(job_id)
+            if job is not None:
+                found.append(job)
+        return found
 
     def _dump_locked(self) -> dict:
         running: list[dict] = []

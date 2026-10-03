@@ -124,6 +124,7 @@ function start() {
     event.preventDefault();
   });
   document.addEventListener("ilt-undo", () => undo());
+  document.addEventListener("ilt-page", (event) => movePage(Number(event.detail) || 0));
   document.addEventListener("ilt-redo", () => redo());
   document.addEventListener("ilt-translate-page", () => translatePage());
   document.addEventListener("ilt-banner", (event) => {
@@ -153,7 +154,7 @@ function bindChrome() {
   });
   document.querySelector("[data-role='translate-page']").addEventListener("click", translatePage);
   document.querySelector("[data-role='translate-all']").addEventListener("click", translateAll);
-  document.querySelector("[data-role='stop']").addEventListener("click", () => cancelJobs().catch(showError));
+  document.querySelector("[data-role='stop']").addEventListener("click", () => stopJobs());
   document.querySelectorAll("[data-role='llm-retry']").forEach((button) => button.addEventListener("click", retryLlm));
   document.querySelector("[data-role='lang-source']").addEventListener("change", saveLanguages);
   document.querySelector("[data-role='lang-target']").addEventListener("change", saveLanguages);
@@ -234,7 +235,8 @@ function render(state) {
   document.querySelectorAll("[data-role='export']").forEach((button) => {
     button.disabled = !hasPages;
   });
-  document.querySelector("[data-role='stop']").hidden = !state.busy;
+  const batchLive = state.batch && (state.batch.status === "running" || state.batch.status === "paused");
+  document.querySelector("[data-role='stop']").hidden = !state.busy && !batchLive;
   document.querySelector("[data-role='empty']").hidden = hasPages;
   syncSfx(state.settings);
   const clients = Number(state.remote && state.remote.clients) || 0;
@@ -426,7 +428,7 @@ async function exitApp() {
     const total = getState().job.total || getState().pages.length;
     const ok = await confirm({
       title: "Закрыть программу?",
-      text: `Идёт перевод главы (страница ${index} из ${total}). Если закрыть окно, обработка остановится. Недоделанная страница останется в очереди.`,
+      text: `Идёт перевод главы (страница ${index} из ${total}). Если закрыть окно, обработка остановится и очередь очистится.`,
       ok: "Остановить и закрыть",
       cancel: "Отмена",
     });
@@ -529,7 +531,7 @@ function onPageUpdated(payload) {
   const partial = {};
   if (page.status) partial.status = page.status;
   if (page.progress != null) partial.progress = page.progress;
-  if (page.stage) partial.stage = page.stage;
+  if (Object.prototype.hasOwnProperty.call(page, "stage")) partial.stage = page.stage || "";
   if (page.error != null) partial.error = page.error;
   if (page.version != null) partial.version = page.version;
   if (Object.keys(partial).length) updatePage(pageId, partial);
@@ -583,13 +585,31 @@ function onFailed(payload) {
   setBanner("job", { text: message });
 }
 
+function batchIsLive() {
+  const status = (getState().batch || {}).status;
+  return status === "running" || status === "paused";
+}
+
+function stopJobs() {
+  cancelJobs().then((data) => {
+    onCancelled();
+    if (data) patch({ jobs: data });
+  }).catch(showError);
+}
+
 function onCancelled() {
   const pages = getState().pages.map((page) => (
     page.status === "running" || page.status === "queued"
       ? { ...page, status: "idle", progress: 0, stage: "" }
       : page
   ));
-  patch({ busy: false, pendingAction: null, pages, job: { stage: "", index: 0, total: 0, pageId: "" } });
+  patch({
+    busy: false,
+    pendingAction: null,
+    pages,
+    job: { stage: "", index: 0, total: 0, pageId: "" },
+    batch: { status: "idle", startedAt: null, done: 0, error: "", currentId: "" },
+  });
 }
 
 function movePage(delta) {
@@ -645,8 +665,8 @@ function escape() {
     return;
   }
   if (isWizard()) return;
-  if (getState().busy) {
-    cancelJobs().catch(showError);
+  if (getState().busy || batchIsLive()) {
+    stopJobs();
     return;
   }
   if (getState().selectedRegionId != null) selectRegion(null);

@@ -128,6 +128,7 @@ function onInput(event) {
   if (keep === "fill") {
     editSelected((style) => {
       style.fill_rgb = hexToRgb(value);
+      style.fill_locked = false;
     }, live);
   } else if (keep === "stroke") {
     editSelected((style) => {

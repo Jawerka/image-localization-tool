@@ -90,6 +90,7 @@ class TextStyle:
     """
 
     fill_rgb: tuple[int, int, int] = (0, 0, 0)
+    fill_locked: bool = False
     stroke_rgb: tuple[int, int, int] | None = None
     font_size: int = 16
     alignment: str = "center"
@@ -123,6 +124,7 @@ class TextStyle:
         warp = _normalize_warp(self.warp)
         return {
             "fill_rgb": [int(v) for v in self.fill_rgb],
+            "fill_locked": bool(self.fill_locked),
             "stroke_rgb": [int(v) for v in self.stroke_rgb] if self.stroke_rgb else None,
             "font_size": int(self.font_size),
             "alignment": self.alignment,
@@ -152,6 +154,7 @@ class TextStyle:
         stroke = data.get("stroke_rgb")
         return cls(
             fill_rgb=tuple(fill),
+            fill_locked=bool(data.get("fill_locked", False)),
             stroke_rgb=tuple(stroke) if stroke else None,
             font_size=int(data.get("font_size", 16)),
             alignment=str(data.get("alignment", "center")),

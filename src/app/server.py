@@ -837,7 +837,9 @@ def _mark_queued(state: AppState, page_ids: list[str]) -> None:
 
 
 def _cancel(state: AppState) -> dict:
+    """Стоп: выкинуть всю очередь, снять паузу и записать пустой снимок."""
     state.queue.cancel(None)
+    state.queue_pending = False
     if state.project_id:
         project = state.store.open_project(state.project_id)
         for record in project.get("pages") or []:
@@ -846,9 +848,17 @@ def _cancel(state: AppState) -> dict:
                 current = state.store.page_status(state.project_id, page_id)
             except (FileNotFoundError, ValueError):
                 continue
-            if current["status"] == "queued":
-                state.store.update_status(state.project_id, page_id, status="idle")
-    return {"ok": True}
+            if current["status"] in ("queued", "running"):
+                state.store.update_status(
+                    state.project_id,
+                    page_id,
+                    status="idle",
+                    progress=0,
+                    stage="",
+                    error="",
+                )
+    _save_queue(state)
+    return {"ok": True, **_jobs_view(state)}
 
 
 def _dialog_directory(state: AppState) -> dict:

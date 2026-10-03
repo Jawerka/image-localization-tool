@@ -266,6 +266,43 @@ def test_cancel_while_paused_drops_unstarted():
     assert worker.calls == []
 
 
+def test_cancel_clears_paused_queue(tmp_path):
+    worker = FakeWorker(synchronous=False)
+    queue = JobQueue(worker)
+    settings = AppSettings()
+    running = queue.submit("translate_page", "proj", "p1", settings=settings)
+    queue.pause()
+    waiting = queue.submit("translate_page", "proj", "p2", settings=settings)
+    edit = queue.submit(
+        "apply_document",
+        "proj",
+        "p1",
+        settings=settings,
+        payload={"plan": "typeset"},
+    )
+    queue.cancel()
+    assert queue.paused is False
+    assert queue.snapshot()["batch"] == []
+    assert queue.snapshot()["edits"] == []
+    assert worker.cancel_calls == [None]
+    assert [job.id for job in worker.calls] == [running.id]
+    cancelled = {
+        event.payload["job_id"]
+        for event in queue.drain_events()
+        if event.type == "job.cancelled"
+    }
+    assert cancelled == {running.id, waiting.id, edit.id}
+    path = tmp_path / "queue.json"
+    queue.save(path)
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    assert raw["paused"] is False
+    assert raw["batch"] == []
+    assert raw["edits"] == []
+    assert raw["running"] == []
+    queue.resume()
+    assert [job.id for job in worker.calls] == [running.id]
+
+
 def test_cancel_inflight_marks_cancelled():
     worker = FakeWorker(synchronous=False)
     queue = JobQueue(worker)

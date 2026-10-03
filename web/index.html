@@ -155,15 +155,19 @@
               <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#eraser"></use></svg>
               Ластик
             </button>
+            <button type="button" class="btn btn-ghost" role="radio" data-role="tool-hand" data-value="hand" data-view-control aria-checked="false" tabindex="-1" disabled title="Рука (H)">
+              <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#hand"></use></svg>
+              Рука
+            </button>
           </div>
-          <label class="brush-size" for="brush-size">Размер
-            <input id="brush-size" data-role="brush-size" data-view-control type="range" min="1" max="64" value="12" disabled>
+          <label class="brush-size" for="brush-size" data-role="brush-size-label" title="Размер кисти" hidden>Кисть
+            <input id="brush-size" data-role="brush-size" data-view-control type="range" min="1" max="64" value="12" title="Размер кисти" disabled>
             <span data-role="brush-size-value">12</span>
           </label>
           <div class="zoom" data-role="zoom">
             <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#zoom"></use></svg>
             <button type="button" class="btn btn-ghost btn-icon" data-role="zoom-out" data-view-control aria-label="Уменьшить" disabled>−</button>
-            <span class="zoom__value" data-role="zoom-value">Вписать</span>
+            <button type="button" class="zoom__value" data-role="zoom-value" data-view-control title="Вписать в окно" disabled>Вписать</button>
             <button type="button" class="btn btn-ghost btn-icon" data-role="zoom-in" data-view-control aria-label="Увеличить" disabled>+</button>
           </div>
           <button type="button" class="btn btn-ghost btn-icon" data-role="undo" aria-label="Отменить" title="Отменить (Ctrl+Z)" disabled>
@@ -193,8 +197,9 @@
             <ul data-role="recent-list"></ul>
           </section>
         </div>
-        <div class="stage" data-role="stage" tabindex="-1" hidden>
-          <div class="stage__fit">
+        <div class="stage-host" data-role="stage-host" hidden>
+          <div class="stage" data-role="stage" tabindex="-1">
+            <div class="stage__fit">
             <div class="frame" data-role="frame">
               <img class="frame__img" data-role="img-base" alt="">
               <div class="frame__placeholder" data-role="result-placeholder" hidden>
@@ -218,8 +223,15 @@
                 <span data-role="frame-progress-text"></span>
                 <progress max="100" value="0">0 %</progress>
               </div>
+              </div>
             </div>
           </div>
+          <button type="button" class="stage-nav stage-nav--prev" data-role="page-prev" aria-label="Предыдущая страница" title="Предыдущая страница">
+            <svg class="icon icon--left" aria-hidden="true"><use href="icons/icons.svg#chevron"></use></svg>
+          </button>
+          <button type="button" class="stage-nav stage-nav--next" data-role="page-next" aria-label="Следующая страница" title="Следующая страница">
+            <svg class="icon icon--right" aria-hidden="true"><use href="icons/icons.svg#chevron"></use></svg>
+          </button>
         </div>
         <ol class="steps" data-role="steps" aria-label="Шаги обработки" hidden></ol>
       </main>
@@ -265,7 +277,7 @@
         <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#gpu"></use></svg>
         <span data-role="device-label">—</span>
       </span>
-      <span class="statusbar__zoom" data-role="zoom-label">Вписать</span>
+      <button type="button" class="statusbar__zoom" data-role="zoom-label" title="Вписать в окно">Вписать</button>
     </footer>
   </div>
 
@@ -417,7 +429,7 @@
               <p class="field-hint form__full">От 100 до 150 %.</p>
               <label class="choice form__full">
                 <input id="set-single" type="checkbox" checked>
-                Однобуквенные клавиши (V, R, B, E, M, L, 1–3)
+                Однобуквенные клавиши (V, R, B, E, H, M, L, 1–3)
               </label>
               <p class="field-hint form__full">Не срабатывают, пока курсор в поле ввода. Можно выключить.</p>
             </div>
@@ -701,6 +713,7 @@
             <tr><td><kbd class="kbd">Ctrl</kbd> + <kbd class="kbd">Shift</kbd> + <kbd class="kbd">Enter</kbd></td><td>Перевести всё</td></tr>
             <tr><td><kbd class="kbd">Esc</kbd></td><td>Стоп, снять выделение или закрыть диалог</td></tr>
             <tr><td><kbd class="kbd">PgUp</kbd> <kbd class="kbd">PgDn</kbd></td><td>Соседние страницы</td></tr>
+            <tr><td><kbd class="kbd">←</kbd> <kbd class="kbd">→</kbd></td><td>Соседняя страница, если регион не выбран</td></tr>
             <tr><td><kbd class="kbd">1</kbd> <kbd class="kbd">2</kbd> <kbd class="kbd">3</kbd></td><td>Виды «Оригинал», «Результат», «Сравнение»</td></tr>
             <tr><td><kbd class="kbd">M</kbd></td><td>Слой маски</td></tr>
             <tr><td><kbd class="kbd">L</kbd></td><td>Слой рамок</td></tr>
@@ -708,6 +721,7 @@
             <tr><td><kbd class="kbd">R</kbd></td><td>Инструмент «Регион»</td></tr>
             <tr><td><kbd class="kbd">B</kbd></td><td>Инструмент «Кисть»</td></tr>
             <tr><td><kbd class="kbd">E</kbd></td><td>Инструмент «Ластик»</td></tr>
+            <tr><td><kbd class="kbd">H</kbd></td><td>Инструмент «Рука»</td></tr>
             <tr><td><kbd class="kbd">[</kbd> <kbd class="kbd">]</kbd></td><td>Размер кисти</td></tr>
             <tr><td><kbd class="kbd">Del</kbd></td><td>Удалить регион</td></tr>
             <tr><td><kbd class="kbd">Стрелки</kbd></td><td>Сдвинуть рамку на 1 px</td></tr>
@@ -718,7 +732,8 @@
             <tr><td><kbd class="kbd">Ctrl</kbd> + <kbd class="kbd">Shift</kbd> + <kbd class="kbd">V</kbd></td><td>Вставить стиль региона</td></tr>
             <tr><td><kbd class="kbd">Ctrl</kbd> + <kbd class="kbd">Z</kbd></td><td>Отмена</td></tr>
             <tr><td><kbd class="kbd">Ctrl</kbd> + <kbd class="kbd">Y</kbd></td><td>Повтор</td></tr>
-            <tr><td><kbd class="kbd">Ctrl</kbd> + колесо</td><td>Масштаб</td></tr>
+            <tr><td><kbd class="kbd">Ctrl</kbd> + колесо</td><td>Масштаб шагом 5 %</td></tr>
+            <tr><td>Клик по процентам</td><td>Вписать в окно</td></tr>
             <tr><td><kbd class="kbd">Ctrl</kbd> + <kbd class="kbd">0</kbd></td><td>Вписать в окно</td></tr>
             <tr><td><kbd class="kbd">Ctrl</kbd> + <kbd class="kbd">1</kbd></td><td>Масштаб 100 %</td></tr>
             <tr><td>Колесо</td><td>Прокрутка холста</td></tr>

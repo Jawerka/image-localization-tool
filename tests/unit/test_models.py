@@ -61,7 +61,7 @@ class TestTextRegion:
             manual=True,
             edited=True,
             overflow=True,
-            style=TextStyle(font_size_override=22, uppercase=True),
+            style=TextStyle(font_size_override=22, uppercase=True, fill_locked=True),
         )
         restored = TextRegion.from_dict(region.to_dict())
         assert restored.skip is True
@@ -70,6 +70,7 @@ class TestTextRegion:
         assert restored.overflow is True
         assert restored.style.font_size_override == 22
         assert restored.style.uppercase is True
+        assert restored.style.fill_locked is True
 
     def test_should_translate_respects_skip(self):
         region = TextRegion(

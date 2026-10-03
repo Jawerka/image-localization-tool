@@ -784,7 +784,9 @@ def _translate_page(job: dict, ctx: _Runtime, store: ProjectStore, page: dict) -
     store.save_image(project_id, page_id, "thumb", image)
     _commit(store, job, document, page_id, snapshot=True, base_version=None)
     _finish_status(store, job, document, page_id)
-    ctx.emit(WorkerEvent(PAGE_UPDATED, {**_dict_ids(job, page_id), "plan": "none", "version": document.version}))
+    ctx.emit(WorkerEvent(PAGE_UPDATED, _page_update(
+        store, job, page_id, plan="none", version=document.version,
+    )))
 
 
 def _run_apply(job: dict, ctx: _Runtime) -> None:
@@ -861,8 +863,11 @@ def _run_region(job: dict, ctx: _Runtime) -> None:
             store, job, document, page_id, snapshot=False, base_version=_base_version(payload),
         )
         if saved is None:
+            ctx.emit(WorkerEvent(PAGE_UPDATED, _page_update(store, job, page_id, plan="none")))
             return
-        ctx.emit(WorkerEvent(PAGE_UPDATED, {**_dict_ids(job, page_id), "plan": "none", "version": saved.version}))
+        ctx.emit(WorkerEvent(PAGE_UPDATED, _page_update(
+            store, job, page_id, plan="none", version=saved.version,
+        )))
         return
     _paint(
         job,
@@ -990,16 +995,16 @@ def _paint(
         snapshot=snapshot,
         base_version=base_version,
     )
+    plan_name = "clean" if need_clean else "typeset"
     if saved is None:
+        ctx.emit(WorkerEvent(PAGE_UPDATED, _page_update(store, job, page_id, plan=plan_name)))
         return
     store.save_image(project_id, page_id, "result", rendered)
     store.save_image(project_id, page_id, "thumb", rendered)
     _finish_status(store, job, document, page_id)
-    ctx.emit(WorkerEvent(PAGE_UPDATED, {
-        **_dict_ids(job, page_id),
-        "plan": "clean" if need_clean else "typeset",
-        "version": saved.version,
-    }))
+    ctx.emit(WorkerEvent(PAGE_UPDATED, _page_update(
+        store, job, page_id, plan=plan_name, version=saved.version,
+    )))
 
 
 def _pipeline(ctx: _Runtime, settings: dict, *, reset_clients: bool):
@@ -1104,6 +1109,19 @@ def _release_running(store: ProjectStore, job: dict, page_id: str) -> None:
         store.update_status(project_id, page_id, status="edited", stage="", error="")
     except (FileNotFoundError, OSError, ValueError):
         return
+
+
+def _page_update(store: ProjectStore, job: dict, page_id: str, **extra) -> dict:
+    """Событие страницы вместе со статусом из стора, чтобы строка списка не зависала."""
+    payload = {**_dict_ids(job, page_id), **extra}
+    try:
+        current = store.page_status(str(job.get("project_id") or ""), page_id)
+    except (FileNotFoundError, OSError, ValueError):
+        return payload
+    payload["status"] = current.get("status") or ""
+    payload["progress"] = int(current.get("progress") or 0)
+    payload["stage"] = str(current.get("stage") or "")
+    return payload
 
 
 def _finish_status(store: ProjectStore, job: dict, document: PageDocument, page_id: str) -> None:

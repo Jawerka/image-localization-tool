@@ -235,6 +235,28 @@ def test_black_bubble_is_drawn_in_white():
     assert region.style.fill_rgb == (255, 255, 255)
 
 
+def test_locked_black_on_black_bubble_stays_black():
+    image = Image.new("RGB", (180, 120), "white")
+    draw = ImageDraw.Draw(image)
+    draw.ellipse((10, 10, 170, 110), fill="black")
+    region = TextRegion(
+        id=1,
+        bbox=(50, 45, 80, 30),
+        bubble_bbox=(10, 10, 160, 100),
+        translation="Да",
+        block_type="dialogue",
+        style=TextStyle(fill_rgb=(0, 0, 0), fill_locked=True),
+    )
+    before = np.array(image)
+    result, overflow = Typesetter(min_font_size=16, max_font_size=28, lang="ru").render(image, [region])
+    assert overflow == []
+    assert region.style.fill_rgb == (0, 0, 0)
+    after = np.array(result)
+    was_dark = np.all(before < 40, axis=2)
+    now_light = np.all(after > 200, axis=2)
+    assert int((was_dark & now_light).sum()) == 0
+
+
 def test_readable_red_on_white_stays_red():
     image = Image.new("RGB", (220, 80), "white")
     region = TextRegion(

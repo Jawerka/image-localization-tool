@@ -163,6 +163,10 @@ ol {
   transform: rotate(-90deg);
 }
 
+.icon--left {
+  transform: rotate(90deg);
+}
+
 .muted {
   color: var(--text-muted);
 }

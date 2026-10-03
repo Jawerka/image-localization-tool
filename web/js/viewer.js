@@ -17,9 +17,13 @@ import {
 } from "./state.js";
 import { isSpaceDown } from "./keys.js";
 
-const TOOLS = ["select", "region", "brush", "eraser"];
+const TOOLS = ["select", "region", "brush", "eraser", "hand"];
 const VIEWS = ["original", "result", "compare"];
+const ZOOM_MIN_PERCENT = 10;
+const ZOOM_MAX_PERCENT = 200;
+const ZOOM_STEP_PERCENT = 5;
 
+let stageHost;
 let stage;
 let frame;
 let baseImage;
@@ -42,8 +46,11 @@ let drag = null;
 let previewImage = null;
 let previewUrl = "";
 let spaceDown = false;
+let seenPageId = "";
+let scrollHome = false;
 
 export function init() {
+  stageHost = document.querySelector("[data-role='stage-host']");
   stage = document.querySelector("[data-role='stage']");
   frame = document.querySelector("[data-role='frame']");
   baseImage = document.querySelector("[data-role='img-base']");
@@ -69,6 +76,10 @@ export function init() {
   });
   document.querySelector("[data-role='zoom-out']").addEventListener("click", () => stepZoom(-1));
   document.querySelector("[data-role='zoom-in']").addEventListener("click", () => stepZoom(1));
+  document.querySelector("[data-role='zoom-value']").addEventListener("click", () => setZoom("fit"));
+  document.querySelector("[data-role='zoom-label']").addEventListener("click", () => setZoom("fit"));
+  document.querySelector("[data-role='page-prev']").addEventListener("click", () => turnPage(-1));
+  document.querySelector("[data-role='page-next']").addEventListener("click", () => turnPage(1));
   document.querySelector("[data-role='undo']").addEventListener("click", () => document.dispatchEvent(new CustomEvent("ilt-undo")));
   document.querySelector("[data-role='redo']").addEventListener("click", () => document.dispatchEvent(new CustomEvent("ilt-redo")));
 
@@ -82,6 +93,9 @@ export function init() {
   });
 
   frame.addEventListener("pointerdown", onPointerDown);
+  frame.addEventListener("mousedown", (event) => {
+    if (event.button === 1) event.preventDefault();
+  });
   frame.addEventListener("dblclick", onDoubleClick);
   frame.addEventListener("pointermove", onPointerMove);
   frame.addEventListener("pointerup", onPointerUp);
@@ -90,6 +104,7 @@ export function init() {
     cursor.hidden = true;
   });
   stage.addEventListener("wheel", onWheel, { passive: false });
+  stage.addEventListener("auxclick", (event) => event.preventDefault());
   stage.addEventListener("scroll", rememberCenter);
   baseImage.addEventListener("load", onImageLoad);
   baseImage.addEventListener("error", onBaseError);
@@ -103,7 +118,7 @@ export function init() {
 
 export function setSpace(down) {
   spaceDown = down;
-  stage.classList.toggle("is-pan", down && !drag);
+  syncPanCursor();
 }
 
 export function viewCenter() {
@@ -187,6 +202,9 @@ function sync(state) {
   document.querySelector("[data-role='undo']").disabled = !state.undoCount;
   document.querySelector("[data-role='redo']").disabled = !state.redoCount;
   const range = document.querySelector("[data-role='brush-size']");
+  const brushLabel = document.querySelector("[data-role='brush-size-label']");
+  const brushOn = state.tool === "brush" || state.tool === "eraser";
+  if (brushLabel) brushLabel.hidden = !brushOn;
   if (document.activeElement !== range) range.value = String(state.brushSize);
   if (sizeLabel) sizeLabel.textContent = String(state.brushSize);
 
@@ -197,9 +215,19 @@ function sync(state) {
   boxesButton.setAttribute("aria-pressed", state.showBoxes ? "true" : "false");
   maskButton.setAttribute("aria-pressed", state.showMask ? "true" : "false");
 
+  if (stageHost) stageHost.hidden = !enabled;
   stage.hidden = !enabled;
   steps.hidden = !enabled;
+  syncPageNav(state, enabled);
   if (!enabled) return;
+
+  let home = false;
+  if (page.id !== seenPageId) {
+    seenPageId = page.id;
+    home = state.zoom !== "fit";
+    scrollHome = home;
+    if (home) pinScroll();
+  }
 
   const version = state.document?.version || page.version || 0;
   setSrc(baseImage, page, state.view === "original" ? "original" : "result", version);
@@ -220,8 +248,32 @@ function sync(state) {
   renderBoxes(state);
   renderProgress(state, page);
   renderSteps(state, page);
-  stage.classList.toggle("is-cross", enabled && (state.tool === "region" || state.tool === "brush" || state.tool === "eraser") && !spaceDown);
+  stage.classList.toggle("is-cross", (state.tool === "region" || state.tool === "brush" || state.tool === "eraser") && !spaceDown);
+  syncPanCursor();
   layout();
+  if (home) pinScroll();
+}
+
+function syncPageNav(state, enabled) {
+  const index = state.pages.findIndex((item) => item.id === state.activePageId);
+  const prev = document.querySelector("[data-role='page-prev']");
+  const next = document.querySelector("[data-role='page-next']");
+  if (prev) prev.disabled = !enabled || index <= 0;
+  if (next) next.disabled = !enabled || index < 0 || index >= state.pages.length - 1;
+}
+
+function syncPanCursor() {
+  const hand = spaceDown || getState().tool === "hand";
+  stage.classList.toggle("is-pan", hand && !(drag && drag.kind === "pan"));
+}
+
+function turnPage(delta) {
+  document.dispatchEvent(new CustomEvent("ilt-page", { detail: delta }));
+}
+
+function pinScroll() {
+  stage.scrollTop = 0;
+  stage.scrollLeft = 0;
 }
 
 function setRadio(selector, value) {
@@ -265,6 +317,11 @@ function onBaseError() {
 function onImageLoad() {
   natural = { w: baseImage.naturalWidth || 0, h: baseImage.naturalHeight || 0 };
   patch({ imageSize: { ...natural } });
+  if (scrollHome) {
+    pinScroll();
+    window.requestAnimationFrame(pinScroll);
+    scrollHome = false;
+  }
   layout();
 }
 
@@ -286,12 +343,12 @@ function layout() {
   const scale = currentScale();
   const width = Math.max(1, Math.round(natural.w * scale));
   const height = Math.max(1, Math.round(natural.h * scale));
-  if (frame.style.getPropertyValue("--frame-w") === `${width}px` && frame.style.getPropertyValue("--frame-h") === `${height}px`) {
+  if (stage.style.getPropertyValue("--frame-w") === `${width}px` && stage.style.getPropertyValue("--frame-h") === `${height}px`) {
     updateZoomLabel(scale);
     return;
   }
-  frame.style.setProperty("--frame-w", `${width}px`);
-  frame.style.setProperty("--frame-h", `${height}px`);
+  stage.style.setProperty("--frame-w", `${width}px`);
+  stage.style.setProperty("--frame-h", `${height}px`);
   updateZoomLabel(scale);
 }
 
@@ -302,20 +359,28 @@ function updateZoomLabel(scale) {
   if (status && status.textContent !== text) status.textContent = text;
 }
 
+function zoomSteps() {
+  const steps = [];
+  for (let percent = ZOOM_MIN_PERCENT; percent <= ZOOM_MAX_PERCENT; percent += ZOOM_STEP_PERCENT) {
+    steps.push(percent / 100);
+  }
+  return steps;
+}
+
+function zoomAt(scale, direction) {
+  const steps = zoomSteps();
+  if (direction > 0) return steps.find((item) => item > scale + 0.001) || ZOOM_MAX_PERCENT / 100;
+  return [...steps].reverse().find((item) => item < scale - 0.001) || ZOOM_MIN_PERCENT / 100;
+}
+
 function stepZoom(direction) {
-  const steps = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4];
-  const scale = currentScale();
-  const next = direction > 0
-    ? (steps.find((item) => item > scale + 0.01) || Math.min(8, scale * 1.25))
-    : ([...steps].reverse().find((item) => item < scale - 0.01) || Math.max(0.1, scale / 1.25));
-  patch({ zoom: next });
+  patch({ zoom: zoomAt(currentScale(), direction) });
 }
 
 function onWheel(event) {
   if (!event.ctrlKey || stage.hidden) return;
   event.preventDefault();
-  const factor = event.deltaY < 0 ? 1.1 : 1 / 1.1;
-  const next = Math.min(8, Math.max(0.1, currentScale() * factor));
+  const next = zoomAt(currentScale(), event.deltaY < 0 ? 1 : -1);
   const rect = frame.getBoundingClientRect();
   const u = rect.width ? (event.clientX - rect.left) / rect.width : 0.5;
   const v = rect.height ? (event.clientY - rect.top) / rect.height : 0.5;
@@ -424,8 +489,11 @@ function icon(id) {
 }
 
 function onPointerDown(event) {
-  if (event.button !== 0 || stage.hidden) return;
-  if (spaceDown || isSpaceDown()) {
+  if (stage.hidden) return;
+  if (event.button !== 0 && event.button !== 1) return;
+  const pan = event.button === 1 || spaceDown || isSpaceDown() || getState().tool === "hand";
+  if (pan) {
+    event.preventDefault();
     drag = {
       kind: "pan",
       x: event.clientX,
@@ -434,6 +502,7 @@ function onPointerDown(event) {
       top: stage.scrollTop,
     };
     stage.classList.add("is-panning");
+    stage.classList.remove("is-pan");
     frame.setPointerCapture(event.pointerId);
     return;
   }
@@ -570,6 +639,7 @@ function onPointerUp(event) {
   const done = drag;
   drag = null;
   stage.classList.remove("is-panning");
+  syncPanCursor();
   if (done && (done.kind === "rotate" || done.kind === "warp")) renderBoxes(getState());
   cursor.hidden = true;
   if (!done) return;

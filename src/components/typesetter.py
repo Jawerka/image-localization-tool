@@ -971,7 +971,7 @@ class Typesetter:
             region.style.font_size = size
             stroke, stroke_width = self._stroke_paint(rgb, area, region, size)
             fill = region.style.fill_rgb
-            if region.block_type != "sfx":
+            if region.block_type != "sfx" and not region.style.fill_locked:
                 fill = _readable_fill(fill, _area_color(rgb, area))
                 region.style.fill_rgb = fill
             if _style_needs_layer(region.style):

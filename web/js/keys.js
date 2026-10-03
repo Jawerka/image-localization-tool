@@ -161,7 +161,14 @@ function onKey(event) {
 
   if (key === "ArrowLeft" || key === "ArrowRight" || key === "ArrowUp" || key === "ArrowDown") {
     if (ownsArrows(target)) return;
-    if (getState().selectedRegionId == null) return;
+    if (getState().selectedRegionId == null) {
+      const plain = !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey;
+      if (plain && (key === "ArrowLeft" || key === "ArrowRight")) {
+        event.preventDefault();
+        actions.page?.(key === "ArrowRight" ? 1 : -1);
+      }
+      return;
+    }
     event.preventDefault();
     actions.nudge?.(key, { shift: event.shiftKey, alt: event.altKey });
     return;
@@ -184,8 +191,9 @@ function onKey(event) {
     return;
   }
 
+  if (event.ctrlKey || event.altKey || event.metaKey) return;
   if (!singleKeys()) return;
-  const toolByCode = { KeyV: "select", KeyR: "region", KeyB: "brush", KeyE: "eraser" };
+  const toolByCode = { KeyV: "select", KeyR: "region", KeyB: "brush", KeyE: "eraser", KeyH: "hand" };
   const viewByCode = { Digit1: "original", Digit2: "result", Digit3: "compare" };
   if (toolByCode[event.code]) {
     event.preventDefault();

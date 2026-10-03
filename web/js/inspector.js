@@ -142,6 +142,9 @@ function renderRegions(state, page) {
     list.querySelectorAll("[data-region-action]").forEach((button) => {
       button.addEventListener("click", () => onAction(button));
     });
+    list.querySelectorAll("[data-ink]").forEach((button) => {
+      button.addEventListener("click", () => onInk(button));
+    });
     if (regionId && field) {
       const next = list.querySelector(`[data-region-id="${cssEscape(regionId)}"] [data-field="${field}"]`);
       if (next) {
@@ -205,6 +208,7 @@ function card(region, index, state) {
         ПРОПИСНЫЕ
       </label>
     </div>
+    ${inkToggle(region)}
   </article>`;
 }
 
@@ -471,6 +475,36 @@ function fontBounds(state) {
 function fontBound(state, key, fallback) {
   const value = Number(state.settings?.[key]);
   return Number.isFinite(value) && value > 0 ? Math.round(value) : fallback;
+}
+
+function inkSide(fill) {
+  const rgb = Array.isArray(fill) ? fill : [0, 0, 0];
+  const mean = (Number(rgb[0]) + Number(rgb[1]) + Number(rgb[2])) / 3;
+  return mean > 127.5 ? "white" : "black";
+}
+
+function inkToggle(region) {
+  const side = inkSide(region.style && region.style.fill_rgb);
+  const button = (value, label) => {
+    const pressed = side === value ? "true" : "false";
+    return `<button type="button" class="btn btn-ghost" data-ink="${value}" aria-pressed="${pressed}">${label}</button>`;
+  };
+  return `<div class="ink-toggle" role="group" aria-label="Цвет текста">${button("black", "Чёрный")}${button("white", "Белый")}</div>`;
+}
+
+function onInk(button) {
+  const cardNode = button.closest("[data-region-id]");
+  const id = cardNode?.dataset.regionId;
+  const ink = button.dataset.ink;
+  if (!id || (ink !== "black" && ink !== "white")) return;
+  editDocument((document) => {
+    const region = findRegion(document, id);
+    if (!region) return;
+    region.edited = true;
+    region.style = { ...(region.style || {}) };
+    region.style.fill_rgb = ink === "white" ? [255, 255, 255] : [0, 0, 0];
+    region.style.fill_locked = true;
+  });
 }
 
 async function onAction(button) {
