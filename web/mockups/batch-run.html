@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>
+  (function () {
+    var theme = "";
+    var scale = "";
+    try {
+      var params = new URLSearchParams(location.search);
+      theme = params.get("theme") || "";
+      scale = params.get("scale") || "";
+      if (!theme) theme = localStorage.getItem("ilt-mockup-theme") || "";
+      if (!scale) scale = localStorage.getItem("ilt-mockup-scale") || "";
+    } catch (err) {}
+    if (theme === "dark" || theme === "light") {
+      document.documentElement.setAttribute("data-theme", theme);
+    }
+    var n = parseInt(scale, 10);
+    if (n >= 100 && n <= 150 && n !== 100) {
+      document.documentElement.style.setProperty("--ui-scale", String(n / 100));
+    }
+  })();
+  </script>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>Image Localization Tool — пакетный прогон</title>
+  <link rel="stylesheet" href="../css/tokens.css">
+  <link rel="stylesheet" href="../css/base.css">
+  <link rel="stylesheet" href="../css/components.css">
+  <link rel="stylesheet" href="../css/main.css">
+  <link rel="stylesheet" href="../css/editor.css">
+  <style>
+    .review {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--space-xs) var(--space);
+      align-items: center;
+      flex-shrink: 0;
+      padding: var(--space-xs) var(--space);
+      border-bottom: 1px dashed var(--border);
+      background: var(--bg-primary);
+      color: var(--text-muted);
+      font-size: var(--font-size-small);
+    }
+
+    .review a {
+      color: var(--text-muted);
+      text-decoration: none;
+    }
+
+    .review a:hover {
+      color: var(--text-primary);
+      text-decoration: underline;
+    }
+
+    .review a[aria-current="page"] {
+      color: var(--text-primary);
+      font-weight: 700;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+
+    .run-host {
+      flex: 1 1 auto;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .run-state {
+      flex: 1 1 auto;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .run-scroll {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      gap: var(--space);
+      padding: var(--space);
+    }
+
+    .run-scroll > h2 {
+      font-size: calc(16px * var(--ui-scale));
+      font-weight: 700;
+    }
+
+    .run-top {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-sm);
+      max-width: calc(720px * var(--ui-scale));
+    }
+
+    .run-progress {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-xs);
+    }
+
+    .run-progress__row {
+      display: flex;
+      justify-content: space-between;
+      gap: var(--space);
+      align-items: baseline;
+    }
+
+    .run-percent {
+      font-weight: 700;
+    }
+
+    .run-eta {
+      color: var(--text-primary);
+    }
+
+    .run-counts {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--space-xs) var(--space);
+    }
+
+    .run-num {
+      font-weight: 700;
+    }
+
+    .run-filters,
+    .run-actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: var(--space-sm);
+    }
+
+    .run-chapters {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space);
+    }
+
+    .chapter {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-xs);
+    }
+
+    .chapter h3 {
+      font-size: var(--font-size-ui);
+      font-weight: 700;
+    }
+
+    .chapter__list {
+      max-width: calc(560px * var(--ui-scale));
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+    }
+
+    .chapter__list .page {
+      cursor: default;
+    }
+
+    .chapter__list .page:hover {
+      background: transparent;
+    }
+
+    .chapter__list .page:last-child {
+      border-bottom: 0;
+    }
+
+    .page.is-current {
+      background: var(--accent);
+      box-shadow: inset 3px 0 0 var(--primary);
+    }
+
+    .chapter__list .page.is-current:hover {
+      background: var(--accent);
+    }
+
+    .page__status--fit {
+      color: var(--text-warning);
+    }
+
+    .banner--error {
+      background: color-mix(in srgb, var(--danger) 16%, var(--bg-card));
+      color: var(--text-error);
+      border: 1px solid var(--border-strong);
+    }
+
+    .banner--error .banner__icon {
+      color: var(--danger);
+    }
+  </style>
+</head>
+<body>
+  <a class="skip" href="#batch">К обзору прогона</a>
+  <div class="app">
+    <nav class="review" aria-label="Состояние макета">
+      <a data-state-link href="?state=empty">Пусто</a>
+      <a data-state-link href="?state=loading">Загрузка</a>
+      <a data-state-link href="?state=error">Ошибка</a>
+      <a data-state-link href="?state=ready" aria-current="page">Готово</a>
+    </nav>
+
+    <header class="toolbar" data-role="toolbar">
+      <h1 class="sr-only">Image Localization Tool</h1>
+      <div class="toolbar__group">
+        <details class="menu">
+          <summary class="btn btn-ghost menu__summary" data-role="file-menu">
+            <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#file"></use></svg>
+            Файл
+            <svg class="icon menu__chevron" aria-hidden="true"><use href="../icons/icons.svg#chevron"></use></svg>
+          </summary>
+          <div class="menu__panel" role="menu" aria-label="Файл">
+            <button type="button" class="btn menu__item" role="menuitem">Открыть файлы… <span class="menu__kbd"><kbd class="kbd">Ctrl+O</kbd></span></button>
+            <button type="button" class="btn menu__item" role="menuitem">Открыть папку… <span class="menu__kbd"><kbd class="kbd">Ctrl+Shift+O</kbd></span></button>
+            <button type="button" class="btn menu__item" role="menuitem">Экспорт… <span class="menu__kbd"><kbd class="kbd">Ctrl+E</kbd></span></button>
+            <div class="menu__sep" role="separator"></div>
+            <button type="button" class="btn menu__item" role="menuitem">Настройки… <span class="menu__kbd"><kbd class="kbd">Ctrl+,</kbd></span></button>
+            <button type="button" class="btn menu__item" role="menuitem">Выход</button>
+          </div>
+        </details>
+      </div>
+      <div class="toolbar__group" role="group" aria-label="Языки">
+        <label class="toolbar__lang" for="lang-source">Откуда
+          <select id="lang-source" class="select" data-role="lang-source">
+            <option value="en" selected>en — English</option>
+            <option value="ja">ja — 日本語</option>
+            <option value="ko">ko — 한국어</option>
+            <option value="zh">zh — 中文</option>
+          </select>
+        </label>
+        <span class="toolbar__arrow" aria-hidden="true">→</span>
+        <label class="toolbar__lang" for="lang-target">Куда
+          <select id="lang-target" class="select" data-role="lang-target">
+            <option value="ru" selected>ru — Русский</option>
+            <option value="en">en — English</option>
+            <option value="uk">uk — Українська</option>
+          </select>
+        </label>
+      </div>
+      <div class="toolbar__spacer"></div>
+      <div class="toolbar__group">
+        <button type="button" class="btn btn-accent" data-role="export">
+          <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#export"></use></svg>
+          Экспорт
+        </button>
+        <button type="button" class="btn btn-ghost btn-icon" data-role="settings" aria-label="Настройки" title="Настройки (Ctrl+,)">
+          <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#settings"></use></svg>
+        </button>
+      </div>
+    </header>
+
+    <main id="batch" class="run-host">
+      <section class="run-state" data-state="empty" hidden>
+        <div class="run-scroll">
+          <h2>В проекте нет страниц</h2>
+          <div class="run-top">
+            <div class="run-progress">
+              <div class="run-progress__row">
+                <span id="empty-prog-label">Общий прогресс</span>
+                <span class="run-percent">0 %</span>
+              </div>
+              <progress id="empty-prog" max="100" value="0" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" aria-labelledby="empty-prog-label" aria-describedby="empty-why">0 %</progress>
+              <p id="empty-why" class="run-eta">Откройте папку главы. Продолжить нечего.</p>
+            </div>
+            <ul class="run-counts" aria-label="Счётчики по статусу">
+              <li class="page__status page__status--done"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> готово <span class="run-num">0</span></li>
+              <li class="page__status page__status--queue"><svg class="icon icon--right" aria-hidden="true"><use href="../icons/icons.svg#chevron"></use></svg> в очереди <span class="run-num">0</span></li>
+              <li class="page__status page__status--error"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#error"></use></svg> ошибка <span class="run-num">0</span></li>
+              <li class="page__status page__status--fit"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#warning"></use></svg> не влезло <span class="run-num">0</span></li>
+              <li class="page__status page__status--offline"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#warning"></use></svg> без LLM <span class="run-num">0</span></li>
+              <li class="page__status page__status--edit"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#info"></use></svg> есть правки <span class="run-num">0</span></li>
+            </ul>
+            <div class="run-actions">
+              <button type="button" class="btn btn-primary" aria-describedby="empty-why">
+                <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#folder"></use></svg>
+                Открыть папку…
+              </button>
+            </div>
+          </div>
+        </div>
+        <footer class="statusbar">
+          <span class="statusbar__job">Нет страниц для прогона</span>
+        </footer>
+      </section>
+
+      <section class="run-state" data-state="loading" aria-busy="true" hidden>
+        <div class="run-scroll">
+          <h2>Идёт пакетный прогон</h2>
+          <div class="run-top">
+            <div class="run-progress">
+              <div class="run-progress__row">
+                <span id="load-prog-label">Общий прогресс</span>
+                <span class="run-percent">45 %</span>
+              </div>
+              <progress id="load-prog" max="100" value="45" aria-valuenow="45" aria-valuemin="0" aria-valuemax="100" aria-labelledby="load-prog-label" aria-describedby="load-eta">45 %</progress>
+              <p id="load-eta" class="run-eta">осталось около 12 мин</p>
+            </div>
+            <ul class="run-counts" aria-label="Счётчики по статусу">
+              <li class="page__status page__status--done"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> готово <span class="run-num">4</span></li>
+              <li class="page__status page__status--queue"><svg class="icon icon--right" aria-hidden="true"><use href="../icons/icons.svg#chevron"></use></svg> в очереди <span class="run-num">1</span></li>
+              <li class="page__status page__status--error"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#error"></use></svg> ошибка <span class="run-num">0</span></li>
+              <li class="page__status page__status--fit"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#warning"></use></svg> не влезло <span class="run-num">0</span></li>
+              <li class="page__status page__status--offline"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#warning"></use></svg> без LLM <span class="run-num">1</span></li>
+              <li class="page__status page__status--edit"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#info"></use></svg> есть правки <span class="run-num">1</span></li>
+            </ul>
+            <div class="run-filters" role="group" aria-label="Фильтр страниц">
+              <button type="button" class="btn btn-ghost" data-filter aria-pressed="false">
+                <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#error"></use></svg>
+                Ошибки
+              </button>
+              <button type="button" class="btn btn-ghost" data-filter aria-pressed="false">
+                <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#warning"></use></svg>
+                Не влезло
+              </button>
+              <button type="button" class="btn btn-ghost" data-filter aria-pressed="false">
+                <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#warning"></use></svg>
+                Без LLM
+              </button>
+              <button type="button" class="btn btn-ghost" data-filter aria-pressed="false">
+                <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#info"></use></svg>
+                Есть правки
+              </button>
+            </div>
+            <div class="run-actions">
+              <button type="button" class="btn btn-accent" aria-describedby="load-now">
+                <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#stop"></use></svg>
+                Пауза
+              </button>
+              <p id="load-now" class="field-hint">Сейчас идёт</p>
+            </div>
+            <p id="load-next" class="field-hint"><kbd class="kbd">N</kbd> — следующая проблемная страница</p>
+          </div>
+          <div class="run-chapters" aria-describedby="load-next">
+            <section class="chapter" aria-labelledby="load-ch12">
+              <h3 id="load-ch12">Глава 12</h3>
+              <ul class="chapter__list">
+                <li class="page">
+                  <img class="page__thumb" src="../../test-img/test-1.jpg" alt="">
+                  <span class="page__body">
+                    <span class="page__title"><span class="page__num">01</span> <span class="page__name">001.jpg</span></span>
+                    <span class="page__status page__status--done"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> <span>готово</span></span>
+                  </span>
+                </li>
+                <li class="page">
+                  <img class="page__thumb" src="../../test-img/test-2.png" alt="">
+                  <span class="page__body">
+                    <span class="page__title"><span class="page__num">02</span> <span class="page__name">002.jpg</span></span>
+                    <span class="page__status page__status--done"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> <span>готово</span></span>
+                  </span>
+                </li>
+                <li class="page">
+                  <img class="page__thumb" src="../../test-img/test-3.jpg" alt="">
+                  <span class="page__body">
+                    <span class="page__title"><span class="page__num">03</span> <span class="page__name">003.jpg</span></span>
+                    <span class="page__status page__status--done"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> <span>готово</span></span>
+                  </span>
+                </li>
+                <li class="page is-current" aria-busy="true">
+                  <img class="page__thumb" src="../../test-img/test-1.jpg" alt="">
+                  <span class="page__body">
+                    <span class="page__title"><span class="page__num">04</span> <span class="page__name">004.jpg</span></span>
+                    <span class="page__status page__status--run"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#play"></use></svg> <span>идёт 45 % · Перевод</span></span>
+                  </span>
+                </li>
+                <li class="page">
+                  <img class="page__thumb" src="../../test-img/test-2.png" alt="">
+                  <span class="page__body">
+                    <span class="page__title"><span class="page__num">05</span> <span class="page__name">005.jpg</span></span>
+                    <span class="page__status page__status--queue"><svg class="icon icon--right" aria-hidden="true"><use href="../icons/icons.svg#chevron"></use></svg> <span>в очереди</span></span>
+                  </span>
+                </li>
+                <li class="page">
+                  <img class="page__thumb" src="../../test-img/test-3.jpg" alt="">
+                  <span class="page__body">
+                    <span class="page__title"><span class="page__num">06</span> <span class="page__name">006.jpg</span></span>
+                    <span class="page__status page__status--offline"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#warning"></use></svg> <span>без LLM</span></span>
+                  </span>
+                </li>
+              </ul>
+            </section>
+            <section class="chapter" aria-labelledby="load-ch13">
+              <h3 id="load-ch13">Глава 13</h3>
+              <ul class="chapter__list">
+                <li class="page">
+                  <img class="page__thumb" src="../../test-img/test-1.jpg" alt="">
+                  <span class="page__body">
+                    <span class="page__title"><span class="page__num">01</span> <span class="page__name">001.jpg</span></span>
+                    <span class="page__status page__status--done"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> <span>готово</span></span>
+                  </span>
+                </li>
+                <li class="page">
+                  <img class="page__thumb" src="../../test-img/test-2.png" alt="">
+                  <span class="page__body">
+                    <span class="page__title"><span class="page__num">02</span> <span class="page__name">002.jpg</span></span>
+                    <span class="page__status page__status--edit"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#info"></use></svg> <span>есть правки</span></span>
+                  </span>
+                </li>
+                <li class="page">
+                  <img class="page__thumb" src="../../test-img/test-3.jpg" alt="">
+                  <span class="page__body">
+                    <span class="page__title"><span class="page__num">03</span> <span class="page__name">003.jpg</span></span>
+                    <span class="page__status page__status--idle"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#file"></use></svg> <span>не начата</span></span>
+                  </span>
+                </li>
+              </ul>
+            </section>
+          </div>
+        </div>
+        <footer class="statusbar">
+          <span class="statusbar__job" aria-live="polite">Пакетный прогон · 45 % · перевод 004.jpg</span>
+        </footer>
+      </section>
+
+      <section class="run-state" data-state="error" hidden>
+        <div class="run-scroll">
+          <h2>Ошибка на странице</h2>
+          <div class="banner banner--error" id="err-reason" role="alert">
+            <svg class="icon banner__icon" aria-hidden="true"><use href="../icons/icons.svg#error"></use></svg>
+            <p class="banner__text">Сервер LLM оборвал соединение на шаге перевода. Страница 004.jpg, Глава 12. Прогон на паузе.</p>
+          </div>
+          <div class="run-top">
+            <div class="run-progress">
+              <div class="run-progress__row">
+                <span id="err-prog-label">Общий прогресс</span>
+                <span class="run-percent">45 %</span>
+              </div>
+              <progress id="err-prog" max="100" value="45" aria-valuenow="45" aria-valuemin="0" aria-valuemax="100" aria-labelledby="err-prog-label" aria-describedby="err-eta">45 %</progress>
+              <p id="err-eta" class="run-eta">пауза</p>
+            </div>
+            <ul class="run-counts" aria-label="Счётчики по статусу">
+              <li class="page__status page__status--done"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> готово <span class="run-num">4</span></li>
+              <li class="page__status page__status--queue"><svg class="icon icon--right" aria-hidden="true"><use href="../icons/icons.svg#chevron"></use></svg> в очереди <span class="run-num">1</span></li>
+              <li class="page__status page__status--error"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#error"></use></svg> ошибка <span class="run-num">1</span></li>
+              <li class="page__status page__status--fit"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#warning"></use></svg> не влезло <span class="run-num">0</span></li>
+              <li class="page__status page__status--offline"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#warning"></use></svg> без LLM <span class="run-num">1</span></li>
+              <li class="page__status page__status--edit"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#info"></use></svg> есть правки <span class="run-num">1</span></li>
+            </ul>
+            <div class="run-filters" role="group" aria-label="Фильтр страниц">
+              <button type="button" class="btn btn-ghost" data-filter aria-pressed="true">
+                <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#error"></use></svg>
+                Ошибки
+              </button>
+              <button type="button" class="btn btn-ghost" data-filter aria-pressed="false">
+                <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#warning"></use></svg>
+                Не влезло
+              </button>
+              <button type="button" class="btn btn-ghost" data-filter aria-pressed="false">
+                <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#warning"></use></svg>
+                Без LLM
+              </button>
+              <button type="button" class="btn btn-ghost" data-filter aria-pressed="false">
+                <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#info"></use></svg>
+                Есть правки
+              </button>
+            </div>
+            <div class="run-actions">
+              <button type="button" class="btn btn-primary" aria-describedby="err-reason">
+                <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#play"></use></svg>
+                Продолжить
+              </button>
+              <button type="button" class="btn btn-accent" aria-describedby="err-reason">
+                <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#file"></use></svg>
+                Открыть страницу
+              </button>
+            </div>
+            <p id="err-next" class="field-hint"><kbd class="kbd">N</kbd> — следующая проблемная страница</p>
+          </div>
+          <div class="run-chapters" aria-describedby="err-next">
+            <section class="chapter" aria-labelledby="err-ch12">
+              <h3 id="err-ch12">Глава 12</h3>
+              <ul class="chapter__list">
+                <li class="page">
+                  <img class="page__thumb" src="../../test-img/test-1.jpg" alt="">
+                  <span class="page__body">
+                    <span class="page__title"><span class="page__num">01</span> <span class="page__name">001.jpg</span></span>
+                    <span class="page__status page__status--done"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> <span>готово</span></span>
+                  </span>
+                </li>
+                <li class="page">
+                  <img class="page__thumb" src="../../test-img/test-2.png" alt="">
+                  <span class="page__body">
+                    <span class="page__title"><span class="page__num">02</span> <span class="page__name">002.jpg</span></span>
+                    <span class="page__status page__status--done"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> <span>готово</span></span>
+                  </span>
+                </li>
+                <li class="page">
+                  <img class="page__thumb" src="../../test-img/test-3.jpg" alt="">
+                  <span class="page__body">
+                    <span class="page__title"><span class="page__num">03</span> <span class="page__name">003.jpg</span></span>
+                    <span class="page__status page__status--done"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> <span>готово</span></span>
+                  </span>
+                </li>
+                <li class="page is-current">
+                  <img class="page__thumb" src="../../test-img/test-1.jpg" alt="">
+                  <span class="page__body">
+                    <span class="page__title"><span class="page__num">04</span> <span class="page__name">004.jpg</span></span>
+                    <span class="page__status page__status--error"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#error"></use></svg> <span>ошибка</span></span>
+                  </span>
+                </li>
+                <li class="page">
+                  <img class="page__thumb" src="../../test-img/test-2.png" alt="">
+                  <span class="page__body">
+                    <span class="page__title"><span class="page__num">05</span> <span class="page__name">005.jpg</span></span>
+                    <span class="page__status page__status--queue"><svg class="icon icon--right" aria-hidden="true"><use href="../icons/icons.svg#chevron"></use></svg> <span>в очереди</span></span>
+                  </span>
+                </li>
+                <li class="page">
+                  <img class="page__thumb" src="../../test-img/test-3.jpg" alt="">
+                  <span class="page__body">
+                    <span class="page__title"><span class="page__num">06</span> <span class="page__name">006.jpg</span></span>
+                    <span class="page__status page__status--offline"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#warning"></use></svg> <span>без LLM</span></span>
+                  </span>
+                </li>
+              </ul>
+            </section>
+            <section class="chapter" aria-labelledby="err-ch13">
+              <h3 id="err-ch13">Глава 13</h3>
+              <ul class="chapter__list">
+                <li class="page">
+                  <img class="page__thumb" src="../../test-img/test-1.jpg" alt="">
+                  <span class="page__body">
+                    <span class="page__title"><span class="page__num">01</span> <span class="page__name">001.jpg</span></span>
+                    <span class="page__status page__status--done"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> <span>готово</span></span>
+                  </span>
+                </li>
+                <li class="page">
+                  <img class="page__thumb" src="../../test-img/test-2.png" alt="">
+                  <span class="page__body">
+                    <span class="page__title"><span class="page__num">02</span> <span class="page__name">002.jpg</span></span>
+                    <span class="page__status page__status--edit"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#info"></use></svg> <span>есть правки</span></span>
+                  </span>
+                </li>
+                <li class="page">
+                  <img class="page__thumb" src="../../test-img/test-3.jpg" alt="">
+                  <span class="page__body">
+                    <span class="page__title"><span class="page__num">03</span> <span class="page__name">003.jpg</span></span>
+                    <span class="page__status page__status--idle"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#file"></use></svg> <span>не начата</span></span>
+                  </span>
+                </li>
+              </ul>
+            </section>
+          </div>
+        </div>
+        <footer class="statusbar">
+          <span class="statusbar__job">Пауза · ошибка на 004.jpg, Глава 12</span>
+        </footer>
+      </section>
+
+      <section class="run-state" data-state="ready">
+        <div class="run-scroll">
+          <h2>Прогон завершён</h2>
+          <div class="run-top">
+            <div class="run-progress">
+              <div class="run-progress__row">
+                <span id="ok-prog-label">Общий прогресс</span>
+                <span class="run-percent">100 %</span>
+              </div>
+              <progress id="ok-prog" max="100" value="100" aria-valuenow="100" aria-valuemin="0" aria-valuemax="100" aria-labelledby="ok-prog-label" aria-describedby="ok-eta">100 %</progress>
+              <p id="ok-eta" class="run-eta">готово</p>
+            </div>
+            <ul class="run-counts" aria-label="Счётчики по статусу">
+              <li class="page__status page__status--done"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> готово <span class="run-num">7</span></li>
+              <li class="page__status page__status--queue"><svg class="icon icon--right" aria-hidden="true"><use href="../icons/icons.svg#chevron"></use></svg> в очереди <span class="run-num">0</span></li>
+              <li class="page__status page__status--error"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#error"></use></svg> ошибка <span class="run-num">0</span></li>
+              <li class="page__status page__status--fit"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#warning"></use></svg> не влезло <span class="run-num">1</span></li>
+              <li class="page__status page__status--offline"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#warning"></use></svg> без LLM <span class="run-num">0</span></li>
+              <li class="page__status page__status--edit"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#info"></use></svg> есть правки <span class="run-num">1</span></li>
+            </ul>
+            <div class="run-filters" role="group" aria-label="Фильтр страниц">
+              <button type="button" class="btn btn-ghost" data-filter aria-pressed="false">
+                <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#error"></use></svg>
+                Ошибки
+              </button>
+              <button type="button" class="btn btn-ghost" data-filter aria-pressed="false">
+                <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#warning"></use></svg>
+                Не влезло
+              </button>
+              <button type="button" class="btn btn-ghost" data-filter aria-pressed="false">
+                <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#warning"></use></svg>
+                Без LLM
+              </button>
+              <button type="button" class="btn btn-ghost" data-filter aria-pressed="false">
+                <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#info"></use></svg>
+                Есть правки
+              </button>
+            </div>
+            <div class="run-actions">
+              <button type="button" class="btn btn-primary">
+                <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#export"></use></svg>
+                К экспорту
+              </button>
+              <button type="button" class="btn btn-accent">
+                <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#play"></use></svg>
+                Продолжить
+              </button>
+            </div>
+            <p id="ok-next" class="field-hint"><kbd class="kbd">N</kbd> — следующая проблемная страница</p>
+          </div>
+          <div class="run-chapters" aria-describedby="ok-next">
+            <section class="chapter" aria-labelledby="ok-ch12">
+              <h3 id="ok-ch12">Глава 12</h3>
+              <ul class="chapter__list">
+                <li class="page">
+                  <img class="page__thumb" src="../../test-img/test-1.jpg" alt="">
+                  <span class="page__body">
+                    <span class="page__title"><span class="page__num">01</span> <span class="page__name">001.jpg</span></span>
+                    <span class="page__status page__status--done"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> <span>готово</span></span>
+                  </span>
+                </li>
+                <li class="page">
+                  <img class="page__thumb" src="../../test-img/test-2.png" alt="">
+                  <span class="page__body">
+                    <span class="page__title"><span class="page__num">02</span> <span class="page__name">002.jpg</span></span>
+                    <span class="page__status page__status--done"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> <span>готово</span></span>
+                  </span>
+                </li>
+                <li class="page">
+                  <img class="page__thumb" src="../../test-img/test-3.jpg" alt="">
+                  <span class="page__body">
+                    <span class="page__title"><span class="page__num">03</span> <span class="page__name">003.jpg</span></span>
+                    <span class="page__status page__status--done"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> <span>готово</span></span>
+                  </span>
+                </li>
+                <li class="page">
+                  <img class="page__thumb" src="../../test-img/test-1.jpg" alt="">
+                  <span class="page__body">
+                    <span class="page__title"><span class="page__num">04</span> <span class="page__name">004.jpg</span></span>
+                    <span class="page__status page__status--done"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> <span>готово</span></span>
+                  </span>
+                </li>
+                <li class="page is-current">
+                  <img class="page__thumb" src="../../test-img/test-2.png" alt="">
+                  <span class="page__body">
+                    <span class="page__title"><span class="page__num">05</span> <span class="page__name">005.jpg</span></span>
+                    <span class="page__status page__status--edit"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#info"></use></svg> <span>есть правки</span></span>
+                  </span>
+                </li>
+                <li class="page">
+                  <img class="page__thumb" src="../../test-img/test-3.jpg" alt="">
+                  <span class="page__body">
+                    <span class="page__title"><span class="page__num">06</span> <span class="page__name">006.jpg</span></span>
+                    <span class="page__status page__status--done"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> <span>готово</span></span>
+                  </span>
+                </li>
+              </ul>
+            </section>
+            <section class="chapter" aria-labelledby="ok-ch13">
+              <h3 id="ok-ch13">Глава 13</h3>
+              <ul class="chapter__list">
+                <li class="page">
+                  <img class="page__thumb" src="../../test-img/test-1.jpg" alt="">
+                  <span class="page__body">
+                    <span class="page__title"><span class="page__num">01</span> <span class="page__name">001.jpg</span></span>
+                    <span class="page__status page__status--done"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> <span>готово</span></span>
+                  </span>
+                </li>
+                <li class="page">
+                  <img class="page__thumb" src="../../test-img/test-2.png" alt="">
+                  <span class="page__body">
+                    <span class="page__title"><span class="page__num">02</span> <span class="page__name">002.jpg</span></span>
+                    <span class="page__status page__status--fit"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#warning"></use></svg> <span>не влезло</span></span>
+                  </span>
+                </li>
+                <li class="page">
+                  <img class="page__thumb" src="../../test-img/test-3.jpg" alt="">
+                  <span class="page__body">
+                    <span class="page__title"><span class="page__num">03</span> <span class="page__name">003.jpg</span></span>
+                    <span class="page__status page__status--done"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> <span>готово</span></span>
+                  </span>
+                </li>
+              </ul>
+            </section>
+          </div>
+        </div>
+        <footer class="statusbar">
+          <span class="statusbar__job">Прогон завершён · 1 не влезло, 1 есть правки</span>
+        </footer>
+      </section>
+    </main>
+  </div>
+  <script>
+  (function () {
+    var known = { empty: true, loading: true, error: true, ready: true };
+    var state = "ready";
+    try {
+      var picked = new URLSearchParams(location.search).get("state");
+      if (picked && known[picked]) state = picked;
+    } catch (err) {}
+    document.querySelectorAll("[data-state]").forEach(function (block) {
+      block.hidden = block.getAttribute("data-state") !== state;
+    });
+    var theme = document.documentElement.getAttribute("data-theme") || "system";
+    var scale = 100;
+    var raw = document.documentElement.style.getPropertyValue("--ui-scale");
+    if (raw) scale = Math.round(parseFloat(raw) * 100);
+    document.querySelectorAll("a[data-state-link]").forEach(function (link) {
+      var parts = link.getAttribute("href").split("?");
+      var href = parts[0];
+      var linkState = new URLSearchParams(parts[1] || "").get("state") || "ready";
+      var q = ["state=" + linkState];
+      if (theme === "dark" || theme === "light") q.push("theme=" + theme);
+      if (scale !== 100) q.push("scale=" + scale);
+      link.setAttribute("href", (href ? href : "") + "?" + q.join("&"));
+      if (linkState === state) link.setAttribute("aria-current", "page");
+      else link.removeAttribute("aria-current");
+    });
+    document.querySelectorAll("[data-filter]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var on = btn.getAttribute("aria-pressed") === "true";
+        btn.setAttribute("aria-pressed", on ? "false" : "true");
+      });
+    });
+  })();
+  </script>
+</body>
+</html>

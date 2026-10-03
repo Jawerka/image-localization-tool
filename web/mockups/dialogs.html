@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>
+  (function () {
+    var theme = "";
+    var scale = "";
+    try {
+      var params = new URLSearchParams(location.search);
+      theme = params.get("theme") || "";
+      scale = params.get("scale") || "";
+      if (!theme) theme = localStorage.getItem("ilt-mockup-theme") || "";
+      if (!scale) scale = localStorage.getItem("ilt-mockup-scale") || "";
+    } catch (err) {}
+    if (theme === "dark" || theme === "light") {
+      document.documentElement.setAttribute("data-theme", theme);
+    }
+    var n = parseInt(scale, 10);
+    if (n >= 100 && n <= 150 && n !== 100) {
+      document.documentElement.style.setProperty("--ui-scale", String(n / 100));
+    }
+  })();
+  </script>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>Image Localization Tool — диалоги</title>
+  <link rel="stylesheet" href="../css/tokens.css">
+  <link rel="stylesheet" href="../css/base.css">
+  <link rel="stylesheet" href="../css/components.css">
+  <link rel="stylesheet" href="../css/dialogs.css">
+</head>
+<body class="is-scroll">
+  <main class="dialog-gallery">
+    <h1>Диалоги</h1>
+
+    <div class="dialog dialog--wide" role="dialog" aria-modal="true" aria-labelledby="hotkeys-title">
+      <div class="dialog__header">
+        <h2 id="hotkeys-title">Горячие клавиши</h2>
+        <button type="button" class="btn btn-ghost btn-icon dialog__close" aria-label="Закрыть">
+          <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#close"></use></svg>
+        </button>
+      </div>
+      <div class="dialog__body">
+        <p>F1 открывает этот список. Все действия есть и в меню.</p>
+        <table class="hotkeys">
+          <caption class="sr-only">Сочетания клавиш</caption>
+          <thead>
+            <tr><th>Клавиши</th><th>Действие</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><kbd class="kbd">F1</kbd></td><td>Список горячих клавиш</td></tr>
+            <tr><td><kbd class="kbd">Ctrl</kbd> + <kbd class="kbd">O</kbd></td><td>Открыть файлы</td></tr>
+            <tr><td><kbd class="kbd">Ctrl</kbd> + <kbd class="kbd">Shift</kbd> + <kbd class="kbd">O</kbd></td><td>Открыть папку</td></tr>
+            <tr><td><kbd class="kbd">Ctrl</kbd> + <kbd class="kbd">E</kbd></td><td>Экспорт</td></tr>
+            <tr><td><kbd class="kbd">Ctrl</kbd> + <kbd class="kbd">,</kbd></td><td>Настройки</td></tr>
+            <tr><td><kbd class="kbd">Ctrl</kbd> + <kbd class="kbd">Enter</kbd></td><td>Перевести страницу</td></tr>
+            <tr><td><kbd class="kbd">Ctrl</kbd> + <kbd class="kbd">Shift</kbd> + <kbd class="kbd">Enter</kbd></td><td>Перевести всё</td></tr>
+            <tr><td><kbd class="kbd">Esc</kbd></td><td>Стоп, снять выделение или закрыть диалог</td></tr>
+            <tr><td><kbd class="kbd">PgUp</kbd> <kbd class="kbd">PgDn</kbd></td><td>Соседние страницы</td></tr>
+            <tr><td><kbd class="kbd">1</kbd> <kbd class="kbd">2</kbd> <kbd class="kbd">3</kbd></td><td>Виды «Оригинал», «Результат», «Сравнение»</td></tr>
+            <tr><td><kbd class="kbd">M</kbd></td><td>Слой маски</td></tr>
+            <tr><td><kbd class="kbd">L</kbd></td><td>Слой рамок</td></tr>
+            <tr><td><kbd class="kbd">V</kbd></td><td>Инструмент «Выбор»</td></tr>
+            <tr><td><kbd class="kbd">R</kbd></td><td>Инструмент «Регион»</td></tr>
+            <tr><td><kbd class="kbd">B</kbd></td><td>Инструмент «Кисть»</td></tr>
+            <tr><td><kbd class="kbd">E</kbd></td><td>Инструмент «Ластик»</td></tr>
+            <tr><td><kbd class="kbd">[</kbd> <kbd class="kbd">]</kbd></td><td>Размер кисти</td></tr>
+            <tr><td><kbd class="kbd">Del</kbd></td><td>Удалить регион</td></tr>
+            <tr><td><kbd class="kbd">Стрелки</kbd></td><td>Сдвинуть рамку на 1 px</td></tr>
+            <tr><td><kbd class="kbd">Shift</kbd> + <kbd class="kbd">стрелки</kbd></td><td>Сдвинуть рамку на 10 px</td></tr>
+            <tr><td><kbd class="kbd">Alt</kbd> + <kbd class="kbd">стрелки</kbd></td><td>Изменить размер рамки</td></tr>
+            <tr><td><kbd class="kbd">Ctrl</kbd> + <kbd class="kbd">Z</kbd></td><td>Отмена</td></tr>
+            <tr><td><kbd class="kbd">Ctrl</kbd> + <kbd class="kbd">Y</kbd></td><td>Повтор</td></tr>
+            <tr><td><kbd class="kbd">Ctrl</kbd> + колесо</td><td>Масштаб</td></tr>
+            <tr><td><kbd class="kbd">Ctrl</kbd> + <kbd class="kbd">0</kbd></td><td>Вписать в окно</td></tr>
+            <tr><td><kbd class="kbd">Ctrl</kbd> + <kbd class="kbd">1</kbd></td><td>Масштаб 100 %</td></tr>
+            <tr><td>Колесо</td><td>Прокрутка холста</td></tr>
+            <tr><td><kbd class="kbd">Пробел</kbd> + перетаскивание</td><td>Прокрутка холста</td></tr>
+          </tbody>
+        </table>
+        <p class="field-hint">Однобуквенные клавиши не срабатывают в полях ввода и отключаются в настройках.</p>
+      </div>
+    </div>
+
+    <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="close-title">
+      <div class="dialog__header">
+        <h2 id="close-title">Закрыть программу?</h2>
+        <button type="button" class="btn btn-ghost btn-icon dialog__close" aria-label="Закрыть">
+          <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#close"></use></svg>
+        </button>
+      </div>
+      <div class="dialog__body">
+        <p>Идёт перевод главы (страница 1 из 12). Если закрыть окно, обработка остановится. Недоделанная страница останется в очереди.</p>
+      </div>
+      <div class="dialog__footer">
+        <button type="button" class="btn btn-primary">Остановить и закрыть</button>
+        <button type="button" class="btn btn-accent">Отмена</button>
+      </div>
+    </div>
+
+    <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="model-title">
+      <div class="dialog__header">
+        <h2 id="model-title">Выбор модели</h2>
+        <button type="button" class="btn btn-ghost btn-icon dialog__close" aria-label="Закрыть">
+          <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#close"></use></svg>
+        </button>
+      </div>
+      <div class="dialog__body">
+        <p class="field-hint">Для распознавания страницы модель должна принимать картинки.</p>
+        <div class="model-pick" role="radiogroup" aria-label="Модель сервера">
+          <label class="model-pick__item">
+            <input type="radio" name="model-pick" value="qwen-vl" checked>
+            <span>qwen2.5-vl-7b</span>
+            <span class="badge badge--ok">
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg>
+              принимает картинки
+            </span>
+          </label>
+          <label class="model-pick__item">
+            <input type="radio" name="model-pick" value="qwen">
+            <span>qwen2.5-7b</span>
+            <span class="badge badge--warn">
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#warning"></use></svg>
+              без картинок
+            </span>
+          </label>
+          <label class="model-pick__item">
+            <input type="radio" name="model-pick" value="llama">
+            <span>llama-3.1-8b</span>
+            <span class="badge badge--warn">
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#warning"></use></svg>
+              без картинок
+            </span>
+          </label>
+        </div>
+      </div>
+      <div class="dialog__footer">
+        <button type="button" class="btn btn-primary">Выбрать</button>
+        <button type="button" class="btn btn-accent">Отмена</button>
+      </div>
+    </div>
+
+    <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="boot-title">
+      <div class="dialog__header">
+        <h2 id="boot-title">Не удалось запустить обработку</h2>
+        <button type="button" class="btn btn-ghost btn-icon dialog__close" aria-label="Закрыть">
+          <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#close"></use></svg>
+        </button>
+      </div>
+      <div class="dialog__body">
+        <p class="warn-line">
+          <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#error"></use></svg>
+          <span>Воркер перезапускался чаще трёх раз в минуту и остановлен.</span>
+        </p>
+        <p>Лог: <span class="about-path">%LOCALAPPDATA%\ImageLocalizationTool\logs\app.log</span></p>
+      </div>
+      <div class="dialog__footer">
+        <button type="button" class="btn btn-primary">
+          <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#file"></use></svg>
+          Открыть лог
+        </button>
+        <button type="button" class="btn btn-accent">Закрыть</button>
+      </div>
+    </div>
+  </main>
+</body>
+</html>

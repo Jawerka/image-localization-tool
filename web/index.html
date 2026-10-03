@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>Image Localization Tool</title>
+  <link rel="stylesheet" href="css/tokens.css">
+  <link rel="stylesheet" href="css/base.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/main.css">
+  <link rel="stylesheet" href="css/editor.css">
+  <link rel="stylesheet" href="css/settings.css">
+  <link rel="stylesheet" href="css/dialogs.css">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <a class="skip" href="#viewer">К просмотру</a>
+  <div class="sr-only" data-role="live" aria-live="polite"></div>
+
+  <div class="app" data-role="shell">
+    <header class="toolbar" data-role="toolbar">
+      <h1 class="sr-only">Image Localization Tool</h1>
+      <div class="toolbar__group">
+        <details class="menu">
+          <summary class="btn btn-ghost menu__summary" data-role="file-menu">
+            <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#file"></use></svg>
+            Файл
+            <svg class="icon menu__chevron" aria-hidden="true"><use href="icons/icons.svg#chevron"></use></svg>
+          </summary>
+          <div class="menu__panel" role="menu" aria-label="Файл">
+            <button type="button" class="btn menu__item" role="menuitem" data-role="open-files">Открыть файлы… <span class="menu__kbd"><kbd class="kbd">Ctrl+O</kbd></span></button>
+            <button type="button" class="btn menu__item" role="menuitem" data-role="open-folder">Открыть папку… <span class="menu__kbd"><kbd class="kbd">Ctrl+Shift+O</kbd></span></button>
+            <button type="button" class="btn menu__item" role="menuitem" data-role="export" disabled>Экспорт… <span class="menu__kbd"><kbd class="kbd">Ctrl+E</kbd></span></button>
+            <button type="button" class="btn menu__item" role="menuitem" data-role="glossary">Глоссарий…</button>
+            <div class="menu__sep" role="separator"></div>
+            <button type="button" class="btn menu__item" role="menuitem" data-role="settings">Настройки… <span class="menu__kbd"><kbd class="kbd">Ctrl+,</kbd></span></button>
+            <button type="button" class="btn menu__item" role="menuitem" data-role="hotkeys-menu">Горячие клавиши… <span class="menu__kbd"><kbd class="kbd">F1</kbd></span></button>
+            <div class="menu__sep" role="separator"></div>
+            <button type="button" class="btn menu__item" role="menuitem" data-role="exit">Выход</button>
+          </div>
+        </details>
+      </div>
+      <div class="toolbar__group" role="group" aria-label="Языки">
+        <label class="toolbar__lang" for="lang-source">Откуда
+          <select id="lang-source" class="select" data-role="lang-source">
+            <option value="en">en — English</option>
+            <option value="ja">ja — 日本語</option>
+            <option value="ko">ko — 한국어</option>
+            <option value="zh">zh — 中文</option>
+          </select>
+        </label>
+        <span class="toolbar__arrow" aria-hidden="true">→</span>
+        <label class="toolbar__lang" for="lang-target">Куда
+          <select id="lang-target" class="select" data-role="lang-target">
+            <option value="ru">ru — Русский</option>
+            <option value="en">en — English</option>
+            <option value="uk">uk — Українська</option>
+          </select>
+        </label>
+      </div>
+      <div class="toolbar__group" role="group" aria-label="Перевод">
+        <button type="button" class="btn btn-primary" data-role="translate-page" disabled>
+          <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#translate"></use></svg>
+          Перевести страницу
+        </button>
+        <button type="button" class="btn btn-accent" data-role="translate-all" disabled>Перевести всё</button>
+        <button type="button" class="btn btn-ghost" data-role="stop" hidden>
+          <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#stop"></use></svg>
+          Стоп
+        </button>
+      </div>
+      <fieldset class="sfx-toggle">
+        <legend>Звуки: не трогать / заменить</legend>
+        <span class="sfx-toggle__name" aria-hidden="true">Звуки</span>
+        <label class="choice"><input type="radio" name="sfx-mode" value="skip" checked> Не трогать</label>
+        <label class="choice"><input type="radio" name="sfx-mode" value="replace"> Заменить</label>
+      </fieldset>
+      <div class="toolbar__spacer"></div>
+      <div class="toolbar__group">
+        <span class="net-clients" data-role="net-clients">Сеть: 0 клиентов</span>
+        <button type="button" class="btn btn-accent" data-role="export" disabled>
+          <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#export"></use></svg>
+          Экспорт
+        </button>
+        <button type="button" class="btn btn-ghost btn-icon" data-role="settings" aria-label="Настройки" title="Настройки (Ctrl+,)">
+          <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#settings"></use></svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="banner-stack" data-role="banners"></div>
+
+    <div class="workspace">
+      <nav class="pages" aria-label="Страницы">
+        <div class="pages__head">Страницы</div>
+        <details class="batch-fold" data-role="batch-fold" hidden>
+          <summary>Прогон</summary>
+          <div data-role="batch-root"></div>
+        </details>
+        <div class="pages__list" role="listbox" data-role="page-list" aria-label="Страницы главы" aria-multiselectable="true" tabindex="0">
+          <p class="pages__empty">Нет страниц</p>
+        </div>
+        <div class="context-menu" role="menu" data-role="context-menu" hidden>
+          <div class="context-menu__title" data-role="context-title"></div>
+          <button type="button" class="btn menu__item" role="menuitem" data-action="translate">Перевести страницу</button>
+          <button type="button" class="btn menu__item" role="menuitem" data-action="retranslate">Перевести заново</button>
+          <button type="button" class="btn menu__item" role="menuitem" data-action="reveal">Показать в папке</button>
+          <div class="menu__sep" role="separator"></div>
+          <button type="button" class="btn menu__item" role="menuitem" data-action="remove">Убрать из проекта</button>
+        </div>
+        <p class="pages__sum"><span>0 из 0 готово</span></p>
+      </nav>
+
+      <main class="viewer" id="viewer" data-role="viewer">
+        <div class="viewer__bar">
+          <div class="segmented" role="radiogroup" aria-label="Вид" data-role="view-group">
+            <button type="button" class="btn" role="radio" data-role="view-original" data-value="original" data-view-control aria-checked="true" disabled>
+              <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#original"></use></svg>
+              Оригинал
+            </button>
+            <button type="button" class="btn" role="radio" data-role="view-result" data-value="result" data-view-control aria-checked="false" tabindex="-1" disabled>
+              <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#translate"></use></svg>
+              Результат
+            </button>
+            <button type="button" class="btn" role="radio" data-role="view-compare" data-value="compare" data-view-control aria-checked="false" tabindex="-1" disabled>
+              <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#compare"></use></svg>
+              Сравнение
+            </button>
+          </div>
+          <div role="group" aria-label="Слои">
+            <button type="button" class="btn btn-ghost" data-role="layer-boxes" data-view-control aria-pressed="false" disabled>
+              <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#layers"></use></svg>
+              Рамки
+            </button>
+            <button type="button" class="btn btn-ghost" data-role="layer-mask" data-view-control aria-pressed="false" disabled>
+              <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#mask"></use></svg>
+              Маска
+            </button>
+          </div>
+          <div role="radiogroup" aria-label="Инструмент" data-role="tool-group">
+            <button type="button" class="btn btn-ghost" role="radio" data-role="tool-select" data-value="select" data-view-control aria-checked="true" disabled>
+              <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#select"></use></svg>
+              Выбор
+            </button>
+            <button type="button" class="btn btn-ghost" role="radio" data-role="tool-region" data-value="region" data-view-control aria-checked="false" tabindex="-1" disabled>
+              <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#region"></use></svg>
+              Регион
+            </button>
+            <button type="button" class="btn btn-ghost" role="radio" data-role="tool-brush" data-value="brush" data-view-control aria-checked="false" tabindex="-1" disabled>
+              <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#brush"></use></svg>
+              Кисть
+            </button>
+            <button type="button" class="btn btn-ghost" role="radio" data-role="tool-eraser" data-value="eraser" data-view-control aria-checked="false" tabindex="-1" disabled>
+              <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#eraser"></use></svg>
+              Ластик
+            </button>
+          </div>
+          <label class="brush-size" for="brush-size">Размер
+            <input id="brush-size" data-role="brush-size" data-view-control type="range" min="1" max="64" value="12" disabled>
+            <span data-role="brush-size-value">12</span>
+          </label>
+          <div class="zoom" data-role="zoom">
+            <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#zoom"></use></svg>
+            <button type="button" class="btn btn-ghost btn-icon" data-role="zoom-out" data-view-control aria-label="Уменьшить" disabled>−</button>
+            <span class="zoom__value" data-role="zoom-value">Вписать</span>
+            <button type="button" class="btn btn-ghost btn-icon" data-role="zoom-in" data-view-control aria-label="Увеличить" disabled>+</button>
+          </div>
+          <button type="button" class="btn btn-ghost btn-icon" data-role="undo" aria-label="Отменить" title="Отменить (Ctrl+Z)" disabled>
+            <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#undo"></use></svg>
+          </button>
+          <button type="button" class="btn btn-ghost btn-icon" data-role="redo" aria-label="Повторить" title="Повторить (Ctrl+Y)" disabled>
+            <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#redo"></use></svg>
+          </button>
+        </div>
+        <div class="drop-wrap" data-role="empty">
+          <div class="drop" data-role="empty-drop">
+            <svg class="icon icon--lg" aria-hidden="true"><use href="icons/icons.svg#folder"></use></svg>
+            <p>Перетащите сюда папку главы или файлы страниц</p>
+            <div class="drop__actions">
+              <button type="button" class="btn btn-primary" data-role="open-files">
+                <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#file"></use></svg>
+                Открыть файлы…
+              </button>
+              <button type="button" class="btn btn-accent" data-role="open-folder">
+                <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#folder"></use></svg>
+                Открыть папку…
+              </button>
+            </div>
+          </div>
+          <section class="recent" data-role="recent" aria-labelledby="recent-title" hidden>
+            <h2 id="recent-title">Недавние проекты</h2>
+            <ul data-role="recent-list"></ul>
+          </section>
+        </div>
+        <div class="stage" data-role="stage" tabindex="-1" hidden>
+          <div class="stage__fit">
+            <div class="frame" data-role="frame">
+              <img class="frame__img" data-role="img-base" alt="">
+              <div class="curtain" data-role="curtain" hidden>
+                <img data-role="img-curtain" alt="">
+              </div>
+              <img class="frame__mask" data-role="img-mask" alt="Слой маски">
+              <span class="curtain__label curtain__label--left" data-role="curtain-label" hidden>Оригинал</span>
+              <span class="curtain__label curtain__label--right" data-role="curtain-label" hidden>Результат</span>
+              <div class="curtain__bar" data-role="curtain-bar" title="Шторка сравнения" hidden>
+                <span class="curtain__grip"></span>
+              </div>
+              <img class="frame__preview" data-role="style-preview" alt="" hidden>
+              <div class="frame__boxes" data-role="boxes"></div>
+              <svg class="stroke-layer" data-role="stroke-layer" aria-hidden="true"></svg>
+              <div class="brush-cursor" data-role="brush-cursor" hidden></div>
+              <div class="frame__progress" data-role="frame-progress" hidden>
+                <span data-role="frame-progress-text"></span>
+                <progress max="100" value="0">0 %</progress>
+              </div>
+            </div>
+          </div>
+        </div>
+        <ol class="steps" data-role="steps" aria-label="Шаги обработки" hidden></ol>
+      </main>
+
+      <aside class="inspector" data-role="inspector" aria-label="Инспектор">
+        <div class="tabs" role="tablist" aria-label="Инспектор">
+          <button type="button" class="btn" role="tab" id="tab-text" data-tab="text" aria-selected="true" aria-controls="panel-text">Текст</button>
+          <button type="button" class="btn" role="tab" id="tab-page" data-tab="page" aria-selected="false" aria-controls="panel-page" tabindex="-1">Страница</button>
+          <button type="button" class="btn" role="tab" id="tab-style" data-tab="style" aria-selected="false" aria-controls="panel-style" tabindex="-1">Стиль</button>
+        </div>
+        <div class="inspector__panel" id="panel-text" role="tabpanel" data-role="inspector-text" data-tabpanel="text" aria-labelledby="tab-text">
+          <div class="inspector__bar" data-role="inspector-bar" hidden>
+            <button type="button" class="btn btn-ghost" data-role="add-region">
+              <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#add"></use></svg>
+              Добавить регион
+            </button>
+          </div>
+          <div class="inspector__scroll" data-role="region-list">
+            <p class="inspector__empty">Откройте файлы или перетащите папку. Регионы появятся после распознавания.</p>
+          </div>
+        </div>
+        <div class="inspector__panel" id="panel-page" role="tabpanel" data-role="inspector-page" data-tabpanel="page" aria-labelledby="tab-page" hidden>
+          <div class="inspector__scroll" data-role="page-facts">
+            <p class="inspector__empty">Нет открытой страницы.</p>
+          </div>
+        </div>
+        <div class="inspector__panel" id="panel-style" role="tabpanel" data-tabpanel="style" aria-labelledby="tab-style" hidden>
+          <div class="inspector__scroll" data-role="inspector-style"></div>
+        </div>
+      </aside>
+    </div>
+
+    <footer class="statusbar" data-role="statusbar">
+      <span class="statusbar__job" data-role="job">Нет открытого проекта</span>
+      <span class="statusbar__llm" data-role="llm">
+        <span class="bullet bullet--off" data-role="llm-bullet" aria-hidden="true">●</span>
+        <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#llm"></use></svg>
+        <span data-role="llm-mark"></span>
+        <span data-role="llm-text">LLM нет</span>
+        <button type="button" class="btn btn-ghost" data-role="llm-retry">Повторить</button>
+      </span>
+      <span class="statusbar__device">
+        <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#gpu"></use></svg>
+        <span data-role="device-label">—</span>
+      </span>
+      <span class="statusbar__zoom" data-role="zoom-label">Вписать</span>
+    </footer>
+  </div>
+
+  <div class="overlay" data-role="screen-error" hidden>
+    <div class="error-screen">
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="error-title" tabindex="-1">
+        <div class="dialog__header">
+          <h1 id="error-title">Нет связи с программой</h1>
+        </div>
+        <div class="dialog__body">
+          <p class="warn-line">
+            <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#error"></use></svg>
+            <span data-role="error-text">Не удалось подключиться к локальному серверу.</span>
+          </p>
+        </div>
+        <div class="dialog__footer">
+          <button type="button" class="btn btn-primary" data-role="error-log">
+            <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#file"></use></svg>
+            Открыть лог
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay" data-role="screen-wizard" hidden>
+    <div class="app wizard">
+      <header class="toolbar">
+        <h1>Первый запуск</h1>
+      </header>
+      <div class="wizard__body">
+        <nav class="stepper" aria-label="Шаги мастера">
+          <button type="button" class="stepper__btn is-active" data-step-btn="1" aria-current="step">
+            <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#check"></use></svg>
+            1. Тема
+          </button>
+          <button type="button" class="stepper__btn" data-step-btn="2">
+            <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#check"></use></svg>
+            2. Модели
+          </button>
+          <button type="button" class="stepper__btn" data-step-btn="3">
+            <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#check"></use></svg>
+            3. Сервер LLM
+          </button>
+          <button type="button" class="stepper__btn" data-step-btn="4">
+            <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#check"></use></svg>
+            4. Языки
+          </button>
+        </nav>
+        <div class="wizard__panel">
+          <section class="wizard__step" data-step="1">
+            <h2>Тема</h2>
+            <p class="settings__intro">Её можно сменить позже в настройках. «Как в системе» следует за Windows.</p>
+            <hr class="settings__rule">
+            <div class="choice-col" role="radiogroup" aria-label="Тема">
+              <label class="choice"><input type="radio" name="wiz-theme" value="dark"> Тёмная</label>
+              <label class="choice"><input type="radio" name="wiz-theme" value="light"> Светлая</label>
+              <label class="choice"><input type="radio" name="wiz-theme" value="system" checked> Как в системе</label>
+            </div>
+          </section>
+          <section class="wizard__step" data-step="2" hidden>
+            <h2>Модели</h2>
+            <p class="settings__intro">Проверка файлов и докачка. Без них глава не обработается.</p>
+            <hr class="settings__rule">
+            <div data-role="wizard-models"></div>
+          </section>
+          <section class="wizard__step" data-step="3" hidden>
+            <h2>Сервер LLM</h2>
+            <p class="settings__intro">Необязательно. Без сервера останутся RapidOCR и Argos.</p>
+            <hr class="settings__rule">
+            <div class="form">
+              <label class="form__label" for="wiz-url">Адрес</label>
+              <input id="wiz-url" class="input" type="url" value="" placeholder="http://127.0.0.1:1234/v1" spellcheck="false">
+              <label class="form__label" for="wiz-model">Модель</label>
+              <input id="wiz-model" class="input" type="text" value="" placeholder="имя модели" spellcheck="false">
+              <div class="form__actions form__full">
+                <button type="button" class="btn btn-accent" data-role="wiz-check">Проверить</button>
+              </div>
+              <p class="field-hint form__full" data-role="wiz-check-result">Проверка убеждается, что модель принимает картинки. Сейчас: не проверено.</p>
+            </div>
+          </section>
+          <section class="wizard__step" data-step="4" hidden>
+            <h2>Языки</h2>
+            <p class="settings__intro">Языки по умолчанию. На каждой главе их можно сменить.</p>
+            <hr class="settings__rule">
+            <div class="form">
+              <label class="form__label" for="wiz-src">Откуда</label>
+              <select id="wiz-src" class="select">
+                <option value="en">en — English</option>
+                <option value="ja">ja — 日本語</option>
+                <option value="ko">ko — 한국어</option>
+                <option value="zh">zh — 中文</option>
+              </select>
+              <label class="form__label" for="wiz-dst">Куда</label>
+              <select id="wiz-dst" class="select">
+                <option value="ru">ru — Русский</option>
+                <option value="en">en — English</option>
+                <option value="uk">uk — Українська</option>
+              </select>
+            </div>
+          </section>
+        </div>
+      </div>
+      <div class="wizard__nav">
+        <button type="button" class="btn btn-accent" id="wizard-prev">Назад</button>
+        <div class="wizard__nav-right">
+          <button type="button" class="btn btn-primary" id="wizard-next">Далее</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay" data-role="screen-settings" hidden>
+    <div class="app settings" data-role="settings-window">
+      <header class="toolbar">
+        <h1>Настройки</h1>
+      </header>
+      <div class="settings__body">
+        <nav aria-label="Разделы настроек">
+          <div class="settings__nav" role="tablist" aria-orientation="vertical">
+            <button type="button" class="btn" role="tab" id="nav-appearance" data-tab="appearance" aria-selected="true" aria-controls="sec-appearance">Внешний вид</button>
+            <button type="button" class="btn" role="tab" id="nav-translation" data-tab="translation" aria-selected="false" aria-controls="sec-translation" tabindex="-1">Перевод</button>
+            <button type="button" class="btn" role="tab" id="nav-llm" data-tab="llm" aria-selected="false" aria-controls="sec-llm" tabindex="-1">Сервер LLM</button>
+            <button type="button" class="btn" role="tab" id="nav-processing" data-tab="processing" aria-selected="false" aria-controls="sec-processing" tabindex="-1">Обработка</button>
+            <button type="button" class="btn" role="tab" id="nav-typeset" data-tab="typeset" aria-selected="false" aria-controls="sec-typeset" tabindex="-1">Вёрстка</button>
+            <button type="button" class="btn" role="tab" id="nav-export" data-tab="export" aria-selected="false" aria-controls="sec-export" tabindex="-1">Экспорт</button>
+            <button type="button" class="btn" role="tab" id="nav-models" data-tab="models" aria-selected="false" aria-controls="sec-models" tabindex="-1">Модели</button>
+            <button type="button" class="btn" role="tab" id="nav-network" data-tab="network" aria-selected="false" aria-controls="sec-network" tabindex="-1">Сеть</button>
+            <button type="button" class="btn" role="tab" id="nav-about" data-tab="about" aria-selected="false" aria-controls="sec-about" tabindex="-1">О программе</button>
+          </div>
+        </nav>
+        <div class="settings__content">
+          <section class="settings__section" id="sec-appearance" role="tabpanel" data-tabpanel="appearance" aria-labelledby="nav-appearance">
+            <h2>Внешний вид</h2>
+            <p class="settings__intro">Окно обновляется сразу, чтобы сравнить темы до нажатия «ОК».</p>
+            <hr class="settings__rule">
+            <div class="form">
+              <span class="form__label" id="theme-label">Тема</span>
+              <div class="choice-col" role="radiogroup" aria-labelledby="theme-label">
+                <label class="choice"><input type="radio" name="set-theme" value="dark"> Тёмная</label>
+                <label class="choice"><input type="radio" name="set-theme" value="light"> Светлая</label>
+                <label class="choice"><input type="radio" name="set-theme" value="system" checked> Как в системе</label>
+              </div>
+              <label class="form__label" for="set-scale">Масштаб интерфейса</label>
+              <div class="scale-row">
+                <input id="set-scale" type="range" min="100" max="150" step="1" value="100">
+                <span id="set-scale-value">100 %</span>
+              </div>
+              <p class="field-hint form__full">От 100 до 150 %.</p>
+              <label class="choice form__full">
+                <input id="set-single" type="checkbox" checked>
+                Однобуквенные клавиши (V, R, B, E, M, L, 1–3)
+              </label>
+              <p class="field-hint form__full">Не срабатывают, пока курсор в поле ввода. Можно выключить.</p>
+            </div>
+          </section>
+          <section class="settings__section" id="sec-translation" role="tabpanel" data-tabpanel="translation" aria-labelledby="nav-translation" hidden>
+            <h2>Перевод</h2>
+            <p class="settings__intro">Языки по умолчанию для новой главы. На странице их можно сменить в тулбаре.</p>
+            <hr class="settings__rule">
+            <div class="form">
+              <label class="form__label" for="set-source">Язык оригинала</label>
+              <select id="set-source" class="select">
+                <option value="en">en — English</option>
+                <option value="ja">ja — 日本語</option>
+                <option value="ko">ko — 한국어</option>
+                <option value="zh">zh — 中文</option>
+              </select>
+              <label class="form__label" for="set-target">Язык перевода</label>
+              <select id="set-target" class="select">
+                <option value="ru">ru — Русский</option>
+                <option value="en">en — English</option>
+                <option value="uk">uk — Українська</option>
+              </select>
+              <label class="form__label" for="set-reading">Порядок чтения</label>
+              <select id="set-reading" class="select">
+                <option value="auto">Авто</option>
+                <option value="ltr">Слева направо</option>
+                <option value="rtl">Справа налево</option>
+              </select>
+              <label class="choice form__full"><input id="set-sfx" type="checkbox"> Переводить звуки</label>
+              <label class="form__label" for="set-glossary">Глоссарий</label>
+              <input id="set-glossary" class="input" type="text" value="" spellcheck="false" placeholder="путь к файлу">
+              <p class="field-hint form__full">Имена серии правятся в меню «Глоссарий». Здесь — запасной файл, если он задан.</p>
+            </div>
+          </section>
+          <section class="settings__section" id="sec-llm" role="tabpanel" data-tabpanel="llm" aria-labelledby="nav-llm" hidden>
+            <h2>Сервер LLM</h2>
+            <p class="settings__intro">Свой OpenAI-совместимый сервер: LM Studio, llama.cpp или Ollama. Пустой адрес — офлайн RapidOCR и Argos.</p>
+            <hr class="settings__rule">
+            <div class="form">
+              <label class="form__label" for="set-llm-url">Адрес</label>
+              <input id="set-llm-url" class="input" type="url" value="" placeholder="http://127.0.0.1:1234/v1" spellcheck="false">
+              <label class="form__label" for="set-llm-model">Модель</label>
+              <div class="input-row">
+                <input id="set-llm-model" class="input" type="text" value="" spellcheck="false">
+                <button type="button" class="btn btn-accent" data-role="llm-models">Список…</button>
+              </div>
+              <label class="form__label" for="set-api-key">Ключ API</label>
+              <div class="input-row">
+                <input id="set-api-key" class="input" type="password" value="" placeholder="не задан" readonly autocomplete="off">
+                <button type="button" class="btn btn-accent" data-role="api-key-edit">Задать…</button>
+              </div>
+              <p class="field-hint form__full"><svg class="icon" aria-hidden="true"><use href="icons/icons.svg#info"></use></svg> Хранится в диспетчере учётных данных Windows, не в JSON.</p>
+              <label class="form__label" for="set-llm-timeout">Таймаут, с</label>
+              <input id="set-llm-timeout" class="input" type="number" min="10" value="300">
+              <label class="choice form__full"><input id="set-llm-think" type="checkbox"> Думать дольше (медленнее)</label>
+              <div class="form__actions form__full">
+                <button type="button" class="btn btn-accent" data-role="llm-check">Проверить</button>
+              </div>
+              <p class="field-hint form__full" data-role="llm-check-result">Проверка заодно убеждается, что модель принимает картинки.</p>
+            </div>
+          </section>
+          <section class="settings__section" id="sec-processing" role="tabpanel" data-tabpanel="processing" aria-labelledby="nav-processing" hidden>
+            <h2>Обработка</h2>
+            <p class="settings__intro">Чем читать текст, переводить и зачищать баллон.</p>
+            <hr class="settings__rule">
+            <div class="form">
+              <label class="form__label" for="set-ocr">Распознавание</label>
+              <select id="set-ocr" class="select">
+                <option value="vlm">VLM</option>
+                <option value="rapid">RapidOCR</option>
+              </select>
+              <label class="form__label" for="set-translator">Перевод</label>
+              <select id="set-translator" class="select">
+                <option value="llm">LLM</option>
+                <option value="argos">Argos</option>
+              </select>
+              <label class="form__label" for="set-clean">Очистка</label>
+              <select id="set-clean" class="select">
+                <option value="lama">LaMa</option>
+                <option value="opencv">Заливка</option>
+              </select>
+              <label class="form__label" for="set-device">Устройство</label>
+              <select id="set-device" class="select">
+                <option value="auto">Авто</option>
+                <option value="gpu">GPU</option>
+                <option value="cpu">CPU</option>
+              </select>
+              <label class="form__label" for="set-conf">Порог детектора</label>
+              <input id="set-conf" class="input" type="number" min="0.05" max="0.95" step="0.05" value="0.3">
+            </div>
+          </section>
+          <section class="settings__section" id="sec-typeset" role="tabpanel" data-tabpanel="typeset" aria-labelledby="nav-typeset" hidden>
+            <h2>Вёрстка</h2>
+            <p class="settings__intro">Кегль ищется между минимумом и максимумом, если у региона не задан свой.</p>
+            <hr class="settings__rule">
+            <div class="form">
+              <label class="form__label" for="set-font-min">Минимальный кегль</label>
+              <input id="set-font-min" class="input" type="number" min="8" value="10">
+              <label class="form__label" for="set-font-max">Максимальный кегль</label>
+              <input id="set-font-max" class="input" type="number" min="8" value="128">
+              <label class="form__label" for="set-stroke">Ореол, доля кегля</label>
+              <input id="set-stroke" class="input" type="number" min="0" max="0.5" step="0.01" value="0.08">
+              <label class="form__label" for="set-font-path">Шрифт</label>
+              <input id="set-font-path" class="input" type="text" value="" placeholder="встроенный" spellcheck="false">
+            </div>
+          </section>
+          <section class="settings__section" id="sec-export" role="tabpanel" data-tabpanel="export" aria-labelledby="nav-export" hidden>
+            <h2>Экспорт</h2>
+            <p class="settings__intro">Значения по умолчанию для диалога экспорта.</p>
+            <hr class="settings__rule">
+            <div class="form">
+              <label class="form__label" for="set-export-sub">Подпапка</label>
+              <input id="set-export-sub" class="input" type="text" value="translated" spellcheck="false">
+              <label class="form__label" for="set-export-format">Формат</label>
+              <select id="set-export-format" class="select">
+                <option value="png">PNG</option>
+                <option value="jpg">JPG</option>
+              </select>
+              <label class="form__label" for="set-jpeg">Качество JPG</label>
+              <input id="set-jpeg" class="input" type="number" min="1" max="100" value="90">
+              <label class="form__label" for="set-conflict">Совпадение имён</label>
+              <select id="set-conflict" class="select">
+                <option value="overwrite">Перезаписать</option>
+                <option value="rename">Добавить номер</option>
+                <option value="skip">Пропустить</option>
+              </select>
+            </div>
+          </section>
+          <section class="settings__section" id="sec-models" role="tabpanel" data-tabpanel="models" aria-labelledby="nav-models" hidden>
+            <h2>Модели</h2>
+            <p class="settings__intro">Файлы лежат в папке models рядом с программой, их можно заменить.</p>
+            <hr class="settings__rule">
+            <div data-role="model-list"></div>
+            <div class="form__actions stack-top">
+              <button type="button" class="btn btn-accent" data-role="open-models-dir">
+                <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#folder"></use></svg>
+                Открыть папку моделей
+              </button>
+            </div>
+          </section>
+          <section class="settings__section" id="sec-network" role="tabpanel" data-tabpanel="network" aria-labelledby="nav-network" hidden>
+            <h2>Доступ по сети</h2>
+            <div class="form remote-form">
+              <label class="choice form__full">
+                <input id="set-remote" type="checkbox">
+                Разрешить доступ в локальной сети
+              </label>
+              <label class="field" for="set-remote-bind">Адрес
+                <input id="set-remote-bind" class="input" type="text" spellcheck="false" autocomplete="off">
+              </label>
+              <label class="field" for="set-remote-port">Порт
+                <input id="set-remote-port" class="input" type="number" min="1" max="65535" step="1">
+              </label>
+            </div>
+            <div data-role="remote-live" aria-live="polite"></div>
+            <div class="banner banner--warning remote-warn">
+              <svg class="icon banner__icon" aria-hidden="true"><use href="icons/icons.svg#warning"></use></svg>
+              <p class="banner__text">Брандмауэр Windows может блокировать порт, пока для программы не разрешены входящие подключения в частной сети. В локальной сети страницы открываются по обычному HTTP, без шифрования.</p>
+            </div>
+          </section>
+          <section class="settings__section" id="sec-about" role="tabpanel" data-tabpanel="about" aria-labelledby="nav-about" hidden>
+            <h2>О программе</h2>
+            <p class="settings__intro">Image Localization Tool, пайплайн v2.</p>
+            <hr class="settings__rule">
+            <div class="form">
+              <span class="form__label">Версия</span>
+              <span id="set-version">1.0.0</span>
+              <span class="form__label">Настройки</span>
+              <span class="about-path" id="set-settings-path">%APPDATA%\ImageLocalizationTool\settings.json</span>
+              <span class="form__label">Данные и лог</span>
+              <span class="about-path" id="set-data-path">%LOCALAPPDATA%\ImageLocalizationTool\</span>
+              <p class="field-hint form__full">Если рядом с программой есть папка data, всё хранится в ней.</p>
+              <div class="form__actions form__full">
+                <button type="button" class="btn btn-accent" data-role="open-log">
+                  <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#file"></use></svg>
+                  Открыть лог
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+      <footer class="settings__footer">
+        <button type="button" class="btn btn-primary" data-role="settings-ok">ОК</button>
+        <button type="button" class="btn btn-accent" data-role="settings-apply">Применить</button>
+        <button type="button" class="btn btn-accent" data-role="settings-cancel">Отмена</button>
+      </footer>
+    </div>
+  </div>
+
+  <div class="overlay overlay--dialog" data-role="modals" hidden>
+    <div class="dialog" data-dialog="export" role="dialog" aria-modal="true" aria-labelledby="export-title" tabindex="-1" hidden>
+      <div class="dialog__header">
+        <h1 id="export-title">Экспорт</h1>
+        <button type="button" class="btn btn-ghost btn-icon dialog__close" data-dialog-close aria-label="Закрыть">
+          <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#close"></use></svg>
+        </button>
+      </div>
+      <div class="dialog__body">
+        <fieldset>
+          <legend>Какие страницы</legend>
+          <div class="choice-stack">
+            <label class="choice"><input type="radio" name="export-which" value="all"> <span>Все (0)</span></label>
+            <label class="choice"><input type="radio" name="export-which" value="ready" checked> <span>Только готовые (0)</span></label>
+            <label class="choice"><input type="radio" name="export-which" value="selected"> <span>Выбранные (0)</span></label>
+          </div>
+        </fieldset>
+        <fieldset>
+          <legend>Что сохранить</legend>
+          <div class="choice-stack">
+            <label class="choice"><input type="radio" name="export-content" value="result" data-role="export-content" checked> Перевод</label>
+            <label class="choice"><input type="radio" name="export-content" value="clean" data-role="export-content"> Очищенная страница</label>
+            <label class="choice"><input type="radio" name="export-content" value="both" data-role="export-content"> Оба (перевод и очищенная)</label>
+          </div>
+          <p class="field-hint">Очищенная страница — кадр после ретуши маски, до вёрстки перевода. При «Оба» очищенный файл получает суффикс -clean.</p>
+        </fieldset>
+        <div class="field">
+          <span class="field__label" id="export-dir-label">Папка</span>
+          <div class="input-row">
+            <input id="export-dir" class="input" data-role="export-dir" type="text" value="" readonly spellcheck="false" aria-labelledby="export-dir-label">
+            <button type="button" class="btn btn-accent" data-role="export-browse">Обзор…</button>
+          </div>
+          <p class="field-hint">Папку выбирает программа. По умолчанию подпапка translated рядом с оригиналами.</p>
+        </div>
+        <div class="field">
+          <label class="field__label" for="export-format">Формат</label>
+          <select id="export-format" class="select" data-role="export-format">
+            <option value="png">PNG</option>
+            <option value="jpg">JPG</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="field__label" for="export-quality">Качество JPG</label>
+          <div class="input-row">
+            <input id="export-quality" data-role="export-quality" type="range" min="1" max="100" value="90">
+            <span data-role="export-quality-value">90</span>
+          </div>
+          <p class="field-hint">Для PNG качество не используется.</p>
+        </div>
+        <fieldset>
+          <legend>Совпадение имён</legend>
+          <div class="choice-stack">
+            <label class="choice"><input type="radio" name="export-clash" value="overwrite"> Перезаписать</label>
+            <label class="choice"><input type="radio" name="export-clash" value="rename" checked> Добавить номер (имя-2.jpg)</label>
+            <label class="choice"><input type="radio" name="export-clash" value="skip"> Пропустить</label>
+          </div>
+        </fieldset>
+      </div>
+      <div class="dialog__footer">
+        <button type="button" class="btn btn-primary" data-role="export-go">
+          <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#export"></use></svg>
+          Экспорт
+        </button>
+        <button type="button" class="btn btn-accent" data-dialog-close>Отмена</button>
+      </div>
+    </div>
+
+    <div class="dialog dialog--wide" data-dialog="hotkeys" role="dialog" aria-modal="true" aria-labelledby="hotkeys-title" tabindex="-1" hidden>
+      <div class="dialog__header">
+        <h2 id="hotkeys-title">Горячие клавиши</h2>
+        <button type="button" class="btn btn-ghost btn-icon dialog__close" data-role="hotkeys-close" data-dialog-close aria-label="Закрыть">
+          <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#close"></use></svg>
+        </button>
+      </div>
+      <div class="dialog__body">
+        <p>F1 открывает этот список. Все действия есть и в меню.</p>
+        <table class="hotkeys">
+          <caption class="sr-only">Сочетания клавиш</caption>
+          <thead>
+            <tr><th>Клавиши</th><th>Действие</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><kbd class="kbd">F1</kbd></td><td>Список горячих клавиш</td></tr>
+            <tr><td><kbd class="kbd">Ctrl</kbd> + <kbd class="kbd">O</kbd></td><td>Открыть файлы</td></tr>
+            <tr><td><kbd class="kbd">Ctrl</kbd> + <kbd class="kbd">Shift</kbd> + <kbd class="kbd">O</kbd></td><td>Открыть папку</td></tr>
+            <tr><td><kbd class="kbd">Ctrl</kbd> + <kbd class="kbd">E</kbd></td><td>Экспорт</td></tr>
+            <tr><td><kbd class="kbd">Ctrl</kbd> + <kbd class="kbd">,</kbd></td><td>Настройки</td></tr>
+            <tr><td><kbd class="kbd">Ctrl</kbd> + <kbd class="kbd">Enter</kbd></td><td>Перевести страницу</td></tr>
+            <tr><td><kbd class="kbd">Ctrl</kbd> + <kbd class="kbd">Shift</kbd> + <kbd class="kbd">Enter</kbd></td><td>Перевести всё</td></tr>
+            <tr><td><kbd class="kbd">Esc</kbd></td><td>Стоп, снять выделение или закрыть диалог</td></tr>
+            <tr><td><kbd class="kbd">PgUp</kbd> <kbd class="kbd">PgDn</kbd></td><td>Соседние страницы</td></tr>
+            <tr><td><kbd class="kbd">1</kbd> <kbd class="kbd">2</kbd> <kbd class="kbd">3</kbd></td><td>Виды «Оригинал», «Результат», «Сравнение»</td></tr>
+            <tr><td><kbd class="kbd">M</kbd></td><td>Слой маски</td></tr>
+            <tr><td><kbd class="kbd">L</kbd></td><td>Слой рамок</td></tr>
+            <tr><td><kbd class="kbd">V</kbd></td><td>Инструмент «Выбор»</td></tr>
+            <tr><td><kbd class="kbd">R</kbd></td><td>Инструмент «Регион»</td></tr>
+            <tr><td><kbd class="kbd">B</kbd></td><td>Инструмент «Кисть»</td></tr>
+            <tr><td><kbd class="kbd">E</kbd></td><td>Инструмент «Ластик»</td></tr>
+            <tr><td><kbd class="kbd">[</kbd> <kbd class="kbd">]</kbd></td><td>Размер кисти</td></tr>
+            <tr><td><kbd class="kbd">Del</kbd></td><td>Удалить регион</td></tr>
+            <tr><td><kbd class="kbd">Стрелки</kbd></td><td>Сдвинуть рамку на 1 px</td></tr>
+            <tr><td><kbd class="kbd">Shift</kbd> + <kbd class="kbd">стрелки</kbd></td><td>Сдвинуть рамку на 10 px</td></tr>
+            <tr><td><kbd class="kbd">Alt</kbd> + <kbd class="kbd">стрелки</kbd></td><td>Изменить размер рамки</td></tr>
+            <tr><td><kbd class="kbd">N</kbd></td><td>Следующая проблемная страница</td></tr>
+            <tr><td><kbd class="kbd">Ctrl</kbd> + <kbd class="kbd">Shift</kbd> + <kbd class="kbd">C</kbd></td><td>Копировать стиль региона</td></tr>
+            <tr><td><kbd class="kbd">Ctrl</kbd> + <kbd class="kbd">Shift</kbd> + <kbd class="kbd">V</kbd></td><td>Вставить стиль региона</td></tr>
+            <tr><td><kbd class="kbd">Ctrl</kbd> + <kbd class="kbd">Z</kbd></td><td>Отмена</td></tr>
+            <tr><td><kbd class="kbd">Ctrl</kbd> + <kbd class="kbd">Y</kbd></td><td>Повтор</td></tr>
+            <tr><td><kbd class="kbd">Ctrl</kbd> + колесо</td><td>Масштаб</td></tr>
+            <tr><td><kbd class="kbd">Ctrl</kbd> + <kbd class="kbd">0</kbd></td><td>Вписать в окно</td></tr>
+            <tr><td><kbd class="kbd">Ctrl</kbd> + <kbd class="kbd">1</kbd></td><td>Масштаб 100 %</td></tr>
+            <tr><td>Колесо</td><td>Прокрутка холста</td></tr>
+            <tr><td><kbd class="kbd">Пробел</kbd> + перетаскивание</td><td>Прокрутка холста</td></tr>
+          </tbody>
+        </table>
+        <p class="field-hint">Однобуквенные клавиши не срабатывают в полях ввода и отключаются в настройках.</p>
+      </div>
+    </div>
+
+    <div class="dialog dialog--wide" data-dialog="glossary" role="dialog" aria-modal="true" aria-labelledby="glossary-title" tabindex="-1" hidden>
+      <div class="dialog__header">
+        <h2 id="glossary-title">Глоссарий</h2>
+        <button type="button" class="btn btn-ghost btn-icon dialog__close" data-dialog-close aria-label="Закрыть">
+          <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#close"></use></svg>
+        </button>
+      </div>
+      <div class="dialog__body" data-role="glossary-root"></div>
+    </div>
+    <div class="dialog" data-dialog="confirm" role="dialog" aria-modal="true" aria-labelledby="confirm-title" tabindex="-1" hidden>
+      <div class="dialog__header">
+        <h2 id="confirm-title" data-role="confirm-title">Подтверждение</h2>
+        <button type="button" class="btn btn-ghost btn-icon dialog__close" data-dialog-close aria-label="Закрыть">
+          <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#close"></use></svg>
+        </button>
+      </div>
+      <div class="dialog__body">
+        <p data-role="confirm-text"></p>
+      </div>
+      <div class="dialog__footer">
+        <button type="button" class="btn btn-primary" data-role="confirm-ok">ОК</button>
+        <button type="button" class="btn btn-accent" data-role="confirm-cancel">Отмена</button>
+      </div>
+    </div>
+
+    <div class="dialog" data-dialog="models" role="dialog" aria-modal="true" aria-labelledby="model-title" tabindex="-1" hidden>
+      <div class="dialog__header">
+        <h2 id="model-title">Выбор модели</h2>
+        <button type="button" class="btn btn-ghost btn-icon dialog__close" data-dialog-close aria-label="Закрыть">
+          <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#close"></use></svg>
+        </button>
+      </div>
+      <div class="dialog__body">
+        <p class="field-hint">Для распознавания страницы модель должна принимать картинки.</p>
+        <div class="model-pick" role="radiogroup" aria-label="Модель сервера" data-role="model-list-dialog"></div>
+      </div>
+      <div class="dialog__footer">
+        <button type="button" class="btn btn-primary" data-role="model-choose">Выбрать</button>
+        <button type="button" class="btn btn-accent" data-dialog-close>Отмена</button>
+      </div>
+    </div>
+
+    <div class="dialog" data-dialog="worker" role="dialog" aria-modal="true" aria-labelledby="boot-title" tabindex="-1" hidden>
+      <div class="dialog__header">
+        <h2 id="boot-title">Не удалось запустить обработку</h2>
+        <button type="button" class="btn btn-ghost btn-icon dialog__close" data-dialog-close aria-label="Закрыть">
+          <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#close"></use></svg>
+        </button>
+      </div>
+      <div class="dialog__body">
+        <p class="warn-line">
+          <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#error"></use></svg>
+          <span data-role="worker-text">Воркер перезапускался чаще трёх раз в минуту и остановлен.</span>
+        </p>
+      </div>
+      <div class="dialog__footer">
+        <button type="button" class="btn btn-primary" data-role="worker-log">
+          <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#file"></use></svg>
+          Открыть лог
+        </button>
+        <button type="button" class="btn btn-accent" data-dialog-close>Закрыть</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>
+  (function () {
+    var theme = "";
+    var scale = "";
+    try {
+      var params = new URLSearchParams(location.search);
+      theme = params.get("theme") || "";
+      scale = params.get("scale") || "";
+      if (!theme) theme = localStorage.getItem("ilt-mockup-theme") || "";
+      if (!scale) scale = localStorage.getItem("ilt-mockup-scale") || "";
+    } catch (err) {}
+    if (theme === "dark" || theme === "light") {
+      document.documentElement.setAttribute("data-theme", theme);
+    }
+    var n = parseInt(scale, 10);
+    if (n >= 100 && n <= 150 && n !== 100) {
+      document.documentElement.style.setProperty("--ui-scale", String(n / 100));
+    }
+  })();
+  </script>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>Image Localization Tool — глава в работе</title>
+  <link rel="stylesheet" href="../css/tokens.css">
+  <link rel="stylesheet" href="../css/base.css">
+  <link rel="stylesheet" href="../css/components.css">
+  <link rel="stylesheet" href="../css/main.css">
+  <link rel="stylesheet" href="../css/editor.css">
+</head>
+<body>
+  <a class="skip" href="#viewer">К просмотру</a>
+  <div class="app">
+    <header class="toolbar" data-role="toolbar">
+      <h1 class="sr-only">Image Localization Tool</h1>
+      <div class="toolbar__group">
+        <details class="menu">
+          <summary class="btn btn-ghost menu__summary" data-role="file-menu">
+            <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#file"></use></svg>
+            Файл
+            <svg class="icon menu__chevron" aria-hidden="true"><use href="../icons/icons.svg#chevron"></use></svg>
+          </summary>
+          <div class="menu__panel" role="menu" aria-label="Файл">
+            <button type="button" class="btn menu__item" role="menuitem">Открыть файлы… <span class="menu__kbd"><kbd class="kbd">Ctrl+O</kbd></span></button>
+            <button type="button" class="btn menu__item" role="menuitem">Открыть папку… <span class="menu__kbd"><kbd class="kbd">Ctrl+Shift+O</kbd></span></button>
+            <button type="button" class="btn menu__item" role="menuitem">Экспорт… <span class="menu__kbd"><kbd class="kbd">Ctrl+E</kbd></span></button>
+            <div class="menu__sep" role="separator"></div>
+            <button type="button" class="btn menu__item" role="menuitem">Настройки… <span class="menu__kbd"><kbd class="kbd">Ctrl+,</kbd></span></button>
+            <button type="button" class="btn menu__item" role="menuitem">Выход</button>
+          </div>
+        </details>
+      </div>
+      <div class="toolbar__group" role="group" aria-label="Языки">
+        <label class="toolbar__lang" for="lang-source">Откуда
+          <select id="lang-source" class="select" data-role="lang-source">
+            <option value="en" selected>en — English</option>
+            <option value="ja">ja — 日本語</option>
+            <option value="ko">ko — 한국어</option>
+            <option value="zh">zh — 中文</option>
+          </select>
+        </label>
+        <span class="toolbar__arrow" aria-hidden="true">→</span>
+        <label class="toolbar__lang" for="lang-target">Куда
+          <select id="lang-target" class="select" data-role="lang-target">
+            <option value="ru" selected>ru — Русский</option>
+            <option value="en">en — English</option>
+            <option value="uk">uk — Українська</option>
+          </select>
+        </label>
+      </div>
+      <div class="toolbar__group" role="group" aria-label="Перевод">
+        <button type="button" class="btn btn-primary" data-role="translate-page">
+          <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#translate"></use></svg>
+          Перевести страницу
+        </button>
+        <button type="button" class="btn btn-accent" data-role="translate-all">Перевести всё</button>
+        <button type="button" class="btn btn-ghost" data-role="stop">
+          <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#stop"></use></svg>
+          Стоп
+        </button>
+      </div>
+      <div class="toolbar__spacer"></div>
+      <div class="toolbar__group">
+        <button type="button" class="btn btn-accent" data-role="export">
+          <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#export"></use></svg>
+          Экспорт
+        </button>
+        <button type="button" class="btn btn-ghost btn-icon" data-role="settings" aria-label="Настройки" title="Настройки (Ctrl+,)">
+          <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#settings"></use></svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="banner banner--warning" data-role="banner" role="status">
+      <svg class="icon banner__icon" aria-hidden="true"><use href="../icons/icons.svg#warning"></use></svg>
+      <p class="banner__text">LLM недоступен. Страницы пойдут через RapidOCR и Argos.</p>
+      <div class="banner__actions">
+        <button type="button" class="btn btn-accent">Настройки</button>
+        <button type="button" class="btn btn-ghost">Повторить</button>
+      </div>
+    </div>
+
+    <div class="workspace">
+      <nav class="pages" aria-label="Страницы">
+        <div class="pages__head">Страницы</div>
+        <div class="pages__list" role="listbox" data-role="page-list" aria-label="Страницы главы" aria-multiselectable="true">
+          <div class="page" role="option" id="page-01" aria-selected="true" tabindex="0" aria-busy="true">
+            <img class="page__thumb" src="../../test-img/test-1.jpg" alt="">
+            <span class="page__body">
+              <span class="page__title"><span class="page__num">01</span> <span class="page__name">001.jpg</span></span>
+              <span class="page__status page__status--run"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#play"></use></svg> <span>идёт 45 % · Перевод</span></span>
+            </span>
+          </div>
+          <div class="page" role="option" id="page-02" aria-selected="false" tabindex="-1">
+            <img class="page__thumb" src="../../test-img/test-2.png" alt="">
+            <span class="page__body">
+              <span class="page__title"><span class="page__num">02</span> <span class="page__name">002.jpg</span></span>
+              <span class="page__status page__status--queue"><svg class="icon icon--right" aria-hidden="true"><use href="../icons/icons.svg#chevron"></use></svg> <span>в очереди</span></span>
+            </span>
+          </div>
+          <div class="page" role="option" id="page-03" aria-selected="false" tabindex="-1">
+            <img class="page__thumb" src="../../test-img/test-3.jpg" alt="">
+            <span class="page__body">
+              <span class="page__title"><span class="page__num">03</span> <span class="page__name">003.jpg</span></span>
+              <span class="page__status page__status--idle"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#file"></use></svg> <span>не начата</span></span>
+            </span>
+          </div>
+          <div class="page" role="option" id="page-04" aria-selected="false" tabindex="-1">
+            <img class="page__thumb" src="../../test-img/test-2.png" alt="">
+            <span class="page__body">
+              <span class="page__title"><span class="page__num">04</span> <span class="page__name">004.jpg</span></span>
+              <span class="page__status page__status--error"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#error"></use></svg> <span>ошибка</span></span>
+            </span>
+          </div>
+          <div class="page" role="option" id="page-05" aria-selected="false" tabindex="-1">
+            <img class="page__thumb" src="../../test-img/test-3.jpg" alt="">
+            <span class="page__body">
+              <span class="page__title"><span class="page__num">05</span> <span class="page__name">005.jpg</span></span>
+              <span class="page__status page__status--offline"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#warning"></use></svg> <span>без LLM</span></span>
+            </span>
+          </div>
+          <div class="page" role="option" id="page-06" aria-selected="false" tabindex="-1">
+            <img class="page__thumb" src="../../test-img/test-1.jpg" alt="">
+            <span class="page__body">
+              <span class="page__title"><span class="page__num">06</span> <span class="page__name">006.jpg</span></span>
+              <span class="page__status page__status--edit"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#brush"></use></svg> <span>есть правки</span></span>
+            </span>
+          </div>
+          <div class="page" role="option" id="page-07" aria-selected="false" tabindex="-1">
+            <img class="page__thumb" src="../../test-img/test-2.png" alt="">
+            <span class="page__body">
+              <span class="page__title"><span class="page__num">07</span> <span class="page__name">007.jpg</span></span>
+              <span class="page__status page__status--done"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> <span>готово</span></span>
+            </span>
+          </div>
+          <div class="page" role="option" id="page-08" aria-selected="false" tabindex="-1">
+            <img class="page__thumb" src="../../test-img/test-3.jpg" alt="">
+            <span class="page__body">
+              <span class="page__title"><span class="page__num">08</span> <span class="page__name">008.jpg</span></span>
+              <span class="page__status page__status--done"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> <span>готово</span></span>
+            </span>
+          </div>
+          <div class="page" role="option" id="page-09" aria-selected="false" tabindex="-1">
+            <img class="page__thumb" src="../../test-img/test-1.jpg" alt="">
+            <span class="page__body">
+              <span class="page__title"><span class="page__num">09</span> <span class="page__name">009.jpg</span></span>
+              <span class="page__status page__status--done"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> <span>готово</span></span>
+            </span>
+          </div>
+          <div class="page" role="option" id="page-10" aria-selected="false" tabindex="-1">
+            <img class="page__thumb" src="../../test-img/test-2.png" alt="">
+            <span class="page__body">
+              <span class="page__title"><span class="page__num">10</span> <span class="page__name">010.jpg</span></span>
+              <span class="page__status page__status--done"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> <span>готово</span></span>
+            </span>
+          </div>
+          <div class="page" role="option" id="page-11" aria-selected="false" tabindex="-1">
+            <img class="page__thumb" src="../../test-img/test-3.jpg" alt="">
+            <span class="page__body">
+              <span class="page__title"><span class="page__num">11</span> <span class="page__name">011.jpg</span></span>
+              <span class="page__status page__status--done"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> <span>готово</span></span>
+            </span>
+          </div>
+          <div class="page" role="option" id="page-12" aria-selected="false" tabindex="-1">
+            <img class="page__thumb" src="../../test-img/test-1.jpg" alt="">
+            <span class="page__body">
+              <span class="page__title"><span class="page__num">12</span> <span class="page__name">012.jpg</span></span>
+              <span class="page__status page__status--done"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> <span>готово</span></span>
+            </span>
+          </div>
+        </div>
+        <div class="context-menu" role="menu" aria-label="Страница 001.jpg">
+          <div class="context-menu__title">001.jpg</div>
+          <button type="button" class="btn menu__item" role="menuitem">Перевести страницу</button>
+          <button type="button" class="btn menu__item" role="menuitem">Перевести заново</button>
+          <button type="button" class="btn menu__item" role="menuitem">Показать в папке</button>
+          <div class="menu__sep" role="separator"></div>
+          <button type="button" class="btn menu__item" role="menuitem">Убрать из проекта</button>
+        </div>
+        <p class="pages__sum"><span>8 из 12 готово</span></p>
+      </nav>
+
+      <main class="viewer" id="viewer" data-role="viewer">
+        <div class="viewer__bar">
+          <div class="segmented" role="radiogroup" aria-label="Вид">
+            <button type="button" class="btn" role="radio" data-role="view-original" aria-checked="true">
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#original"></use></svg>
+              Оригинал
+            </button>
+            <button type="button" class="btn" role="radio" data-role="view-result" aria-checked="false">
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#translate"></use></svg>
+              Результат
+            </button>
+            <button type="button" class="btn" role="radio" data-role="view-compare" aria-checked="false">
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#compare"></use></svg>
+              Сравнение
+            </button>
+          </div>
+          <div role="group" aria-label="Слои">
+            <button type="button" class="btn btn-ghost" data-role="layer-boxes" aria-pressed="false">
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#layers"></use></svg>
+              Рамки
+            </button>
+            <button type="button" class="btn btn-ghost" data-role="layer-mask" aria-pressed="false">
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#mask"></use></svg>
+              Маска
+            </button>
+          </div>
+          <div role="radiogroup" aria-label="Инструмент">
+            <button type="button" class="btn btn-ghost" role="radio" data-role="tool-select" aria-checked="true">
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#select"></use></svg>
+              Выбор
+            </button>
+            <button type="button" class="btn btn-ghost" role="radio" data-role="tool-region" aria-checked="false">
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#region"></use></svg>
+              Регион
+            </button>
+            <button type="button" class="btn btn-ghost" role="radio" data-role="tool-brush" aria-checked="false">
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#brush"></use></svg>
+              Кисть
+            </button>
+            <button type="button" class="btn btn-ghost" role="radio" data-role="tool-eraser" aria-checked="false">
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#eraser"></use></svg>
+              Ластик
+            </button>
+          </div>
+          <label class="brush-size" for="brush-size">Размер
+            <input id="brush-size" data-role="brush-size" type="range" min="1" max="64" value="12">
+            <span>12</span>
+          </label>
+          <div class="zoom" data-role="zoom">
+            <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#zoom"></use></svg>
+            <button type="button" class="btn btn-ghost btn-icon" aria-label="Уменьшить">−</button>
+            <span class="zoom__value">Вписать</span>
+            <button type="button" class="btn btn-ghost btn-icon" aria-label="Увеличить">+</button>
+          </div>
+          <button type="button" class="btn btn-ghost btn-icon" data-role="undo" aria-label="Отменить" title="Отменить (Ctrl+Z)" disabled>
+            <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#undo"></use></svg>
+          </button>
+          <button type="button" class="btn btn-ghost btn-icon" data-role="redo" aria-label="Повторить" title="Повторить (Ctrl+Y)" disabled>
+            <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#redo"></use></svg>
+          </button>
+        </div>
+        <div class="stage">
+          <div class="frame">
+            <img class="frame__img" src="../../test-img/test-1.jpg" alt="Оригинал страницы 001.jpg">
+            <div class="frame__progress">
+              <span>Перевод · 45 %</span>
+              <progress max="100" value="45">45 %</progress>
+            </div>
+          </div>
+        </div>
+        <ol class="steps" aria-label="Шаги обработки">
+          <li class="is-done"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> Детекция</li>
+          <li class="is-done"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> OCR</li>
+          <li class="is-current" aria-current="step"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#play"></use></svg> Перевод</li>
+          <li>Маска</li>
+          <li>Очистка</li>
+          <li>Вёрстка</li>
+        </ol>
+      </main>
+
+      <aside class="inspector" data-role="inspector" aria-label="Инспектор" data-tabs>
+        <div class="tabs" role="tablist" aria-label="Инспектор">
+          <button type="button" class="btn" role="tab" id="tab-text" data-tab="text" aria-selected="true" aria-controls="panel-text">Текст</button>
+          <button type="button" class="btn" role="tab" id="tab-page" data-tab="page" aria-selected="false" aria-controls="panel-page">Страница</button>
+        </div>
+        <div class="inspector__panel" id="panel-text" role="tabpanel" data-role="inspector-text" data-tabpanel="text" aria-labelledby="tab-text">
+          <div class="inspector__scroll">
+            <p>Страница переводится. Регионы можно править, когда этап завершится.</p>
+            <p class="warn-line">
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#warning"></use></svg>
+              <span>Ждёт сервер LLM</span>
+            </p>
+          </div>
+        </div>
+        <div class="inspector__panel" id="panel-page" role="tabpanel" data-role="inspector-page" data-tabpanel="page" aria-labelledby="tab-page" hidden>
+          <div class="inspector__scroll">
+            <dl class="kv">
+              <dt>Этап</dt><dd>Перевод, 45 %</dd>
+              <dt>OCR</dt><dd>VLM, готово</dd>
+              <dt>Перевод</dt><dd>ждёт LLM</dd>
+              <dt>Очистка</dt><dd>LaMa</dd>
+              <dt>Устройство</dt><dd>GPU</dd>
+            </dl>
+            <p class="warn-line">
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#warning"></use></svg>
+              <span>LLM недоступен, включён офлайн-режим.</span>
+            </p>
+            <div class="region-card__actions">
+              <button type="button" class="btn btn-accent" disabled>Перевести заново</button>
+              <button type="button" class="btn btn-ghost" disabled>Сбросить правки</button>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <footer class="statusbar" data-role="statusbar">
+      <span class="statusbar__job" aria-live="polite">Перевод · страница 1 из 12</span>
+      <span class="statusbar__llm">
+        <span class="bullet bullet--off" aria-hidden="true">●</span>
+        <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#llm"></use></svg>
+        <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#warning"></use></svg>
+        <span>LLM нет</span>
+        <button type="button" class="btn btn-ghost">Повторить</button>
+      </span>
+      <span class="statusbar__device">
+        <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#gpu"></use></svg>
+        GPU
+      </span>
+      <span class="statusbar__zoom">Вписать</span>
+    </footer>
+  </div>
+  <script>
+  (function () {
+    document.querySelectorAll("[data-tabs]").forEach(function (root) {
+      root.querySelectorAll("[data-tab]").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          var name = btn.getAttribute("data-tab");
+          root.querySelectorAll("[data-tab]").forEach(function (item) {
+            item.setAttribute("aria-selected", item === btn ? "true" : "false");
+          });
+          root.querySelectorAll("[data-tabpanel]").forEach(function (panel) {
+            panel.hidden = panel.getAttribute("data-tabpanel") !== name;
+          });
+        });
+      });
+    });
+  })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,268 @@
+/* Живой холст, оверлеи и правки, которых нет в статичных макетах. */
+
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  background: var(--bg-primary);
+}
+
+.overlay--dialog {
+  z-index: 60;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space);
+  background: color-mix(in srgb, var(--bg-primary) 78%, #000);
+}
+
+.overlay > .app {
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+}
+
+.error-screen {
+  margin: auto;
+  width: min(520px, 100%);
+}
+
+.banner-stack {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.viewer .stage {
+  display: block;
+  place-items: unset;
+  padding: 0;
+  cursor: default;
+}
+
+.stage__fit {
+  box-sizing: border-box;
+  min-width: 100%;
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-sm);
+}
+
+.viewer .frame {
+  width: var(--frame-w, auto);
+  height: var(--frame-h, auto);
+  aspect-ratio: auto;
+  max-width: none;
+  flex: 0 0 auto;
+  user-select: none;
+}
+
+.viewer .frame img {
+  -webkit-user-drag: none;
+  user-select: none;
+}
+
+.viewer .curtain img {
+  width: var(--frame-w, 100%);
+  height: var(--frame-h, 100%);
+  max-width: none;
+  aspect-ratio: auto;
+}
+
+.frame__boxes {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.box--draft {
+  border-style: dashed;
+}
+
+.box--selected.box--overflow {
+  box-shadow:
+    0 0 0 1px var(--on-ink-inverse),
+    0 0 0 2px var(--on-ink),
+    0 0 0 4px var(--primary);
+}
+
+.stroke-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.brush-cursor {
+  position: absolute;
+  border: 1px solid var(--on-ink);
+  box-shadow: 0 0 0 1px var(--on-ink-inverse);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 6;
+  transform: translate(-50%, -50%);
+}
+
+.stage.is-pan {
+  cursor: grab;
+}
+
+.stage.is-panning {
+  cursor: grabbing;
+}
+
+.stage.is-cross {
+  cursor: crosshair;
+}
+
+.pages .context-menu {
+  position: fixed;
+  z-index: 80;
+}
+
+.drop.is-dragover,
+.stage.is-dragover {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+
+button.region-card__head {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.region-card__head .region-card__title {
+  flex: 1;
+  min-width: 0;
+}
+
+.viewer__bar [role="radiogroup"],
+.viewer__bar [role="group"] {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.sfx-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.sfx-toggle legend {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+.net-clients {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.batch-fold {
+  flex: 0 1 auto;
+  max-height: 45%;
+  overflow: auto;
+  border-bottom: 1px solid var(--border);
+}
+
+.batch-fold summary {
+  padding: var(--space-xs) var(--space);
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.pages__chapter {
+  padding: var(--space-xs) var(--space);
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+.run-state[hidden] {
+  display: none;
+}
+
+.run-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-sm);
+}
+
+.run-actions,
+.run-filters,
+.run-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chapter__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gloss {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.gloss th,
+.gloss td {
+  padding: var(--space-xs);
+  text-align: left;
+  vertical-align: top;
+}
+
+.pair-code {
+  margin: var(--space-sm) 0;
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.remote-devices,
+.remote-log {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.remote-devices li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.remote-state[data-state="error"] {
+  color: var(--danger);
+}

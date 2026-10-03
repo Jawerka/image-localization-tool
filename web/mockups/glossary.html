@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>
+  (function () {
+    var theme = "";
+    var scale = "";
+    try {
+      var params = new URLSearchParams(location.search);
+      theme = params.get("theme") || "";
+      scale = params.get("scale") || "";
+      if (!theme) theme = localStorage.getItem("ilt-mockup-theme") || "";
+      if (!scale) scale = localStorage.getItem("ilt-mockup-scale") || "";
+    } catch (err) {}
+    if (theme === "dark" || theme === "light") {
+      document.documentElement.setAttribute("data-theme", theme);
+    }
+    var n = parseInt(scale, 10);
+    if (n >= 100 && n <= 150 && n !== 100) {
+      document.documentElement.style.setProperty("--ui-scale", String(n / 100));
+    }
+  })();
+  </script>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>Image Localization Tool — глоссарий</title>
+  <link rel="stylesheet" href="../css/tokens.css">
+  <link rel="stylesheet" href="../css/base.css">
+  <link rel="stylesheet" href="../css/components.css">
+  <link rel="stylesheet" href="../css/settings.css">
+  <style>
+    .review {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--space-xs) var(--space);
+      align-items: center;
+      flex-shrink: 0;
+      padding: var(--space-xs) var(--space);
+      border-bottom: 1px dashed var(--border);
+      background: var(--bg-primary);
+      color: var(--text-muted);
+      font-size: var(--font-size-small);
+    }
+
+    .review a {
+      color: var(--text-muted);
+      text-decoration: none;
+    }
+
+    .review a:hover {
+      color: var(--text-primary);
+      text-decoration: underline;
+    }
+
+    .review a[aria-current="page"] {
+      color: var(--text-primary);
+      font-weight: 700;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+
+    .glossary-host {
+      flex: 1 1 auto;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg-card);
+    }
+
+    .glossary-host > [data-state] {
+      flex: 1 1 auto;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .glossary-state {
+      flex: 1 1 auto;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .glossary-scroll {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      gap: var(--space);
+      padding: var(--space);
+    }
+
+    .glossary-scroll h2 {
+      font-size: calc(16px * var(--ui-scale));
+      font-weight: 700;
+    }
+
+    .gloss {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+
+    .gloss th:nth-child(1),
+    .gloss td:nth-child(1),
+    .gloss th:nth-child(2),
+    .gloss td:nth-child(2) {
+      width: 18%;
+    }
+
+    .gloss th:nth-child(3),
+    .gloss td:nth-child(3) {
+      width: calc(168px * var(--ui-scale));
+    }
+
+    .gloss th,
+    .gloss td {
+      padding: var(--space-xs) var(--space-sm) var(--space-xs) 0;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      vertical-align: middle;
+    }
+
+    .gloss th {
+      color: var(--text-muted);
+      font-size: var(--font-size-small);
+      font-weight: 700;
+      padding-bottom: var(--space-sm);
+    }
+
+    .gloss th:last-child,
+    .gloss td:last-child {
+      width: calc(148px * var(--ui-scale));
+      padding-right: 0;
+      white-space: nowrap;
+    }
+
+    .glossary-state .settings__footer {
+      justify-content: flex-start;
+    }
+
+    .glossary-state .is-commit {
+      margin-left: auto;
+    }
+
+    .banner--error {
+      background: color-mix(in srgb, var(--danger) 16%, var(--bg-card));
+      color: var(--text-error);
+      border: 1px solid var(--border-strong);
+    }
+
+    .banner--error .banner__icon {
+      color: var(--danger);
+    }
+  </style>
+</head>
+<body>
+  <a class="skip" href="#glossary">К глоссарию</a>
+  <div class="app settings">
+    <nav class="review" aria-label="Состояние макета">
+      <a data-state-link href="?state=empty">Пусто</a>
+      <a data-state-link href="?state=loading">Загрузка</a>
+      <a data-state-link href="?state=error">Ошибка</a>
+      <a data-state-link href="?state=ready" aria-current="page">Готово</a>
+    </nav>
+
+    <header class="toolbar">
+      <h1>Глоссарий</h1>
+    </header>
+
+    <main id="glossary" class="glossary-host">
+      <section data-state="empty" hidden>
+        <form class="glossary-state">
+          <div class="glossary-scroll">
+            <h2 id="empty-title">В глоссарии пока нет записей</h2>
+            <p class="settings__intro" id="empty-intro">Записи действуют на всю серию, род нужен для русского согласования.</p>
+            <hr class="settings__rule">
+            <table class="gloss" aria-labelledby="empty-title" aria-describedby="empty-intro">
+              <thead>
+                <tr>
+                  <th scope="col">Оригинал</th>
+                  <th scope="col">Перевод</th>
+                  <th scope="col">Род</th>
+                  <th scope="col">Заметка</th>
+                  <th scope="col">Действие</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+            <p id="empty-save-hint" class="field-hint">Сохранять пока нечего.</p>
+          </div>
+          <footer class="settings__footer">
+            <button type="button" class="btn btn-accent">
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#add"></use></svg>
+              Добавить строку
+            </button>
+            <button type="submit" class="btn btn-primary is-commit" disabled aria-describedby="empty-save-hint">Сохранить</button>
+          </footer>
+        </form>
+      </section>
+
+      <section data-state="loading" aria-busy="true" hidden>
+        <form class="glossary-state">
+          <div class="glossary-scroll">
+            <h2 id="load-title">Читаем глоссарий</h2>
+            <p class="settings__intro" id="load-intro">Записи действуют на всю серию, род нужен для русского согласования.</p>
+            <p class="field-hint" id="load-hint">
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#info"></use></svg>
+              Читаем файл глоссария серии.
+            </p>
+            <hr class="settings__rule">
+            <table class="gloss" aria-labelledby="load-title" aria-describedby="load-intro">
+              <thead>
+                <tr>
+                  <th scope="col">Оригинал</th>
+                  <th scope="col">Перевод</th>
+                  <th scope="col">Род</th>
+                  <th scope="col">Заметка</th>
+                  <th scope="col">Действие</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>
+                    <label class="sr-only" for="load-src-kirby">Оригинал, Kirby</label>
+                    <input id="load-src-kirby" class="input" type="text" value="Kirby" spellcheck="false" autocomplete="off" disabled>
+                  </td>
+                  <td>
+                    <label class="sr-only" for="load-dst-kirby">Перевод, Kirby</label>
+                    <input id="load-dst-kirby" class="input" type="text" value="Кирби" autocomplete="off" disabled>
+                  </td>
+                  <td>
+                    <label class="sr-only" for="load-gen-kirby">Род, Kirby</label>
+                    <select id="load-gen-kirby" class="select" aria-describedby="load-intro" disabled>
+                      <option value="m" selected>мужской</option>
+                      <option value="f">женский</option>
+                      <option value="n">средний</option>
+                      <option value="">не указан</option>
+                    </select>
+                  </td>
+                  <td>
+                    <label class="sr-only" for="load-note-kirby">Заметка, Kirby</label>
+                    <input id="load-note-kirby" class="input" type="text" value="имя героя, не склонять" autocomplete="off" disabled>
+                  </td>
+                  <td>
+                    <button type="button" class="btn btn-ghost" aria-label="Удалить Kirby" disabled>
+                      <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#delete"></use></svg>
+                      Удалить
+                    </button>
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <label class="sr-only" for="load-src-poppy">Оригинал, Poppy</label>
+                    <input id="load-src-poppy" class="input" type="text" value="Poppy" spellcheck="false" autocomplete="off" disabled>
+                  </td>
+                  <td>
+                    <label class="sr-only" for="load-dst-poppy">Перевод, Poppy</label>
+                    <input id="load-dst-poppy" class="input" type="text" value="Поппи" autocomplete="off" disabled>
+                  </td>
+                  <td>
+                    <label class="sr-only" for="load-gen-poppy">Род, Poppy</label>
+                    <select id="load-gen-poppy" class="select" aria-describedby="load-intro" disabled>
+                      <option value="m">мужской</option>
+                      <option value="f" selected>женский</option>
+                      <option value="n">средний</option>
+                      <option value="">не указан</option>
+                    </select>
+                  </td>
+                  <td>
+                    <label class="sr-only" for="load-note-poppy">Заметка, Poppy</label>
+                    <input id="load-note-poppy" class="input" type="text" value="подруга Кирби" autocomplete="off" disabled>
+                  </td>
+                  <td>
+                    <button type="button" class="btn btn-ghost" aria-label="Удалить Poppy" disabled>
+                      <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#delete"></use></svg>
+                      Удалить
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <footer class="settings__footer">
+            <button type="button" class="btn btn-accent" disabled>
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#add"></use></svg>
+              Добавить строку
+            </button>
+            <button type="submit" class="btn btn-primary is-commit" disabled aria-describedby="load-hint">Сохранить</button>
+          </footer>
+        </form>
+      </section>
+
+      <section data-state="error" hidden>
+        <form class="glossary-state">
+          <div class="glossary-scroll">
+            <h2 id="err-title">Не удалось сохранить</h2>
+            <p class="settings__intro" id="err-intro">Записи действуют на всю серию, род нужен для русского согласования.</p>
+            <div class="banner banner--error" id="err-reason" role="alert">
+              <svg class="icon banner__icon" aria-hidden="true"><use href="../icons/icons.svg#error"></use></svg>
+              <p class="banner__text">Файл глоссария открыт в другой программе и заблокирован.</p>
+            </div>
+            <p id="err-unsaved" class="field-hint">Строки на экране не записаны в файл.</p>
+            <hr class="settings__rule">
+            <table class="gloss" aria-labelledby="err-title" aria-describedby="err-intro">
+              <thead>
+                <tr>
+                  <th scope="col">Оригинал</th>
+                  <th scope="col">Перевод</th>
+                  <th scope="col">Род</th>
+                  <th scope="col">Заметка</th>
+                  <th scope="col">Действие</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>
+                    <label class="sr-only" for="err-src-kirby">Оригинал, Kirby</label>
+                    <input id="err-src-kirby" class="input" type="text" value="Kirby" spellcheck="false" autocomplete="off">
+                  </td>
+                  <td>
+                    <label class="sr-only" for="err-dst-kirby">Перевод, Kirby</label>
+                    <input id="err-dst-kirby" class="input" type="text" value="Кирби" autocomplete="off">
+                  </td>
+                  <td>
+                    <label class="sr-only" for="err-gen-kirby">Род, Kirby</label>
+                    <select id="err-gen-kirby" class="select" aria-describedby="err-intro">
+                      <option value="m" selected>мужской</option>
+                      <option value="f">женский</option>
+                      <option value="n">средний</option>
+                      <option value="">не указан</option>
+                    </select>
+                  </td>
+                  <td>
+                    <label class="sr-only" for="err-note-kirby">Заметка, Kirby</label>
+                    <input id="err-note-kirby" class="input" type="text" value="имя героя, не склонять" autocomplete="off">
+                  </td>
+                  <td>
+                    <button type="button" class="btn btn-ghost" aria-label="Удалить Kirby">
+                      <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#delete"></use></svg>
+                      Удалить
+                    </button>
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <label class="sr-only" for="err-src-poppy">Оригинал, Poppy</label>
+                    <input id="err-src-poppy" class="input" type="text" value="Poppy" spellcheck="false" autocomplete="off">
+                  </td>
+                  <td>
+                    <label class="sr-only" for="err-dst-poppy">Перевод, Poppy</label>
+                    <input id="err-dst-poppy" class="input" type="text" value="Поппи" autocomplete="off">
+                  </td>
+                  <td>
+                    <label class="sr-only" for="err-gen-poppy">Род, Poppy</label>
+                    <select id="err-gen-poppy" class="select" aria-describedby="err-intro">
+                      <option value="m">мужской</option>
+                      <option value="f" selected>женский</option>
+                      <option value="n">средний</option>
+                      <option value="">не указан</option>
+                    </select>
+                  </td>
+                  <td>
+                    <label class="sr-only" for="err-note-poppy">Заметка, Poppy</label>
+                    <input id="err-note-poppy" class="input" type="text" value="подруга Кирби" autocomplete="off">
+                  </td>
+                  <td>
+                    <button type="button" class="btn btn-ghost" aria-label="Удалить Poppy">
+                      <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#delete"></use></svg>
+                      Удалить
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <footer class="settings__footer">
+            <button type="button" class="btn btn-accent">
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#add"></use></svg>
+              Добавить строку
+            </button>
+            <button type="submit" class="btn btn-primary is-commit" aria-describedby="err-reason">Повторить сохранение</button>
+          </footer>
+        </form>
+      </section>
+
+      <section data-state="ready">
+        <form class="glossary-state">
+          <div class="glossary-scroll">
+            <h2 id="ok-title">Глоссарий серии</h2>
+            <p class="settings__intro" id="ok-intro">Записи действуют на всю серию, род нужен для русского согласования.</p>
+            <hr class="settings__rule">
+            <table class="gloss" aria-labelledby="ok-title" aria-describedby="ok-intro">
+              <thead>
+                <tr>
+                  <th scope="col">Оригинал</th>
+                  <th scope="col">Перевод</th>
+                  <th scope="col">Род</th>
+                  <th scope="col">Заметка</th>
+                  <th scope="col">Действие</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>
+                    <label class="sr-only" for="ok-src-kirby">Оригинал, Kirby</label>
+                    <input id="ok-src-kirby" class="input" type="text" value="Kirby" spellcheck="false" autocomplete="off">
+                  </td>
+                  <td>
+                    <label class="sr-only" for="ok-dst-kirby">Перевод, Kirby</label>
+                    <input id="ok-dst-kirby" class="input" type="text" value="Кирби" autocomplete="off">
+                  </td>
+                  <td>
+                    <label class="sr-only" for="ok-gen-kirby">Род, Kirby</label>
+                    <select id="ok-gen-kirby" class="select" aria-describedby="ok-intro">
+                      <option value="m" selected>мужской</option>
+                      <option value="f">женский</option>
+                      <option value="n">средний</option>
+                      <option value="">не указан</option>
+                    </select>
+                  </td>
+                  <td>
+                    <label class="sr-only" for="ok-note-kirby">Заметка, Kirby</label>
+                    <input id="ok-note-kirby" class="input" type="text" value="имя героя, не склонять" autocomplete="off">
+                  </td>
+                  <td>
+                    <button type="button" class="btn btn-ghost" aria-label="Удалить Kirby">
+                      <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#delete"></use></svg>
+                      Удалить
+                    </button>
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <label class="sr-only" for="ok-src-poppy">Оригинал, Poppy</label>
+                    <input id="ok-src-poppy" class="input" type="text" value="Poppy" spellcheck="false" autocomplete="off">
+                  </td>
+                  <td>
+                    <label class="sr-only" for="ok-dst-poppy">Перевод, Poppy</label>
+                    <input id="ok-dst-poppy" class="input" type="text" value="Поппи" autocomplete="off">
+                  </td>
+                  <td>
+                    <label class="sr-only" for="ok-gen-poppy">Род, Poppy</label>
+                    <select id="ok-gen-poppy" class="select" aria-describedby="ok-intro">
+                      <option value="m">мужской</option>
+                      <option value="f" selected>женский</option>
+                      <option value="n">средний</option>
+                      <option value="">не указан</option>
+                    </select>
+                  </td>
+                  <td>
+                    <label class="sr-only" for="ok-note-poppy">Заметка, Poppy</label>
+                    <input id="ok-note-poppy" class="input" type="text" value="подруга Кирби" autocomplete="off">
+                  </td>
+                  <td>
+                    <button type="button" class="btn btn-ghost" aria-label="Удалить Poppy">
+                      <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#delete"></use></svg>
+                      Удалить
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <p id="ok-save-hint" class="field-hint">Сохранение запишет эти строки в файл глоссария серии.</p>
+          </div>
+          <footer class="settings__footer">
+            <button type="button" class="btn btn-accent">
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#add"></use></svg>
+              Добавить строку
+            </button>
+            <button type="submit" class="btn btn-primary is-commit" aria-describedby="ok-save-hint">Сохранить</button>
+          </footer>
+        </form>
+      </section>
+    </main>
+  </div>
+  <script>
+  (function () {
+    var known = { empty: true, loading: true, error: true, ready: true };
+    var state = "ready";
+    try {
+      var picked = new URLSearchParams(location.search).get("state");
+      if (picked && known[picked]) state = picked;
+    } catch (err) {}
+    document.querySelectorAll("[data-state]").forEach(function (block) {
+      block.hidden = block.getAttribute("data-state") !== state;
+    });
+    var theme = document.documentElement.getAttribute("data-theme") || "system";
+    var scale = 100;
+    var raw = document.documentElement.style.getPropertyValue("--ui-scale");
+    if (raw) scale = Math.round(parseFloat(raw) * 100);
+    document.querySelectorAll("a[data-state-link]").forEach(function (link) {
+      var parts = link.getAttribute("href").split("?");
+      var href = parts[0];
+      var linkState = new URLSearchParams(parts[1] || "").get("state") || "ready";
+      var q = ["state=" + linkState];
+      if (theme === "dark" || theme === "light") q.push("theme=" + theme);
+      if (scale !== 100) q.push("scale=" + scale);
+      link.setAttribute("href", (href ? href : "") + "?" + q.join("&"));
+      if (linkState === state) link.setAttribute("aria-current", "page");
+      else link.removeAttribute("aria-current");
+    });
+    document.querySelectorAll("form").forEach(function (form) {
+      form.addEventListener("submit", function (event) {
+        event.preventDefault();
+      });
+    });
+  })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Перевод</title>
+  <style>
+    body {
+      margin: 0;
+      min-width: 260px;
+      padding: 12px;
+      font-family: system-ui, "Segoe UI", sans-serif;
+      font-size: 14px;
+    }
+    label, button, select, p {
+      display: block;
+      margin: 8px 0 0;
+    }
+    button, select {
+      font: inherit;
+    }
+    button {
+      padding: 6px 10px;
+    }
+    .check {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    #status {
+      min-height: 1.2em;
+    }
+  </style>
+</head>
+<body>
+  <button id="translate-all" type="button">Перевести все на странице</button>
+  <label for="source">Язык источника</label>
+  <select id="source">
+    <option value="en" selected>en</option>
+    <option value="ru">ru</option>
+  </select>
+  <label for="target">Язык перевода</label>
+  <select id="target">
+    <option value="ru" selected>ru</option>
+    <option value="en">en</option>
+  </select>
+  <label class="check" for="auto"><input id="auto" type="checkbox"><span>Автоперевод на этом сайте</span></label>
+  <button id="open-options" type="button">Настройки</button>
+  <p id="status"></p>
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>
+  (function () {
+    var theme = "";
+    var scale = "";
+    try {
+      var params = new URLSearchParams(location.search);
+      theme = params.get("theme") || "";
+      scale = params.get("scale") || "";
+      if (!theme) theme = localStorage.getItem("ilt-mockup-theme") || "";
+      if (!scale) scale = localStorage.getItem("ilt-mockup-scale") || "";
+    } catch (err) {}
+    if (theme === "dark" || theme === "light") {
+      document.documentElement.setAttribute("data-theme", theme);
+    }
+    var n = parseInt(scale, 10);
+    if (n >= 100 && n <= 150 && n !== 100) {
+      document.documentElement.style.setProperty("--ui-scale", String(n / 100));
+    }
+  })();
+  </script>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>Image Localization Tool — макеты</title>
+  <link rel="stylesheet" href="../css/tokens.css">
+  <link rel="stylesheet" href="../css/base.css">
+  <link rel="stylesheet" href="../css/components.css">
+</head>
+<body class="is-scroll">
+  <main class="hub">
+    <h1>Image Localization Tool</h1>
+    <p class="hub__lead">Статичные экраны этапа 0. Открываются из проводника, без сборщика. Тема макета пишется в localStorage.</p>
+
+    <fieldset class="hub__theme">
+      <legend>Тема</legend>
+      <label class="choice"><input type="radio" name="theme" value="dark"> Тёмная</label>
+      <label class="choice"><input type="radio" name="theme" value="light"> Светлая</label>
+      <label class="choice"><input type="radio" name="theme" value="system" checked> Как в системе</label>
+    </fieldset>
+
+    <nav aria-label="Экраны">
+      <ul class="hub__list">
+        <li><a data-screen href="main-empty.html">Пустое окно<span>Перетаскивание, открыть файлы или папку, недавние проекты</span></a></li>
+        <li><a data-screen href="main-batch.html">Глава в работе<span>Статусы страниц, баннер LLM, кнопка «Стоп», меню страницы</span></a></li>
+        <li><a data-screen href="main-editor.html">Редактор<span>Регион, кисть, шторка сравнения, слои рамок и маски</span></a></li>
+        <li><a data-screen href="settings.html">Настройки<span>Восемь разделов, черновик «ОК / Применить / Отмена», предпросмотр темы</span></a></li>
+        <li><a data-screen href="first-run.html">Первый запуск<span>Мастер из четырёх шагов, активен шаг «Модели»</span></a></li>
+        <li><a data-screen href="export.html">Экспорт<span>Какие страницы, папка translated, JPG, совпадение имён</span></a></li>
+        <li><a data-screen href="dialogs.html">Диалоги<span>Горячие клавиши, закрытие, выбор модели, ошибка запуска</span></a></li>
+        <li><a data-screen href="style.html">Стиль<span>Шрифт с образцом строки, заливка и обводка, искривление, стили проекта</span></a></li>
+        <li><a data-screen href="sfx.html">Звуки<span>Отдельная рамка звука, подбор стиля заново, не трогать или заменить</span></a></li>
+        <li><a data-screen href="batch-run.html">Пакетный прогон<span>Прогресс и ETA, счётчики, фильтры проблем, главы, кнопка «Продолжить»</span></a></li>
+        <li><a data-screen href="glossary.html">Глоссарий<span>Таблица: оригинал, перевод, род и заметка на всю серию</span></a></li>
+        <li><a data-screen href="remote.html">Доступ по сети<span>Адреса в LAN, код из шести цифр, устройства, HTTP без шифрования</span></a></li>
+      </ul>
+    </nav>
+
+    <p class="hub__note">Вид «Результат» показывает тот же test-1.jpg: готового перевода на диске нет. Миниатюра второй страницы — test-2.png.</p>
+  </main>
+  <script>
+  (function () {
+    var key = "ilt-mockup-theme";
+    function currentTheme() {
+      return document.documentElement.getAttribute("data-theme") || "system";
+    }
+    function applyTheme(theme) {
+      if (theme === "dark" || theme === "light") {
+        document.documentElement.setAttribute("data-theme", theme);
+      } else {
+        document.documentElement.removeAttribute("data-theme");
+        theme = "system";
+      }
+      try { localStorage.setItem(key, theme); } catch (err) {}
+      document.querySelectorAll('input[name="theme"]').forEach(function (input) {
+        input.checked = input.value === theme;
+      });
+      var scale = 100;
+      var raw = document.documentElement.style.getPropertyValue("--ui-scale");
+      if (raw) scale = Math.round(parseFloat(raw) * 100);
+      document.querySelectorAll("a[data-screen]").forEach(function (link) {
+        var href = link.getAttribute("href").split("?")[0];
+        var q = [];
+        if (theme === "dark" || theme === "light") q.push("theme=" + theme);
+        if (scale !== 100) q.push("scale=" + scale);
+        link.setAttribute("href", q.length ? href + "?" + q.join("&") : href);
+      });
+    }
+    document.querySelectorAll('input[name="theme"]').forEach(function (input) {
+      input.addEventListener("change", function () {
+        if (input.checked) applyTheme(input.value);
+      });
+    });
+    applyTheme(currentTheme());
+  })();
+  </script>
+</body>
+</html>

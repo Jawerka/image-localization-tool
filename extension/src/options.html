@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Настройки</title>
+  <style>
+    body {
+      margin: 24px;
+      max-width: 420px;
+      font-family: system-ui, "Segoe UI", sans-serif;
+      font-size: 15px;
+    }
+    label, input, p {
+      display: block;
+    }
+    label {
+      margin: 12px 0 4px;
+    }
+    input, button {
+      font: inherit;
+    }
+    input {
+      box-sizing: border-box;
+      width: 100%;
+      padding: 6px 8px;
+    }
+    .actions {
+      margin-top: 12px;
+    }
+    button {
+      margin-right: 8px;
+      padding: 6px 12px;
+    }
+    #status {
+      min-height: 1.2em;
+    }
+  </style>
+</head>
+<body>
+  <label for="server-url">Адрес сервера</label>
+  <input id="server-url" type="text" value="http://127.0.0.1:8765" placeholder="http://127.0.0.1:8765" autocomplete="off" spellcheck="false">
+  <label for="pair-code">Код сопряжения</label>
+  <input id="pair-code" type="text" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="off">
+  <div class="actions">
+    <button id="pair" type="button">Сопрячь</button>
+    <button id="check" type="button">Проверить связь</button>
+  </div>
+  <p id="status"></p>
+  <script src="options.js"></script>
+</body>
+</html>

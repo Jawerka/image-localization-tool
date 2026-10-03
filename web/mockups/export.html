@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>
+  (function () {
+    var theme = "";
+    var scale = "";
+    try {
+      var params = new URLSearchParams(location.search);
+      theme = params.get("theme") || "";
+      scale = params.get("scale") || "";
+      if (!theme) theme = localStorage.getItem("ilt-mockup-theme") || "";
+      if (!scale) scale = localStorage.getItem("ilt-mockup-scale") || "";
+    } catch (err) {}
+    if (theme === "dark" || theme === "light") {
+      document.documentElement.setAttribute("data-theme", theme);
+    }
+    var n = parseInt(scale, 10);
+    if (n >= 100 && n <= 150 && n !== 100) {
+      document.documentElement.style.setProperty("--ui-scale", String(n / 100));
+    }
+  })();
+  </script>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>Image Localization Tool — экспорт</title>
+  <link rel="stylesheet" href="../css/tokens.css">
+  <link rel="stylesheet" href="../css/base.css">
+  <link rel="stylesheet" href="../css/components.css">
+  <link rel="stylesheet" href="../css/dialogs.css">
+</head>
+<body>
+  <main class="app dialog-host">
+    <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="export-title">
+      <div class="dialog__header">
+        <h1 id="export-title">Экспорт</h1>
+        <button type="button" class="btn btn-ghost btn-icon dialog__close" aria-label="Закрыть">
+          <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#close"></use></svg>
+        </button>
+      </div>
+      <div class="dialog__body">
+        <fieldset>
+          <legend>Какие страницы</legend>
+          <div class="choice-stack">
+            <label class="choice"><input type="radio" name="export-which" value="all"> Все (12)</label>
+            <label class="choice"><input type="radio" name="export-which" value="ready" checked> Только готовые (8)</label>
+            <label class="choice"><input type="radio" name="export-which" value="selected"> Выбранные (1)</label>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Что сохранить</legend>
+          <div class="choice-stack">
+            <label class="choice"><input type="radio" name="export-content" value="result" checked> Перевод</label>
+            <label class="choice"><input type="radio" name="export-content" value="clean"> Очищенная страница</label>
+            <label class="choice"><input type="radio" name="export-content" value="both"> Оба (перевод и очищенная)</label>
+          </div>
+          <p class="field-hint">Очищенная страница — кадр после ретуши маски, до вёрстки перевода. При «Оба» очищенный файл получает суффикс -clean.</p>
+        </fieldset>
+
+        <div class="field">
+          <label class="field__label" for="export-dir">Папка</label>
+          <div class="input-row">
+            <input id="export-dir" class="input" type="text" value="D:\Manga\Kirby\ch12\translated" spellcheck="false">
+            <button type="button" class="btn btn-accent">Обзор…</button>
+          </div>
+          <p class="field-hint">По умолчанию подпапка translated рядом с оригиналами.</p>
+        </div>
+
+        <div class="field">
+          <label class="field__label" for="export-format">Формат</label>
+          <select id="export-format" class="select">
+            <option value="png">PNG</option>
+            <option value="jpg" selected>JPG</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label class="field__label" for="export-quality">Качество JPG</label>
+          <div class="input-row">
+            <input id="export-quality" type="range" min="1" max="100" value="90">
+            <span>90</span>
+          </div>
+          <p class="field-hint">Для PNG качество не используется.</p>
+        </div>
+
+        <fieldset>
+          <legend>Совпадение имён</legend>
+          <div class="choice-stack">
+            <label class="choice"><input type="radio" name="export-clash" value="overwrite"> Перезаписать</label>
+            <label class="choice"><input type="radio" name="export-clash" value="suffix" checked> Добавить номер (файл_2.jpg)</label>
+            <label class="choice"><input type="radio" name="export-clash" value="skip"> Пропустить</label>
+          </div>
+        </fieldset>
+      </div>
+      <div class="dialog__footer">
+        <button type="button" class="btn btn-primary">
+          <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#export"></use></svg>
+          Экспорт
+        </button>
+        <button type="button" class="btn btn-accent">Отмена</button>
+      </div>
+    </div>
+  </main>
+</body>
+</html>

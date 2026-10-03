@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>
+  (function () {
+    var theme = "";
+    var scale = "";
+    try {
+      var params = new URLSearchParams(location.search);
+      theme = params.get("theme") || "";
+      scale = params.get("scale") || "";
+      if (!theme) theme = localStorage.getItem("ilt-mockup-theme") || "";
+      if (!scale) scale = localStorage.getItem("ilt-mockup-scale") || "";
+    } catch (err) {}
+    if (theme === "dark" || theme === "light") {
+      document.documentElement.setAttribute("data-theme", theme);
+    }
+    var n = parseInt(scale, 10);
+    if (n >= 100 && n <= 150 && n !== 100) {
+      document.documentElement.style.setProperty("--ui-scale", String(n / 100));
+    }
+  })();
+  </script>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>Image Localization Tool — доступ по сети</title>
+  <link rel="stylesheet" href="../css/tokens.css">
+  <link rel="stylesheet" href="../css/base.css">
+  <link rel="stylesheet" href="../css/components.css">
+  <link rel="stylesheet" href="../css/settings.css">
+  <style>
+    body.mock-remote {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+    }
+
+    .mock-remote .app {
+      flex: 1 1 auto;
+      height: auto;
+      min-height: 0;
+    }
+
+    .review-nav {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: var(--space-sm);
+      flex: 0 0 auto;
+      padding: var(--space-sm) var(--space);
+      background: var(--bg-card);
+      color: var(--text-primary);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .review-nav a {
+      color: var(--text-muted);
+      padding: var(--space-xs) var(--space-sm);
+      border: 1px solid transparent;
+    }
+
+    .review-nav a[aria-current="page"] {
+      color: var(--text-primary);
+      font-weight: 700;
+      border-color: var(--border);
+    }
+
+    .remote-form {
+      align-items: start;
+    }
+
+    .remote-status {
+      display: flex;
+      align-items: center;
+      gap: var(--space-sm);
+      margin: var(--space-sm) 0 var(--space-xs);
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    .remote-status--bad {
+      color: var(--danger);
+    }
+
+    .remote-lead {
+      margin: 0 0 var(--space-sm);
+      color: var(--text-primary);
+    }
+
+    .remote-fail {
+      margin: 0 0 var(--space-sm);
+      color: var(--danger);
+    }
+
+    .remote-addrs {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space);
+      min-width: 0;
+    }
+
+    .remote-url__text {
+      margin: 0 0 var(--space-xs);
+      font-family: var(--font-editor);
+      color: var(--text-primary);
+    }
+
+    .pair-code {
+      display: block;
+      width: 100%;
+      margin: 0;
+      padding: var(--space);
+      font-family: var(--font-editor);
+      font-size: 2rem;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      line-height: 1.2;
+      text-align: center;
+      color: var(--text-primary);
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+    }
+
+    .remote-block {
+      margin-top: var(--space);
+    }
+
+    .remote-subhead {
+      margin: 0 0 var(--space-xs);
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    .device-list,
+    .request-log {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .device-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--space);
+      padding: var(--space-sm) 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .device-row__main {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-xs);
+      min-width: 0;
+    }
+
+    .device-row__name {
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    .device-row__meta {
+      color: var(--text-muted);
+    }
+
+    .device-row__addr {
+      font-family: var(--font-editor);
+      color: var(--text-primary);
+    }
+
+    .request-log li {
+      padding: var(--space-xs) 0;
+      border-bottom: 1px solid var(--border);
+      color: var(--text-primary);
+    }
+
+    .remote-revoke {
+      color: var(--danger);
+    }
+
+    .remote-warn {
+      margin-top: var(--space);
+      border: 1px solid var(--border);
+      align-items: flex-start;
+    }
+  </style>
+</head>
+<body class="mock-remote">
+  <nav class="review-nav" aria-label="Состояние макета">
+    <a data-state-link="empty" href="remote.html?state=empty">Пусто</a>
+    <a data-state-link="loading" href="remote.html?state=loading">Загрузка</a>
+    <a data-state-link="error" href="remote.html?state=error">Ошибка</a>
+    <a data-state-link="ready" href="remote.html?state=ready" aria-current="page">Готово</a>
+  </nav>
+
+  <div class="app settings" data-role="settings-window">
+    <header class="toolbar">
+      <h1>Настройки</h1>
+    </header>
+
+    <div class="settings__body">
+      <nav aria-label="Разделы настроек">
+        <div class="settings__nav" role="tablist" aria-orientation="vertical">
+          <button type="button" class="btn" role="tab" id="nav-appearance" data-tab="appearance" aria-selected="false" aria-controls="sec-appearance">Внешний вид</button>
+          <button type="button" class="btn" role="tab" id="nav-translation" data-tab="translation" aria-selected="false" aria-controls="sec-translation">Перевод</button>
+          <button type="button" class="btn" role="tab" id="nav-llm" data-tab="llm" aria-selected="false" aria-controls="sec-llm">Сервер LLM</button>
+          <button type="button" class="btn" role="tab" id="nav-processing" data-tab="processing" aria-selected="false" aria-controls="sec-processing">Обработка</button>
+          <button type="button" class="btn" role="tab" id="nav-typeset" data-tab="typeset" aria-selected="false" aria-controls="sec-typeset">Вёрстка</button>
+          <button type="button" class="btn" role="tab" id="nav-export" data-tab="export" aria-selected="false" aria-controls="sec-export">Экспорт</button>
+          <button type="button" class="btn" role="tab" id="nav-models" data-tab="models" aria-selected="false" aria-controls="sec-models">Модели</button>
+          <button type="button" class="btn" role="tab" id="nav-network" data-tab="network" aria-selected="true" aria-controls="sec-network">Сеть</button>
+          <button type="button" class="btn" role="tab" id="nav-about" data-tab="about" aria-selected="false" aria-controls="sec-about">О программе</button>
+        </div>
+      </nav>
+
+      <div class="settings__content">
+        <section class="settings__section" id="sec-network" role="tabpanel" aria-labelledby="nav-network">
+          <h2>Доступ по сети</h2>
+
+          <div data-state="empty" hidden>
+            <h3 class="remote-status">Доступ выключен</h3>
+            <p class="settings__intro">Другие компьютеры в сети не видят этот проект.</p>
+            <hr class="settings__rule">
+            <div class="form remote-form">
+              <label class="choice form__full">
+                <input id="lan-toggle-empty" type="checkbox">
+                Разрешить доступ в локальной сети
+              </label>
+            </div>
+          </div>
+
+          <div data-state="loading" hidden aria-busy="true">
+            <h3 class="remote-status">Запускаем доступ</h3>
+            <p class="remote-lead">Открываем порт 8765.</p>
+            <hr class="settings__rule">
+            <div class="form remote-form">
+              <label class="choice form__full">
+                <input id="lan-toggle-loading" type="checkbox" checked disabled>
+                Разрешить доступ в локальной сети
+              </label>
+            </div>
+          </div>
+
+          <div data-state="error" hidden>
+            <h3 class="remote-status remote-status--bad">
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#error"></use></svg>
+              Порт занят
+            </h3>
+            <p class="remote-fail" id="port-error">Порт 8765 уже занят другой программой.</p>
+            <hr class="settings__rule">
+            <div class="form remote-form">
+              <label class="choice form__full">
+                <input id="lan-toggle-error" type="checkbox" aria-describedby="port-error">
+                Разрешить доступ в локальной сети
+              </label>
+              <div class="form__actions form__full">
+                <button type="button" class="btn btn-accent">Повторить</button>
+              </div>
+            </div>
+            <div class="banner banner--warning remote-warn">
+              <svg class="icon banner__icon" aria-hidden="true"><use href="../icons/icons.svg#warning"></use></svg>
+              <p class="banner__text">Брандмауэр Windows может блокировать порт 8765, пока для программы не разрешены входящие подключения в частной сети. В локальной сети страницы открываются по обычному HTTP, без шифрования.</p>
+            </div>
+          </div>
+
+          <div data-state="ready">
+            <h3 class="remote-status">
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg>
+              Доступ включён
+            </h3>
+            <hr class="settings__rule">
+            <div class="form remote-form">
+              <label class="choice form__full">
+                <input id="lan-toggle-ready" type="checkbox" checked>
+                Разрешить доступ в локальной сети
+              </label>
+
+              <span class="form__label" id="addr-label">Адреса в сети</span>
+              <div class="remote-addrs" role="group" aria-labelledby="addr-label">
+                <div class="remote-url">
+                  <p class="remote-url__text">http://192.168.1.24:8765</p>
+                  <input id="lan-url-1" class="input" type="text" readonly spellcheck="false" value="http://192.168.1.24:8765" aria-label="Скопировать http://192.168.1.24:8765">
+                </div>
+                <div class="remote-url">
+                  <p class="remote-url__text">http://10.0.0.8:8765</p>
+                  <input id="lan-url-2" class="input" type="text" readonly spellcheck="false" value="http://10.0.0.8:8765" aria-label="Скопировать http://10.0.0.8:8765">
+                </div>
+              </div>
+
+              <label class="form__label form__full" for="pair-code">Код подключения</label>
+              <output class="pair-code form__full" id="pair-code" tabindex="0" aria-describedby="code-hint">482 913</output>
+              <p class="field-hint form__full" id="code-hint"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#info"></use></svg>Код показывают на этом компьютере, второе устройство вводит его само.</p>
+            </div>
+
+            <div class="remote-block">
+              <h4 class="remote-subhead" id="devices-heading">Устройства</h4>
+              <ul class="device-list" aria-labelledby="devices-heading">
+                <li class="device-row">
+                  <div class="device-row__main">
+                    <span class="device-row__name">Ноутбук в гостиной</span>
+                    <span class="device-row__meta"><span class="device-row__addr">192.168.1.41</span> · подключён сегодня</span>
+                  </div>
+                  <button type="button" class="btn btn-ghost remote-revoke" aria-label="Отозвать доступ: Ноутбук в гостиной">
+                    <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#delete"></use></svg>
+                    Отозвать
+                  </button>
+                </li>
+              </ul>
+            </div>
+
+            <div class="remote-block">
+              <h4 class="remote-subhead" id="log-heading">Последние запросы</h4>
+              <ul class="request-log" aria-labelledby="log-heading">
+                <li>14:02 — Ноутбук в гостиной открыл страницу 006.jpg</li>
+                <li>13:48 — Ноутбук в гостиной открыл страницу 005.jpg</li>
+                <li>13:41 — Ноутбук в гостиной открыл страницу 004.jpg</li>
+              </ul>
+            </div>
+
+            <div class="banner banner--warning remote-warn">
+              <svg class="icon banner__icon" aria-hidden="true"><use href="../icons/icons.svg#warning"></use></svg>
+              <p class="banner__text">Брандмауэр Windows может блокировать порт 8765, пока для программы не разрешены входящие подключения в частной сети. В локальной сети страницы открываются по обычному HTTP, без шифрования.</p>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <footer class="settings__footer">
+      <button type="button" class="btn btn-primary">ОК</button>
+      <button type="button" class="btn btn-accent">Применить</button>
+      <button type="button" class="btn btn-accent">Отмена</button>
+    </footer>
+  </div>
+
+  <script>
+  (function () {
+    var known = { empty: 1, loading: 1, error: 1, ready: 1 };
+    var state = "ready";
+    try {
+      var asked = new URLSearchParams(location.search).get("state");
+      if (asked && known[asked]) state = asked;
+    } catch (err) {}
+
+    document.querySelectorAll("[data-state]").forEach(function (block) {
+      if (block.getAttribute("data-state") === state) block.removeAttribute("hidden");
+      else block.setAttribute("hidden", "");
+    });
+
+    var theme = document.documentElement.getAttribute("data-theme") || "";
+    var scale = 100;
+    var raw = document.documentElement.style.getPropertyValue("--ui-scale");
+    if (raw) scale = Math.round(parseFloat(raw) * 100);
+
+    document.querySelectorAll("a[data-state-link]").forEach(function (link) {
+      var name = link.getAttribute("data-state-link");
+      var href = link.getAttribute("href").split("?")[0];
+      var q = ["state=" + name];
+      if (theme === "dark" || theme === "light") q.push("theme=" + theme);
+      if (scale !== 100) q.push("scale=" + scale);
+      link.setAttribute("href", href + "?" + q.join("&"));
+      if (name === state) link.setAttribute("aria-current", "page");
+      else link.removeAttribute("aria-current");
+    });
+  })();
+  </script>
+</body>
+</html>

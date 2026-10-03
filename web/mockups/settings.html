@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>
+  (function () {
+    var theme = "";
+    var scale = "";
+    try {
+      var params = new URLSearchParams(location.search);
+      theme = params.get("theme") || "";
+      scale = params.get("scale") || "";
+      if (!theme) theme = localStorage.getItem("ilt-mockup-theme") || "";
+      if (!scale) scale = localStorage.getItem("ilt-mockup-scale") || "";
+    } catch (err) {}
+    if (theme === "dark" || theme === "light") {
+      document.documentElement.setAttribute("data-theme", theme);
+    }
+    var n = parseInt(scale, 10);
+    if (n >= 100 && n <= 150 && n !== 100) {
+      document.documentElement.style.setProperty("--ui-scale", String(n / 100));
+    }
+  })();
+  </script>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>Image Localization Tool — настройки</title>
+  <link rel="stylesheet" href="../css/tokens.css">
+  <link rel="stylesheet" href="../css/base.css">
+  <link rel="stylesheet" href="../css/components.css">
+  <link rel="stylesheet" href="../css/settings.css">
+</head>
+<body>
+  <div class="app settings" data-role="settings-window">
+    <header class="toolbar">
+      <h1>Настройки</h1>
+    </header>
+
+    <div class="settings__body" data-tabs>
+      <nav aria-label="Разделы настроек">
+        <div class="settings__nav" role="tablist" aria-orientation="vertical">
+          <button type="button" class="btn" role="tab" id="nav-appearance" data-tab="appearance" aria-selected="true" aria-controls="sec-appearance">Внешний вид</button>
+          <button type="button" class="btn" role="tab" id="nav-translation" data-tab="translation" aria-selected="false" aria-controls="sec-translation">Перевод</button>
+          <button type="button" class="btn" role="tab" id="nav-llm" data-tab="llm" aria-selected="false" aria-controls="sec-llm">Сервер LLM</button>
+          <button type="button" class="btn" role="tab" id="nav-processing" data-tab="processing" aria-selected="false" aria-controls="sec-processing">Обработка</button>
+          <button type="button" class="btn" role="tab" id="nav-typeset" data-tab="typeset" aria-selected="false" aria-controls="sec-typeset">Вёрстка</button>
+          <button type="button" class="btn" role="tab" id="nav-export" data-tab="export" aria-selected="false" aria-controls="sec-export">Экспорт</button>
+          <button type="button" class="btn" role="tab" id="nav-models" data-tab="models" aria-selected="false" aria-controls="sec-models">Модели</button>
+          <button type="button" class="btn" role="tab" id="nav-about" data-tab="about" aria-selected="false" aria-controls="sec-about">О программе</button>
+        </div>
+      </nav>
+
+      <div class="settings__content">
+        <section class="settings__section" id="sec-appearance" role="tabpanel" data-tabpanel="appearance" aria-labelledby="nav-appearance">
+          <h2>Внешний вид</h2>
+          <p class="settings__intro">Окно обновляется сразу, чтобы сравнить темы до нажатия «ОК».</p>
+          <hr class="settings__rule">
+          <div class="form">
+            <span class="form__label" id="theme-label">Тема</span>
+            <div class="choice-col" role="radiogroup" aria-labelledby="theme-label">
+              <label class="choice"><input type="radio" name="theme" value="dark"> Тёмная</label>
+              <label class="choice"><input type="radio" name="theme" value="light"> Светлая</label>
+              <label class="choice"><input type="radio" name="theme" value="system" checked> Как в системе</label>
+            </div>
+
+            <label class="form__label" for="ui-scale">Масштаб интерфейса</label>
+            <div class="scale-row">
+              <input id="ui-scale" type="range" min="100" max="150" step="1" value="100">
+              <span id="ui-scale-value">100 %</span>
+            </div>
+            <p class="field-hint form__full">От 100 до 150 %.</p>
+
+            <label class="choice form__full">
+              <input type="checkbox" checked>
+              Однобуквенные клавиши (V, R, B, E, M, L, 1–3)
+            </label>
+            <p class="field-hint form__full">Не срабатывают, пока курсор в поле ввода. Можно выключить.</p>
+          </div>
+        </section>
+
+        <section class="settings__section" id="sec-translation" role="tabpanel" data-tabpanel="translation" aria-labelledby="nav-translation" hidden>
+          <h2>Перевод</h2>
+          <p class="settings__intro">Языки по умолчанию для новой главы. На странице их можно сменить в тулбаре.</p>
+          <hr class="settings__rule">
+          <div class="form">
+            <label class="form__label" for="src-lang">Язык оригинала</label>
+            <select id="src-lang" class="select">
+              <option value="en" selected>en — English</option>
+              <option value="ja">ja — 日本語</option>
+              <option value="ko">ko — 한국어</option>
+              <option value="zh">zh — 中文</option>
+            </select>
+            <label class="form__label" for="dst-lang">Язык перевода</label>
+            <select id="dst-lang" class="select">
+              <option value="ru" selected>ru — Русский</option>
+              <option value="en">en — English</option>
+              <option value="uk">uk — Українська</option>
+            </select>
+            <label class="form__label" for="reading">Порядок чтения</label>
+            <select id="reading" class="select">
+              <option value="auto" selected>Авто</option>
+              <option value="ltr">Слева направо</option>
+              <option value="rtl">Справа налево</option>
+            </select>
+            <label class="choice form__full"><input type="checkbox"> Переводить звуки</label>
+            <label class="form__label" for="glossary">Глоссарий</label>
+            <div class="input-row">
+              <input id="glossary" class="input" type="text" value="D:\Manga\glossary.txt" spellcheck="false">
+              <button type="button" class="btn btn-accent">Обзор…</button>
+            </div>
+            <p class="field-hint form__full">Редактора глоссария нет: здесь только путь к файлу.</p>
+          </div>
+        </section>
+
+        <section class="settings__section" id="sec-llm" role="tabpanel" data-tabpanel="llm" aria-labelledby="nav-llm" hidden>
+          <h2>Сервер LLM</h2>
+          <p class="settings__intro">Свой OpenAI-совместимый сервер: LM Studio, llama.cpp или Ollama. Пустой адрес — офлайн RapidOCR и Argos.</p>
+          <hr class="settings__rule">
+          <div class="form">
+            <label class="form__label" for="llm-url">Адрес</label>
+            <input id="llm-url" class="input" type="url" value="http://127.0.0.1:1234/v1" placeholder="http://127.0.0.1:1234/v1" spellcheck="false">
+            <label class="form__label" for="llm-model">Модель</label>
+            <div class="input-row">
+              <input id="llm-model" class="input" type="text" value="qwen2.5-vl-7b" spellcheck="false">
+              <button type="button" class="btn btn-accent">Список…</button>
+            </div>
+            <label class="form__label" for="api-key">Ключ API</label>
+            <div class="input-row">
+              <input id="api-key" class="input" type="password" value="" placeholder="не задан" readonly>
+              <button type="button" class="btn btn-accent">Задать…</button>
+            </div>
+            <p class="field-hint form__full"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#info"></use></svg>Хранится в диспетчере учётных данных Windows, не в JSON.</p>
+            <label class="form__label" for="llm-timeout">Таймаут, с</label>
+            <input id="llm-timeout" class="input" type="number" min="1" value="300">
+            <label class="choice form__full"><input type="checkbox"> Думать дольше (медленнее)</label>
+            <div class="form__actions form__full">
+              <button type="button" class="btn btn-accent">Проверить</button>
+            </div>
+            <p class="field-hint form__full">Проверка заодно убеждается, что модель принимает картинки.</p>
+          </div>
+        </section>
+
+        <section class="settings__section" id="sec-processing" role="tabpanel" data-tabpanel="processing" aria-labelledby="nav-processing" hidden>
+          <h2>Обработка</h2>
+          <p class="settings__intro">Чем читать текст, переводить и зачищать баллон.</p>
+          <hr class="settings__rule">
+          <div class="form">
+            <label class="form__label" for="ocr-backend">Распознавание</label>
+            <select id="ocr-backend" class="select">
+              <option value="vlm" selected>VLM</option>
+              <option value="rapid">RapidOCR</option>
+            </select>
+            <label class="form__label" for="tr-backend">Перевод</label>
+            <select id="tr-backend" class="select">
+              <option value="llm" selected>LLM</option>
+              <option value="argos">Argos</option>
+            </select>
+            <label class="form__label" for="clean-backend">Очистка</label>
+            <select id="clean-backend" class="select">
+              <option value="lama" selected>LaMa</option>
+              <option value="fill">Заливка</option>
+            </select>
+            <label class="form__label" for="device">Устройство</label>
+            <select id="device" class="select">
+              <option value="auto" selected>Авто</option>
+              <option value="gpu">GPU</option>
+              <option value="cpu">CPU</option>
+            </select>
+            <label class="form__label" for="det-conf">Порог детектора</label>
+            <input id="det-conf" class="input" type="number" min="0" max="1" step="0.05" value="0.3">
+          </div>
+        </section>
+
+        <section class="settings__section" id="sec-typeset" role="tabpanel" data-tabpanel="typeset" aria-labelledby="nav-typeset" hidden>
+          <h2>Вёрстка</h2>
+          <p class="settings__intro">Кегль ищется между минимумом и максимумом, если у региона не задан свой.</p>
+          <hr class="settings__rule">
+          <div class="form">
+            <label class="form__label" for="font-min">Минимальный кегль</label>
+            <input id="font-min" class="input" type="number" min="1" value="8">
+            <label class="form__label" for="font-max">Максимальный кегль</label>
+            <input id="font-max" class="input" type="number" min="1" value="48">
+            <label class="form__label" for="stroke">Ореол, доля кегля</label>
+            <input id="stroke" class="input" type="number" min="0" max="1" step="0.01" value="0.08">
+            <label class="form__label" for="font-path">Шрифт</label>
+            <div class="input-row">
+              <input id="font-path" class="input" type="text" value="" placeholder="встроенный" spellcheck="false">
+              <button type="button" class="btn btn-accent">Обзор…</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="settings__section" id="sec-export" role="tabpanel" data-tabpanel="export" aria-labelledby="nav-export" hidden>
+          <h2>Экспорт</h2>
+          <p class="settings__intro">Значения по умолчанию для диалога экспорта.</p>
+          <hr class="settings__rule">
+          <div class="form">
+            <label class="form__label" for="export-sub">Подпапка</label>
+            <input id="export-sub" class="input" type="text" value="translated" spellcheck="false">
+            <label class="form__label" for="export-fmt">Формат</label>
+            <select id="export-fmt" class="select">
+              <option value="png">PNG</option>
+              <option value="jpg" selected>JPG</option>
+            </select>
+            <label class="form__label" for="jpg-q">Качество JPG</label>
+            <input id="jpg-q" class="input" type="number" min="1" max="100" value="90">
+            <label class="form__label" for="name-clash">Совпадение имён</label>
+            <select id="name-clash" class="select">
+              <option value="overwrite">Перезаписать</option>
+              <option value="suffix" selected>Добавить номер</option>
+              <option value="skip">Пропустить</option>
+            </select>
+          </div>
+        </section>
+
+        <section class="settings__section" id="sec-models" role="tabpanel" data-tabpanel="models" aria-labelledby="nav-models" hidden>
+          <h2>Модели</h2>
+          <p class="settings__intro">Файлы лежат в папке models рядом с программой, их можно заменить.</p>
+          <hr class="settings__rule">
+          <div class="model-row">
+            <span class="model-row__name">Детектор RT-DETR</span>
+            <span class="badge badge--ok"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> установлена</span>
+            <span></span>
+          </div>
+          <div class="model-row">
+            <span class="model-row__name">LaMa</span>
+            <span class="badge badge--ok"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> установлена</span>
+            <span></span>
+          </div>
+          <div class="model-row">
+            <span class="model-row__name">RapidOCR</span>
+            <span class="badge badge--ok"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> установлена</span>
+            <span></span>
+          </div>
+          <div class="model-row">
+            <span class="model-row__name">Argos en → ru</span>
+            <span class="badge badge--warn"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#warning"></use></svg> не установлена</span>
+            <button type="button" class="btn btn-accent">Установить</button>
+          </div>
+          <div class="form__actions stack-top">
+            <button type="button" class="btn btn-accent">
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#folder"></use></svg>
+              Открыть папку моделей
+            </button>
+          </div>
+        </section>
+
+        <section class="settings__section" id="sec-about" role="tabpanel" data-tabpanel="about" aria-labelledby="nav-about" hidden>
+          <h2>О программе</h2>
+          <p class="settings__intro">Image Localization Tool, пайплайн v2.</p>
+          <hr class="settings__rule">
+          <div class="form">
+            <span class="form__label">Версия</span>
+            <span>1.0.0</span>
+            <span class="form__label">Настройки</span>
+            <span class="about-path">%APPDATA%\ImageLocalizationTool\settings.json</span>
+            <span class="form__label">Данные и лог</span>
+            <span class="about-path">%LOCALAPPDATA%\ImageLocalizationTool\</span>
+            <p class="field-hint form__full">Если рядом с программой есть папка data, всё хранится в ней.</p>
+            <div class="form__actions form__full">
+              <button type="button" class="btn btn-accent">
+                <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#file"></use></svg>
+                Открыть лог
+              </button>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <footer class="settings__footer">
+      <button type="button" class="btn btn-primary">ОК</button>
+      <button type="button" class="btn btn-accent">Применить</button>
+      <button type="button" class="btn btn-accent">Отмена</button>
+    </footer>
+  </div>
+  <script>
+  (function () {
+    var key = "ilt-mockup-theme";
+    function currentTheme() {
+      return document.documentElement.getAttribute("data-theme") || "system";
+    }
+    function applyTheme(theme) {
+      if (theme === "dark" || theme === "light") {
+        document.documentElement.setAttribute("data-theme", theme);
+      } else {
+        document.documentElement.removeAttribute("data-theme");
+        theme = "system";
+      }
+      try { localStorage.setItem(key, theme); } catch (err) {}
+      document.querySelectorAll('input[name="theme"]').forEach(function (input) {
+        input.checked = input.value === theme;
+      });
+    }
+    document.querySelectorAll('input[name="theme"]').forEach(function (input) {
+      input.addEventListener("change", function () {
+        if (input.checked) applyTheme(input.value);
+      });
+    });
+    applyTheme(currentTheme());
+
+    var scaleKey = "ilt-mockup-scale";
+    var range = document.getElementById("ui-scale");
+    var out = document.getElementById("ui-scale-value");
+    if (range) {
+      var raw = document.documentElement.style.getPropertyValue("--ui-scale");
+      var n = raw ? Math.round(parseFloat(raw) * 100) : 100;
+      if (!n || n < 100 || n > 150) n = 100;
+      range.value = String(n);
+      if (out) out.textContent = n + " %";
+      range.addEventListener("input", function () {
+        var value = parseInt(range.value, 10);
+        document.documentElement.style.setProperty("--ui-scale", String(value / 100));
+        if (out) out.textContent = value + " %";
+        try { localStorage.setItem(scaleKey, String(value)); } catch (err) {}
+      });
+    }
+
+    document.querySelectorAll("[data-tabs]").forEach(function (root) {
+      root.querySelectorAll("[data-tab]").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          var name = btn.getAttribute("data-tab");
+          root.querySelectorAll("[data-tab]").forEach(function (item) {
+            item.setAttribute("aria-selected", item === btn ? "true" : "false");
+          });
+          root.querySelectorAll("[data-tabpanel]").forEach(function (panel) {
+            panel.hidden = panel.getAttribute("data-tabpanel") !== name;
+          });
+        });
+      });
+    });
+  })();
+  </script>
+</body>
+</html>

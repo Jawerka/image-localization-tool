@@ -1,0 +1,804 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>
+  (function () {
+    var theme = "";
+    var scale = "";
+    try {
+      var params = new URLSearchParams(location.search);
+      theme = params.get("theme") || "";
+      scale = params.get("scale") || "";
+      if (!theme) theme = localStorage.getItem("ilt-mockup-theme") || "";
+      if (!scale) scale = localStorage.getItem("ilt-mockup-scale") || "";
+    } catch (err) {}
+    if (theme === "dark" || theme === "light") {
+      document.documentElement.setAttribute("data-theme", theme);
+    }
+    var n = parseInt(scale, 10);
+    if (n >= 100 && n <= 150 && n !== 100) {
+      document.documentElement.style.setProperty("--ui-scale", String(n / 100));
+    }
+  })();
+  </script>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>Image Localization Tool — стиль</title>
+  <link rel="stylesheet" href="../css/tokens.css">
+  <link rel="stylesheet" href="../css/base.css">
+  <link rel="stylesheet" href="../css/components.css">
+  <link rel="stylesheet" href="../css/main.css">
+  <link rel="stylesheet" href="../css/editor.css">
+  <style>
+    .mock-review {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: var(--space-xs) var(--space);
+      flex-shrink: 0;
+      padding: 2px var(--space);
+      background: var(--bg-primary);
+      border-bottom: 1px dashed var(--border);
+      color: var(--text-muted);
+      font-size: var(--font-size-small);
+    }
+
+    .mock-review a {
+      color: var(--text-muted);
+      text-decoration: none;
+    }
+
+    .mock-review a:hover {
+      color: var(--text-primary);
+    }
+
+    .mock-review a[aria-current="page"] {
+      color: var(--text-primary);
+      font-weight: 700;
+      text-decoration: underline;
+    }
+
+    .style-state {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-sm);
+      min-width: 0;
+    }
+
+    .style-state h2 {
+      font-size: var(--font-size-ui);
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    .style-state fieldset {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-xs);
+    }
+
+    .style-font-list {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-xs);
+    }
+
+    .style-font-row {
+      display: flex;
+      align-items: center;
+      gap: var(--space-xs);
+      min-width: 0;
+    }
+
+    .style-font-row .choice {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+
+    .style-font-row .choice span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .style-font__fav {
+      flex: 0 0 auto;
+      padding: 0 var(--space-sm);
+      font-size: var(--font-size-small);
+    }
+
+    .style-font__fav[aria-pressed="true"] {
+      color: var(--text-warning);
+      border-color: var(--warning);
+    }
+
+    .style-sample {
+      margin: 0;
+      padding: var(--space);
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      color: #ffffff;
+      -webkit-text-stroke: 3px #111111;
+      paint-order: stroke fill;
+      font-weight: 700;
+      font-size: calc(26px * var(--ui-scale));
+      line-height: 1.35;
+      text-align: center;
+      transform-origin: center;
+    }
+
+    .style-sample--busy {
+      opacity: 0.45;
+    }
+
+    .style-colors input[type="color"] {
+      width: 100%;
+      height: var(--btn-h);
+      padding: var(--space-xs);
+      background: var(--input);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-control);
+    }
+
+    .style-range {
+      display: flex;
+      align-items: center;
+      gap: var(--space-sm);
+    }
+
+    .style-range input[type="range"] {
+      flex: 1 1 auto;
+      width: auto;
+      min-width: 0;
+    }
+
+    .style-range output {
+      flex: 0 0 auto;
+      min-width: 2.5ch;
+      text-align: right;
+      color: var(--text-primary);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .style-warp {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--space-xs);
+    }
+
+    .style-warp .btn {
+      width: 100%;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+    }
+
+    .style-warp .btn[aria-checked="true"] {
+      background: var(--accent-hover);
+      border-color: var(--border-strong);
+      font-weight: 700;
+    }
+
+    .style-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--space-xs);
+    }
+
+    .style-chips .btn {
+      border: 1px solid var(--border);
+      background: var(--bg-secondary);
+    }
+
+    .style-chips .btn[aria-pressed="true"] {
+      background: var(--accent-hover);
+      border-color: var(--border-strong);
+      font-weight: 700;
+    }
+
+    .style-fail {
+      display: flex;
+      align-items: flex-start;
+      gap: var(--space-xs);
+      color: var(--text-error);
+    }
+  </style>
+</head>
+<body>
+  <a class="skip" href="#viewer">К просмотру</a>
+  <div class="app">
+    <nav class="mock-review" aria-label="Состояние макета">
+      <a data-state-link="empty" href="?state=empty">Пусто</a>
+      <a data-state-link="loading" href="?state=loading">Загрузка</a>
+      <a data-state-link="error" href="?state=error">Ошибка</a>
+      <a data-state-link="ready" href="?state=ready" aria-current="page">Готово</a>
+    </nav>
+
+    <header class="toolbar" data-role="toolbar">
+      <h1 class="sr-only">Image Localization Tool</h1>
+      <div class="toolbar__group">
+        <details class="menu">
+          <summary class="btn btn-ghost menu__summary" data-role="file-menu">
+            <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#file"></use></svg>
+            Файл
+            <svg class="icon menu__chevron" aria-hidden="true"><use href="../icons/icons.svg#chevron"></use></svg>
+          </summary>
+          <div class="menu__panel" role="menu" aria-label="Файл">
+            <button type="button" class="btn menu__item" role="menuitem">Открыть файлы… <span class="menu__kbd"><kbd class="kbd">Ctrl+O</kbd></span></button>
+            <button type="button" class="btn menu__item" role="menuitem">Открыть папку… <span class="menu__kbd"><kbd class="kbd">Ctrl+Shift+O</kbd></span></button>
+            <button type="button" class="btn menu__item" role="menuitem">Экспорт… <span class="menu__kbd"><kbd class="kbd">Ctrl+E</kbd></span></button>
+            <div class="menu__sep" role="separator"></div>
+            <button type="button" class="btn menu__item" role="menuitem">Настройки… <span class="menu__kbd"><kbd class="kbd">Ctrl+,</kbd></span></button>
+            <button type="button" class="btn menu__item" role="menuitem">Выход</button>
+          </div>
+        </details>
+      </div>
+      <div class="toolbar__group" role="group" aria-label="Языки">
+        <label class="toolbar__lang" for="lang-source">Откуда
+          <select id="lang-source" class="select" data-role="lang-source">
+            <option value="en" selected>en — English</option>
+            <option value="ja">ja — 日本語</option>
+            <option value="ko">ko — 한국어</option>
+            <option value="zh">zh — 中文</option>
+          </select>
+        </label>
+        <span class="toolbar__arrow" aria-hidden="true">→</span>
+        <label class="toolbar__lang" for="lang-target">Куда
+          <select id="lang-target" class="select" data-role="lang-target">
+            <option value="ru" selected>ru — Русский</option>
+            <option value="en">en — English</option>
+            <option value="uk">uk — Українська</option>
+          </select>
+        </label>
+      </div>
+      <div class="toolbar__group" role="group" aria-label="Перевод">
+        <button type="button" class="btn btn-primary" data-role="translate-page">
+          <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#translate"></use></svg>
+          Перевести страницу
+        </button>
+        <button type="button" class="btn btn-accent" data-role="translate-all">Перевести всё</button>
+      </div>
+      <div class="toolbar__spacer"></div>
+      <div class="toolbar__group">
+        <button type="button" class="btn btn-accent" data-role="export">
+          <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#export"></use></svg>
+          Экспорт
+        </button>
+        <button type="button" class="btn btn-ghost btn-icon" data-role="settings" aria-label="Настройки" title="Настройки (Ctrl+,)">
+          <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#settings"></use></svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="workspace">
+      <nav class="pages" aria-label="Страницы">
+        <div class="pages__head">Страницы</div>
+        <div class="pages__list" role="listbox" data-role="page-list" aria-label="Страницы главы" aria-multiselectable="true">
+          <div class="page" role="option" id="page-01" aria-selected="true" tabindex="0">
+            <img class="page__thumb" src="../../test-img/test-1.jpg" alt="">
+            <span class="page__body">
+              <span class="page__title"><span class="page__num">01</span> <span class="page__name">001.jpg</span></span>
+              <span class="page__status page__status--edit"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#brush"></use></svg> <span>есть правки</span></span>
+            </span>
+          </div>
+          <div class="page" role="option" id="page-02" aria-selected="false" tabindex="-1">
+            <img class="page__thumb" src="../../test-img/test-2.png" alt="">
+            <span class="page__body">
+              <span class="page__title"><span class="page__num">02</span> <span class="page__name">002.jpg</span></span>
+              <span class="page__status page__status--done"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> <span>готово</span></span>
+            </span>
+          </div>
+          <div class="page" role="option" id="page-03" aria-selected="false" tabindex="-1">
+            <img class="page__thumb" src="../../test-img/test-3.jpg" alt="">
+            <span class="page__body">
+              <span class="page__title"><span class="page__num">03</span> <span class="page__name">003.jpg</span></span>
+              <span class="page__status page__status--idle"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#file"></use></svg> <span>не начата</span></span>
+            </span>
+          </div>
+          <div class="page" role="option" id="page-04" aria-selected="false" tabindex="-1">
+            <img class="page__thumb" src="../../test-img/test-2.png" alt="">
+            <span class="page__body">
+              <span class="page__title"><span class="page__num">04</span> <span class="page__name">004.jpg</span></span>
+              <span class="page__status page__status--error"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#error"></use></svg> <span>ошибка</span></span>
+            </span>
+          </div>
+        </div>
+        <p class="pages__sum"><span>1 из 4 готово</span></p>
+      </nav>
+
+      <main class="viewer" id="viewer" data-role="viewer">
+        <div class="viewer__bar">
+          <div class="segmented" role="radiogroup" aria-label="Вид">
+            <button type="button" class="btn" role="radio" data-role="view-original" aria-checked="false">
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#original"></use></svg>
+              Оригинал
+            </button>
+            <button type="button" class="btn" role="radio" data-role="view-result" aria-checked="false">
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#translate"></use></svg>
+              Результат
+            </button>
+            <button type="button" class="btn" role="radio" data-role="view-compare" aria-checked="true">
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#compare"></use></svg>
+              Сравнение
+            </button>
+          </div>
+          <div role="group" aria-label="Слои">
+            <button type="button" class="btn btn-ghost" data-role="layer-boxes" aria-pressed="true">
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#layers"></use></svg>
+              Рамки
+            </button>
+            <button type="button" class="btn btn-ghost" data-role="layer-mask" aria-pressed="true">
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#mask"></use></svg>
+              Маска
+            </button>
+          </div>
+          <div role="radiogroup" aria-label="Инструмент">
+            <button type="button" class="btn btn-ghost" role="radio" data-role="tool-select" aria-checked="false">
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#select"></use></svg>
+              Выбор
+            </button>
+            <button type="button" class="btn btn-ghost" role="radio" data-role="tool-region" aria-checked="false">
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#region"></use></svg>
+              Регион
+            </button>
+            <button type="button" class="btn btn-ghost" role="radio" data-role="tool-brush" aria-checked="true">
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#brush"></use></svg>
+              Кисть
+            </button>
+            <button type="button" class="btn btn-ghost" role="radio" data-role="tool-eraser" aria-checked="false">
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#eraser"></use></svg>
+              Ластик
+            </button>
+          </div>
+          <label class="brush-size" for="brush-size">Размер
+            <input id="brush-size" data-role="brush-size" type="range" min="1" max="64" value="12">
+            <span>12</span>
+          </label>
+          <div class="zoom" data-role="zoom">
+            <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#zoom"></use></svg>
+            <button type="button" class="btn btn-ghost btn-icon" aria-label="Уменьшить">−</button>
+            <span class="zoom__value">Вписать</span>
+            <button type="button" class="btn btn-ghost btn-icon" aria-label="Увеличить">+</button>
+          </div>
+          <button type="button" class="btn btn-ghost btn-icon" data-role="undo" aria-label="Отменить" title="Отменить (Ctrl+Z)">
+            <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#undo"></use></svg>
+          </button>
+          <button type="button" class="btn btn-ghost btn-icon" data-role="redo" aria-label="Повторить" title="Повторить (Ctrl+Y)" disabled>
+            <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#redo"></use></svg>
+          </button>
+        </div>
+        <div class="stage">
+          <div class="frame frame--mask">
+            <img class="frame__img" src="../../test-img/test-1.jpg" alt="">
+            <div class="curtain">
+              <img src="../../test-img/test-1.jpg" alt="">
+            </div>
+            <img class="frame__mask" src="../../test-img/test-1-mask.jpg" alt="Слой маски">
+            <span class="curtain__label curtain__label--left">Оригинал</span>
+            <span class="curtain__label curtain__label--right">Результат</span>
+            <div class="curtain__bar" title="Шторка сравнения">
+              <span class="curtain__grip"></span>
+            </div>
+            <div class="box" style="left:33%;top:2.5%;width:22%;height:7%">
+              <span class="box__num">1</span>
+            </div>
+            <div class="box box--skipped" style="left:56%;top:1%;width:18%;height:11%">
+              <span class="box__num">2</span>
+              <span class="box__flag">пропущен</span>
+            </div>
+            <div class="box box--selected" style="left:78%;top:3%;width:19%;height:8%">
+              <span class="box__num">3</span>
+              <span class="box__flag">выбран</span>
+            </div>
+            <div class="box box--overflow" style="left:66%;top:78%;width:31%;height:18%">
+              <span class="box__num">4</span>
+              <span class="box__flag">не влез</span>
+            </div>
+          </div>
+        </div>
+        <ol class="steps" aria-label="Шаги обработки">
+          <li class="is-done"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> Детекция</li>
+          <li class="is-done"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> OCR</li>
+          <li class="is-done"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> Перевод</li>
+          <li class="is-done"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> Маска</li>
+          <li class="is-done"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> Очистка</li>
+          <li class="is-done"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> Вёрстка</li>
+        </ol>
+      </main>
+
+      <aside class="inspector" data-role="inspector" aria-label="Инспектор" data-tabs>
+        <div class="tabs" role="tablist" aria-label="Инспектор">
+          <button type="button" class="btn" role="tab" id="tab-text" data-tab="text" aria-selected="false" aria-controls="panel-text">Текст</button>
+          <button type="button" class="btn" role="tab" id="tab-page" data-tab="page" aria-selected="false" aria-controls="panel-page">Страница</button>
+          <button type="button" class="btn" role="tab" id="tab-style" data-tab="style" aria-selected="true" aria-controls="panel-style">Стиль</button>
+        </div>
+        <div class="inspector__panel" id="panel-text" role="tabpanel" data-role="inspector-text" data-tabpanel="text" aria-labelledby="tab-text" hidden>
+          <div class="inspector__scroll">
+            <p>Оригинал и перевод региона правятся на этой вкладке.</p>
+          </div>
+        </div>
+        <div class="inspector__panel" id="panel-page" role="tabpanel" data-role="inspector-page" data-tabpanel="page" aria-labelledby="tab-page" hidden>
+          <div class="inspector__scroll">
+            <p>Здесь движки страницы и время этапов.</p>
+          </div>
+        </div>
+        <div class="inspector__panel" id="panel-style" role="tabpanel" data-role="inspector-style" data-tabpanel="style" aria-labelledby="tab-style">
+          <div class="inspector__scroll">
+            <div class="style-state" data-state="empty" hidden>
+              <h2>Регион не выбран</h2>
+              <p class="muted">Выберите регион на странице, чтобы задать шрифт и искривление.</p>
+            </div>
+
+            <div class="style-state" data-state="loading" hidden>
+              <h2>Обновляем предпросмотр</h2>
+              <p role="status">Образец «Я ГОЛОДЕН!» перерисовывается.</p>
+              <p class="style-sample style-sample--busy" lang="ru" style="font-family: 'Wild Words', 'Segoe Print', 'Segoe UI', sans-serif">Я ГОЛОДЕН!</p>
+              <label class="field" for="busy-font-search">Найти шрифт
+                <input id="busy-font-search" class="input" type="search" disabled>
+              </label>
+              <fieldset disabled>
+                <legend>Шрифт</legend>
+                <ul class="style-font-list">
+                  <li class="style-font-row">
+                    <label class="choice">
+                      <input id="busy-font-wild" type="radio" name="font-busy" value="wild-words" checked disabled>
+                      <span style="font-family: 'Wild Words', 'Segoe Print', 'Segoe UI', sans-serif">Wild Words</span>
+                    </label>
+                    <button type="button" class="btn btn-ghost style-font__fav" aria-pressed="true" aria-label="Избранное: Wild Words" disabled><span aria-hidden="true">★</span> Избранное</button>
+                  </li>
+                  <li class="style-font-row">
+                    <label class="choice">
+                      <input id="busy-font-comic" type="radio" name="font-busy" value="comic-neue" disabled>
+                      <span style="font-family: 'Comic Neue', 'Comic Sans MS', 'Segoe UI', sans-serif">Comic Neue</span>
+                    </label>
+                    <button type="button" class="btn btn-ghost style-font__fav" aria-pressed="true" aria-label="Избранное: Comic Neue" disabled><span aria-hidden="true">★</span> Избранное</button>
+                  </li>
+                  <li class="style-font-row">
+                    <label class="choice">
+                      <input id="busy-font-anime" type="radio" name="font-busy" value="anime-ace" disabled>
+                      <span style="font-family: 'Anime Ace', 'Ink Free', 'Segoe UI', sans-serif">Anime Ace</span>
+                    </label>
+                    <button type="button" class="btn btn-ghost style-font__fav" aria-pressed="false" aria-label="Избранное: Anime Ace" disabled><span aria-hidden="true">★</span> Избранное</button>
+                  </li>
+                  <li class="style-font-row">
+                    <label class="choice">
+                      <input id="busy-font-pt" type="radio" name="font-busy" value="pt-sans" disabled>
+                      <span style="font-family: 'PT Sans', Calibri, 'Segoe UI', sans-serif">PT Sans</span>
+                    </label>
+                    <button type="button" class="btn btn-ghost style-font__fav" aria-pressed="false" aria-label="Избранное: PT Sans" disabled><span aria-hidden="true">★</span> Избранное</button>
+                  </li>
+                  <li class="style-font-row">
+                    <label class="choice">
+                      <input id="busy-font-noto" type="radio" name="font-busy" value="noto-sans" disabled>
+                      <span style="font-family: 'Noto Sans', Arial, 'Segoe UI', sans-serif">Noto Sans</span>
+                    </label>
+                    <button type="button" class="btn btn-ghost style-font__fav" aria-pressed="false" aria-label="Избранное: Noto Sans" disabled><span aria-hidden="true">★</span> Избранное</button>
+                  </li>
+                </ul>
+              </fieldset>
+              <div class="region-card__row style-colors">
+                  <label class="field" for="busy-fill">Заливка
+                    <input id="busy-fill" type="color" value="#ffffff" disabled>
+                  </label>
+                  <label class="field" for="busy-stroke">Обводка
+                    <input id="busy-stroke" type="color" value="#111111" disabled>
+                  </label>
+                </div>
+                <label class="field" for="busy-stroke-width">Толщина обводки
+                  <span class="style-range">
+                    <input id="busy-stroke-width" type="range" min="0" max="20" step="1" value="3" disabled>
+                    <output for="busy-stroke-width">3</output>
+                  </span>
+                </label>
+                <label class="field" for="busy-angle">Угол
+                  <input id="busy-angle" class="input" type="number" step="1" value="0" disabled aria-describedby="busy-angle-hint">
+                </label>
+                <p class="field-hint" id="busy-angle-hint">градусы, по часовой стрелке</p>
+                <div class="field">
+                  <span class="field__label" id="busy-warp-label">Искривление</span>
+                  <div class="style-warp" role="radiogroup" aria-labelledby="busy-warp-label">
+                    <button type="button" class="btn" role="radio" aria-checked="true" disabled>Дугой вверх</button>
+                    <button type="button" class="btn" role="radio" aria-checked="false" disabled>Дугой вниз</button>
+                    <button type="button" class="btn" role="radio" aria-checked="false" disabled>Кольцо</button>
+                    <button type="button" class="btn" role="radio" aria-checked="false" disabled>Волна</button>
+                    <button type="button" class="btn" role="radio" aria-checked="false" disabled>Флаг</button>
+                    <button type="button" class="btn" role="radio" aria-checked="false" disabled>Перспектива</button>
+                    <button type="button" class="btn" role="radio" aria-checked="false" disabled>Сетка</button>
+                  </div>
+                </div>
+                <label class="field" for="busy-bend">Изгиб
+                  <span class="style-range">
+                    <input id="busy-bend" type="range" min="0" max="100" step="1" value="24" disabled>
+                    <output for="busy-bend">24</output>
+                  </span>
+                </label>
+                <div class="field">
+                  <span class="field__label" id="busy-lib-label">Стили проекта</span>
+                  <div class="style-chips" role="group" aria-labelledby="busy-lib-label">
+                    <button type="button" class="btn" aria-pressed="false" disabled>Диалог</button>
+                    <button type="button" class="btn" aria-pressed="true" disabled>Крик</button>
+                    <button type="button" class="btn" aria-pressed="false" disabled>SFX</button>
+                  </div>
+                </div>
+            </div>
+
+            <div class="style-state" data-state="error" hidden>
+              <h2>Не удалось обновить предпросмотр</h2>
+              <p class="style-fail">
+                <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#error"></use></svg>
+                <span>Не удалось нарисовать образец: файл шрифта Wild Words не найден.</span>
+              </p>
+              <button type="button" class="btn btn-accent">Повторить</button>
+            </div>
+
+            <div class="style-state" data-state="ready">
+              <h2>Стиль региона 3</h2>
+              <label class="field" for="font-search">Найти шрифт
+                <input id="font-search" class="input" type="search" autocomplete="off">
+              </label>
+              <fieldset>
+                <legend id="font-list-label">Шрифт</legend>
+                <ul class="style-font-list" id="font-list">
+                  <li class="style-font-row" data-name="Wild Words">
+                    <label class="choice">
+                      <input id="font-wild" type="radio" name="font" value="wild-words" checked data-family="'Wild Words', 'Segoe Print', 'Segoe UI', sans-serif">
+                      <span style="font-family: 'Wild Words', 'Segoe Print', 'Segoe UI', sans-serif">Wild Words</span>
+                    </label>
+                    <button type="button" class="btn btn-ghost style-font__fav" aria-pressed="true" aria-label="Избранное: Wild Words"><span aria-hidden="true">★</span> Избранное</button>
+                  </li>
+                  <li class="style-font-row" data-name="Comic Neue">
+                    <label class="choice">
+                      <input id="font-comic" type="radio" name="font" value="comic-neue" data-family="'Comic Neue', 'Comic Sans MS', 'Segoe UI', sans-serif">
+                      <span style="font-family: 'Comic Neue', 'Comic Sans MS', 'Segoe UI', sans-serif">Comic Neue</span>
+                    </label>
+                    <button type="button" class="btn btn-ghost style-font__fav" aria-pressed="true" aria-label="Избранное: Comic Neue"><span aria-hidden="true">★</span> Избранное</button>
+                  </li>
+                  <li class="style-font-row" data-name="Anime Ace">
+                    <label class="choice">
+                      <input id="font-anime" type="radio" name="font" value="anime-ace" data-family="'Anime Ace', 'Ink Free', 'Segoe UI', sans-serif">
+                      <span style="font-family: 'Anime Ace', 'Ink Free', 'Segoe UI', sans-serif">Anime Ace</span>
+                    </label>
+                    <button type="button" class="btn btn-ghost style-font__fav" aria-pressed="false" aria-label="Избранное: Anime Ace"><span aria-hidden="true">★</span> Избранное</button>
+                  </li>
+                  <li class="style-font-row" data-name="PT Sans">
+                    <label class="choice">
+                      <input id="font-pt" type="radio" name="font" value="pt-sans" data-family="'PT Sans', Calibri, 'Segoe UI', sans-serif">
+                      <span style="font-family: 'PT Sans', Calibri, 'Segoe UI', sans-serif">PT Sans</span>
+                    </label>
+                    <button type="button" class="btn btn-ghost style-font__fav" aria-pressed="false" aria-label="Избранное: PT Sans"><span aria-hidden="true">★</span> Избранное</button>
+                  </li>
+                  <li class="style-font-row" data-name="Noto Sans">
+                    <label class="choice">
+                      <input id="font-noto" type="radio" name="font" value="noto-sans" data-family="'Noto Sans', Arial, 'Segoe UI', sans-serif">
+                      <span style="font-family: 'Noto Sans', Arial, 'Segoe UI', sans-serif">Noto Sans</span>
+                    </label>
+                    <button type="button" class="btn btn-ghost style-font__fav" aria-pressed="false" aria-label="Избранное: Noto Sans"><span aria-hidden="true">★</span> Избранное</button>
+                  </li>
+                </ul>
+              </fieldset>
+              <p class="field__label" id="sample-label">Образец</p>
+              <p class="style-sample" id="style-sample" lang="ru" style="font-family: 'Wild Words', 'Segoe Print', 'Segoe UI', sans-serif">Я ГОЛОДЕН!</p>
+              <div class="region-card__row style-colors">
+                <label class="field" for="fill-color">Заливка
+                  <input id="fill-color" type="color" value="#ffffff">
+                </label>
+                <label class="field" for="stroke-color">Обводка
+                  <input id="stroke-color" type="color" value="#111111">
+                </label>
+              </div>
+              <label class="field" for="stroke-width">Толщина обводки
+                <span class="style-range">
+                  <input id="stroke-width" type="range" min="0" max="20" step="1" value="3">
+                  <output id="stroke-width-value" for="stroke-width">3</output>
+                </span>
+              </label>
+              <label class="field" for="angle">Угол
+                <input id="angle" class="input" type="number" step="1" value="0" aria-describedby="angle-hint">
+              </label>
+              <p class="field-hint" id="angle-hint">градусы, по часовой стрелке</p>
+              <div class="field">
+                <span class="field__label" id="warp-label">Искривление</span>
+                <div class="style-warp" role="radiogroup" aria-labelledby="warp-label">
+                  <button type="button" class="btn" role="radio" aria-checked="true">Дугой вверх</button>
+                  <button type="button" class="btn" role="radio" aria-checked="false">Дугой вниз</button>
+                  <button type="button" class="btn" role="radio" aria-checked="false">Кольцо</button>
+                  <button type="button" class="btn" role="radio" aria-checked="false">Волна</button>
+                  <button type="button" class="btn" role="radio" aria-checked="false">Флаг</button>
+                  <button type="button" class="btn" role="radio" aria-checked="false">Перспектива</button>
+                  <button type="button" class="btn" role="radio" aria-checked="false">Сетка</button>
+                </div>
+              </div>
+              <label class="field" for="bend">Изгиб
+                <span class="style-range">
+                  <input id="bend" type="range" min="0" max="100" step="1" value="24">
+                  <output id="bend-value" for="bend">24</output>
+                </span>
+              </label>
+              <div class="field">
+                <span class="field__label" id="lib-label">Стили проекта</span>
+                <div class="style-chips" role="group" aria-labelledby="lib-label">
+                  <button type="button" class="btn" aria-pressed="false">Диалог</button>
+                  <button type="button" class="btn" aria-pressed="true">Крик</button>
+                  <button type="button" class="btn" aria-pressed="false">SFX</button>
+                </div>
+              </div>
+              <p class="field-hint" id="style-copy-hint"><kbd class="kbd">Ctrl+Shift+C</kbd> копирует стиль региона, <kbd class="kbd">Ctrl+Shift+V</kbd> вставляет его в выбранный.</p>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <footer class="statusbar" data-role="statusbar">
+      <span class="statusbar__job" aria-live="polite">Есть правки · страница 1</span>
+      <span class="statusbar__llm">
+        <span class="bullet bullet--on" aria-hidden="true">●</span>
+        <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#llm"></use></svg>
+        <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg>
+        <span>LLM</span>
+      </span>
+      <span class="statusbar__device">
+        <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#gpu"></use></svg>
+        GPU
+      </span>
+      <span class="statusbar__zoom">Вписать</span>
+    </footer>
+  </div>
+  <script>
+  (function () {
+    document.querySelectorAll("[data-tabs]").forEach(function (root) {
+      root.querySelectorAll("[data-tab]").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          var name = btn.getAttribute("data-tab");
+          root.querySelectorAll("[data-tab]").forEach(function (item) {
+            item.setAttribute("aria-selected", item === btn ? "true" : "false");
+          });
+          root.querySelectorAll("[data-tabpanel]").forEach(function (panel) {
+            panel.hidden = panel.getAttribute("data-tabpanel") !== name;
+          });
+        });
+      });
+    });
+  })();
+  </script>
+  <script>
+  (function () {
+    var allowed = ["empty", "loading", "error", "ready"];
+    var params;
+    try {
+      params = new URLSearchParams(location.search);
+    } catch (err) {
+      params = new URLSearchParams();
+    }
+    var state = params.get("state") || "";
+    if (allowed.indexOf(state) === -1) state = "ready";
+
+    document.querySelectorAll("[data-state]").forEach(function (block) {
+      if (block.getAttribute("data-state") === state) block.removeAttribute("hidden");
+      else block.setAttribute("hidden", "");
+    });
+
+    var panel = document.getElementById("panel-style");
+    if (panel) {
+      if (state === "loading") panel.setAttribute("aria-busy", "true");
+      else panel.removeAttribute("aria-busy");
+    }
+
+    if (state === "empty") {
+      document.querySelectorAll(".box--selected").forEach(function (box) {
+        box.classList.remove("box--selected");
+        var flag = box.querySelector(".box__flag");
+        if (flag) flag.remove();
+      });
+    }
+
+    var theme = document.documentElement.getAttribute("data-theme") || "";
+    var scale = 100;
+    var raw = document.documentElement.style.getPropertyValue("--ui-scale");
+    if (raw) {
+      var parsed = Math.round(parseFloat(raw) * 100);
+      if (parsed) scale = parsed;
+    }
+    document.querySelectorAll("a[data-state-link]").forEach(function (link) {
+      var name = link.getAttribute("data-state-link");
+      var q = ["state=" + name];
+      if (theme === "dark" || theme === "light") q.push("theme=" + theme);
+      if (scale !== 100) q.push("scale=" + scale);
+      link.setAttribute("href", "?" + q.join("&"));
+      if (name === state) link.setAttribute("aria-current", "page");
+      else link.removeAttribute("aria-current");
+    });
+
+    function syncSample() {
+      var sample = document.getElementById("style-sample");
+      if (!sample) return;
+      var picked = document.querySelector('input[name="font"]:checked');
+      if (picked && picked.getAttribute("data-family")) {
+        sample.style.fontFamily = picked.getAttribute("data-family");
+      }
+      var fill = document.getElementById("fill-color");
+      var stroke = document.getElementById("stroke-color");
+      var width = document.getElementById("stroke-width");
+      var angle = document.getElementById("angle");
+      if (fill) sample.style.color = fill.value;
+      if (stroke && width) sample.style.webkitTextStroke = width.value + "px " + stroke.value;
+      if (angle) sample.style.transform = "rotate(" + (parseFloat(angle.value) || 0) + "deg)";
+    }
+
+    document.querySelectorAll('input[name="font"]').forEach(function (input) {
+      input.addEventListener("change", syncSample);
+    });
+    ["fill-color", "stroke-color", "stroke-width", "angle"].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      el.addEventListener("input", syncSample);
+    });
+
+    document.querySelectorAll(".style-range input[type='range']").forEach(function (input) {
+      var out = input.parentNode.querySelector("output");
+      input.addEventListener("input", function () {
+        if (out) out.textContent = input.value;
+      });
+    });
+
+    document.querySelectorAll('[role="radiogroup"].style-warp').forEach(function (group) {
+      var buttons = Array.prototype.slice.call(group.querySelectorAll('[role="radio"]'));
+      function choose(btn) {
+        buttons.forEach(function (item) {
+          item.setAttribute("aria-checked", item === btn ? "true" : "false");
+        });
+      }
+      buttons.forEach(function (btn) {
+        btn.addEventListener("click", function () { choose(btn); });
+      });
+      group.addEventListener("keydown", function (event) {
+        var dir = 0;
+        if (event.key === "ArrowRight" || event.key === "ArrowDown") dir = 1;
+        else if (event.key === "ArrowLeft" || event.key === "ArrowUp") dir = -1;
+        else return;
+        if (group.querySelector("[disabled]")) return;
+        event.preventDefault();
+        var current = 0;
+        buttons.forEach(function (item, index) {
+          if (item.getAttribute("aria-checked") === "true") current = index;
+        });
+        var next = (current + dir + buttons.length) % buttons.length;
+        choose(buttons[next]);
+        buttons[next].focus();
+      });
+    });
+
+    document.querySelectorAll(".style-chips").forEach(function (group) {
+      var buttons = group.querySelectorAll("button");
+      buttons.forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          buttons.forEach(function (item) {
+            item.setAttribute("aria-pressed", item === btn ? "true" : "false");
+          });
+        });
+      });
+    });
+
+    document.querySelectorAll(".style-font__fav").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var on = btn.getAttribute("aria-pressed") === "true";
+        btn.setAttribute("aria-pressed", on ? "false" : "true");
+      });
+    });
+
+    var search = document.getElementById("font-search");
+    var fontList = document.getElementById("font-list");
+    if (search && fontList) {
+      search.addEventListener("input", function () {
+        var q = search.value.trim().toLowerCase();
+        fontList.querySelectorAll(".style-font-row").forEach(function (row) {
+          var name = (row.getAttribute("data-name") || "").toLowerCase();
+          if (!q || name.indexOf(q) !== -1) row.removeAttribute("hidden");
+          else row.setAttribute("hidden", "");
+        });
+      });
+    }
+  })();
+  </script>
+</body>
+</html>

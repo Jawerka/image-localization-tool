@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>
+  (function () {
+    var theme = "";
+    var scale = "";
+    try {
+      var params = new URLSearchParams(location.search);
+      theme = params.get("theme") || "";
+      scale = params.get("scale") || "";
+      if (!theme) theme = localStorage.getItem("ilt-mockup-theme") || "";
+      if (!scale) scale = localStorage.getItem("ilt-mockup-scale") || "";
+    } catch (err) {}
+    if (theme === "dark" || theme === "light") {
+      document.documentElement.setAttribute("data-theme", theme);
+    }
+    var n = parseInt(scale, 10);
+    if (n >= 100 && n <= 150 && n !== 100) {
+      document.documentElement.style.setProperty("--ui-scale", String(n / 100));
+    }
+  })();
+  </script>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>Image Localization Tool — звуки</title>
+  <link rel="stylesheet" href="../css/tokens.css">
+  <link rel="stylesheet" href="../css/base.css">
+  <link rel="stylesheet" href="../css/components.css">
+  <link rel="stylesheet" href="../css/main.css">
+  <link rel="stylesheet" href="../css/editor.css">
+  <style>
+    /* Рамка звука только в этом макете: в токенах нет отдельного цвета. */
+    .sfx-page {
+      --sfx-frame: #b388ff;
+    }
+
+    .sfx-page .toolbar {
+      height: auto;
+      min-height: var(--toolbar-h);
+      flex-wrap: wrap;
+      row-gap: var(--space-xs);
+      padding-top: var(--space-xs);
+      padding-bottom: var(--space-xs);
+    }
+
+    .sfx-page .app {
+      min-height: 0;
+    }
+
+    .sfx-page .toolbar__lang .select {
+      width: calc(108px * var(--ui-scale));
+    }
+
+    .sfx-toggle {
+      position: relative;
+      display: flex;
+      align-items: center;
+      gap: var(--space-sm);
+      margin: 0;
+      padding: 0;
+      border: 0;
+    }
+
+    .sfx-toggle legend {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      clip-path: inset(50%);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    .sfx-toggle__name {
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
+
+    .sfx-toggle .choice {
+      gap: var(--space-xs);
+      min-height: var(--btn-h);
+      white-space: nowrap;
+    }
+
+    .sfx-status {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 2px;
+      flex-shrink: 0;
+      padding: var(--space-xs) var(--space-sm);
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-secondary);
+    }
+
+    .sfx-status[data-state="ready"] {
+      box-shadow: inset 3px 0 0 var(--sfx-frame);
+    }
+
+    .sfx-head {
+      display: flex;
+      align-items: center;
+      gap: var(--space-xs);
+      font-size: calc(16px * var(--ui-scale));
+      font-weight: 700;
+      line-height: 1.3;
+    }
+
+    .box--sfx {
+      border: 2px solid var(--sfx-frame);
+      outline: 2px solid var(--sfx-frame);
+      outline-offset: 1px;
+      box-shadow:
+        0 0 0 1px var(--on-ink-inverse),
+        0 0 0 4px var(--sfx-frame);
+    }
+
+    .box--sfx .box__flag {
+      background: var(--sfx-frame);
+      color: #1a1028;
+      box-shadow: 0 0 0 1px var(--sfx-frame);
+      font-weight: 700;
+    }
+
+    .region-card--sfx {
+      border-color: var(--border-strong);
+      box-shadow: inset 3px 0 0 var(--sfx-frame);
+    }
+
+    .sfx-block {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-sm);
+    }
+
+    .sfx-reason {
+      display: flex;
+      align-items: flex-start;
+      gap: var(--space-xs);
+      margin: 0;
+      color: var(--text-error);
+    }
+
+    .sfx-review {
+      display: inline-flex;
+      align-items: center;
+      gap: var(--space-sm);
+      margin-left: var(--space-sm);
+      font-size: var(--font-size-small);
+    }
+
+    .sfx-review a {
+      color: var(--text-muted);
+      text-decoration: none;
+    }
+
+    .sfx-review a:hover {
+      color: var(--text-primary);
+    }
+
+    .sfx-review a[aria-current="page"] {
+      color: var(--text-primary);
+      font-weight: 700;
+      text-decoration: none;
+    }
+  </style>
+</head>
+<body class="sfx-page">
+  <a class="skip" href="#viewer">К просмотру</a>
+  <div class="app">
+    <header class="toolbar" data-role="toolbar">
+      <h1 class="sr-only">Image Localization Tool</h1>
+      <div class="toolbar__group">
+        <details class="menu">
+          <summary class="btn btn-ghost menu__summary" data-role="file-menu">
+            <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#file"></use></svg>
+            Файл
+            <svg class="icon menu__chevron" aria-hidden="true"><use href="../icons/icons.svg#chevron"></use></svg>
+          </summary>
+          <div class="menu__panel" role="menu" aria-label="Файл">
+            <button type="button" class="btn menu__item" role="menuitem">Открыть файлы… <span class="menu__kbd"><kbd class="kbd">Ctrl+O</kbd></span></button>
+            <button type="button" class="btn menu__item" role="menuitem">Открыть папку… <span class="menu__kbd"><kbd class="kbd">Ctrl+Shift+O</kbd></span></button>
+            <button type="button" class="btn menu__item" role="menuitem">Экспорт… <span class="menu__kbd"><kbd class="kbd">Ctrl+E</kbd></span></button>
+            <div class="menu__sep" role="separator"></div>
+            <button type="button" class="btn menu__item" role="menuitem">Настройки… <span class="menu__kbd"><kbd class="kbd">Ctrl+,</kbd></span></button>
+            <button type="button" class="btn menu__item" role="menuitem">Выход</button>
+          </div>
+        </details>
+      </div>
+      <div class="toolbar__group" role="group" aria-label="Языки">
+        <label class="toolbar__lang" for="lang-source">Откуда
+          <select id="lang-source" class="select" data-role="lang-source">
+            <option value="en" selected>en — English</option>
+            <option value="ja">ja — 日本語</option>
+            <option value="ko">ko — 한국어</option>
+            <option value="zh">zh — 中文</option>
+          </select>
+        </label>
+        <span class="toolbar__arrow" aria-hidden="true">→</span>
+        <label class="toolbar__lang" for="lang-target">Куда
+          <select id="lang-target" class="select" data-role="lang-target">
+            <option value="ru" selected>ru — Русский</option>
+            <option value="en">en — English</option>
+            <option value="uk">uk — Українська</option>
+          </select>
+        </label>
+      </div>
+      <div class="toolbar__group" role="group" aria-label="Перевод">
+        <button type="button" class="btn btn-primary" data-role="translate-page">
+          <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#translate"></use></svg>
+          Перевести страницу
+        </button>
+        <button type="button" class="btn btn-accent" data-role="translate-all">Перевести всё</button>
+      </div>
+      <fieldset class="sfx-toggle" data-state="empty" hidden>
+        <legend>Звуки: не трогать / заменить</legend>
+        <span class="sfx-toggle__name" aria-hidden="true">Звуки</span>
+        <label class="choice"><input type="radio" name="sfx-mode-empty" value="keep" checked> Не трогать</label>
+        <label class="choice"><input type="radio" name="sfx-mode-empty" value="replace"> Заменить</label>
+      </fieldset>
+      <fieldset class="sfx-toggle" data-state="loading" hidden>
+        <legend>Звуки: не трогать / заменить</legend>
+        <span class="sfx-toggle__name" aria-hidden="true">Звуки</span>
+        <label class="choice"><input type="radio" name="sfx-mode-loading" value="keep"> Не трогать</label>
+        <label class="choice"><input type="radio" name="sfx-mode-loading" value="replace" checked> Заменить</label>
+      </fieldset>
+      <fieldset class="sfx-toggle" data-state="error" hidden>
+        <legend>Звуки: не трогать / заменить</legend>
+        <span class="sfx-toggle__name" aria-hidden="true">Звуки</span>
+        <label class="choice"><input type="radio" name="sfx-mode-error" value="keep"> Не трогать</label>
+        <label class="choice"><input type="radio" name="sfx-mode-error" value="replace" checked> Заменить</label>
+      </fieldset>
+      <fieldset class="sfx-toggle" data-state="ready">
+        <legend>Звуки: не трогать / заменить</legend>
+        <span class="sfx-toggle__name" aria-hidden="true">Звуки</span>
+        <label class="choice"><input type="radio" name="sfx-mode-ready" value="keep"> Не трогать</label>
+        <label class="choice"><input type="radio" name="sfx-mode-ready" value="replace" checked> Заменить</label>
+      </fieldset>
+      <div class="toolbar__spacer"></div>
+      <div class="toolbar__group">
+        <button type="button" class="btn btn-accent" data-role="export">
+          <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#export"></use></svg>
+          Экспорт
+        </button>
+        <button type="button" class="btn btn-ghost btn-icon" data-role="settings" aria-label="Настройки" title="Настройки (Ctrl+,)">
+          <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#settings"></use></svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="workspace">
+      <nav class="pages" aria-label="Страницы">
+        <div class="pages__head">Страницы</div>
+        <div class="pages__list" role="listbox" data-role="page-list" aria-label="Страницы главы" aria-multiselectable="true">
+          <div class="page" role="option" id="page-01" aria-selected="false" tabindex="-1">
+            <img class="page__thumb" src="../../test-img/test-2.png" alt="">
+            <span class="page__body">
+              <span class="page__title"><span class="page__num">01</span> <span class="page__name">001.jpg</span></span>
+              <span class="page__status page__status--done"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> <span>готово</span></span>
+            </span>
+          </div>
+          <div class="page" role="option" id="page-02" aria-selected="true" tabindex="0">
+            <img class="page__thumb" src="../../test-img/test-1.jpg" alt="">
+            <span class="page__body">
+              <span class="page__title"><span class="page__num">02</span> <span class="page__name">002.jpg</span></span>
+              <span class="page__status page__status--edit"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#brush"></use></svg> <span>звук</span></span>
+            </span>
+          </div>
+          <div class="page" role="option" id="page-03" aria-selected="false" tabindex="-1">
+            <img class="page__thumb" src="../../test-img/test-2.png" alt="">
+            <span class="page__body">
+              <span class="page__title"><span class="page__num">03</span> <span class="page__name">003.jpg</span></span>
+              <span class="page__status page__status--queue"><svg class="icon icon--right" aria-hidden="true"><use href="../icons/icons.svg#chevron"></use></svg> <span>в очереди</span></span>
+            </span>
+          </div>
+          <div class="page" role="option" id="page-04" aria-selected="false" tabindex="-1">
+            <img class="page__thumb" src="../../test-img/test-1.jpg" alt="">
+            <span class="page__body">
+              <span class="page__title"><span class="page__num">04</span> <span class="page__name">004.jpg</span></span>
+              <span class="page__status page__status--idle"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#file"></use></svg> <span>не начата</span></span>
+            </span>
+          </div>
+        </div>
+        <p class="pages__sum"><span>1 из 4 готово</span></p>
+      </nav>
+
+      <main class="viewer" id="viewer" data-role="viewer">
+        <div class="viewer__bar">
+          <div class="segmented" role="radiogroup" aria-label="Вид">
+            <button type="button" class="btn" role="radio" data-role="view-original" aria-checked="true">
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#original"></use></svg>
+              Оригинал
+            </button>
+            <button type="button" class="btn" role="radio" data-role="view-result" aria-checked="false">
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#translate"></use></svg>
+              Результат
+            </button>
+            <button type="button" class="btn" role="radio" data-role="view-compare" aria-checked="false">
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#compare"></use></svg>
+              Сравнение
+            </button>
+          </div>
+          <div role="group" aria-label="Слои">
+            <button type="button" class="btn btn-ghost" data-role="layer-boxes" aria-pressed="true">
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#layers"></use></svg>
+              Рамки
+            </button>
+            <button type="button" class="btn btn-ghost" data-role="layer-mask" aria-pressed="false">
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#mask"></use></svg>
+              Маска
+            </button>
+          </div>
+          <div role="radiogroup" aria-label="Инструмент">
+            <button type="button" class="btn btn-ghost" role="radio" data-role="tool-select" aria-checked="true">
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#select"></use></svg>
+              Выбор
+            </button>
+            <button type="button" class="btn btn-ghost" role="radio" data-role="tool-region" aria-checked="false">
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#region"></use></svg>
+              Регион
+            </button>
+            <button type="button" class="btn btn-ghost" role="radio" data-role="tool-brush" aria-checked="false">
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#brush"></use></svg>
+              Кисть
+            </button>
+            <button type="button" class="btn btn-ghost" role="radio" data-role="tool-eraser" aria-checked="false">
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#eraser"></use></svg>
+              Ластик
+            </button>
+          </div>
+          <label class="brush-size" for="brush-size">Размер
+            <input id="brush-size" data-role="brush-size" type="range" min="1" max="64" value="12">
+            <span>12</span>
+          </label>
+          <div class="zoom" data-role="zoom">
+            <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#zoom"></use></svg>
+            <button type="button" class="btn btn-ghost btn-icon" aria-label="Уменьшить">−</button>
+            <span class="zoom__value">Вписать</span>
+            <button type="button" class="btn btn-ghost btn-icon" aria-label="Увеличить">+</button>
+          </div>
+          <button type="button" class="btn btn-ghost btn-icon" data-role="undo" aria-label="Отменить" title="Отменить (Ctrl+Z)">
+            <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#undo"></use></svg>
+          </button>
+          <button type="button" class="btn btn-ghost btn-icon" data-role="redo" aria-label="Повторить" title="Повторить (Ctrl+Y)" disabled>
+            <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#redo"></use></svg>
+          </button>
+        </div>
+
+        <div class="sfx-status" data-state="empty" hidden>
+          <h2 class="sfx-head">
+            <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#info"></use></svg>
+            На странице нет звуков
+          </h2>
+        </div>
+        <div class="sfx-status" data-state="loading" aria-busy="true" hidden>
+          <h2 class="sfx-head">
+            <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#play"></use></svg>
+            Подбираем стиль звука
+          </h2>
+        </div>
+        <div class="sfx-status" data-state="error" hidden>
+          <h2 class="sfx-head">
+            <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#error"></use></svg>
+            Не удалось подобрать стиль
+          </h2>
+        </div>
+        <div class="sfx-status" data-state="ready">
+          <h2 class="sfx-head">
+            <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg>
+            Звук на странице
+          </h2>
+        </div>
+
+        <div class="stage">
+          <div class="frame">
+            <img class="frame__img" src="../../test-img/test-1.jpg" alt="Страница 002.jpg">
+            <div data-state="empty" hidden>
+              <div class="box" style="left:80%;top:0%;width:12%;height:13%">
+                <span class="box__num">1</span>
+              </div>
+            </div>
+            <div data-state="loading" aria-busy="true" hidden>
+              <div class="box" style="left:80%;top:0%;width:12%;height:13%">
+                <span class="box__num">1</span>
+              </div>
+              <div class="box box--sfx" style="left:51%;top:0%;width:28%;height:13%">
+                <span class="box__num">2</span>
+                <span class="box__flag">звук</span>
+              </div>
+            </div>
+            <div data-state="error" hidden>
+              <div class="box" style="left:80%;top:0%;width:12%;height:13%">
+                <span class="box__num">1</span>
+              </div>
+              <div class="box box--sfx" style="left:51%;top:0%;width:28%;height:13%">
+                <span class="box__num">2</span>
+                <span class="box__flag">звук</span>
+              </div>
+            </div>
+            <div data-state="ready">
+              <div class="box" style="left:80%;top:0%;width:12%;height:13%">
+                <span class="box__num">1</span>
+              </div>
+              <div class="box box--sfx" style="left:51%;top:0%;width:28%;height:13%">
+                <span class="box__num">2</span>
+                <span class="box__flag">звук</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <ol class="steps" aria-label="Шаги обработки">
+          <li class="is-done"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> Детекция</li>
+          <li class="is-done"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> OCR</li>
+          <li class="is-done"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> Перевод</li>
+          <li class="is-done"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> Маска</li>
+          <li class="is-done"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> Очистка</li>
+          <li class="is-done"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> Вёрстка</li>
+        </ol>
+      </main>
+
+      <aside class="inspector" data-role="inspector" aria-label="Инспектор" data-tabs>
+        <div class="tabs" role="tablist" aria-label="Инспектор">
+          <button type="button" class="btn" role="tab" id="tab-text" data-tab="text" aria-selected="true" aria-controls="panel-text">Текст</button>
+          <button type="button" class="btn" role="tab" id="tab-page" data-tab="page" aria-selected="false" aria-controls="panel-page">Страница</button>
+        </div>
+        <div class="inspector__panel" id="panel-text" role="tabpanel" data-role="inspector-text" data-tabpanel="text" aria-labelledby="tab-text">
+          <div class="inspector__bar">
+            <button type="button" class="btn btn-ghost">
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#add"></use></svg>
+              Добавить регион
+            </button>
+          </div>
+          <div class="inspector__scroll">
+            <div class="sfx-block" data-state="empty" hidden>
+              <article class="region-card">
+                <div class="region-card__head">
+                  <span class="region-card__num">1</span>
+                  <span class="region-card__title">I'M HUNGRYYY.</span>
+                </div>
+                <p class="muted">Я ГОЛОДЕН! · диалог · Кирби</p>
+              </article>
+              <p class="field-hint">
+                <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#info"></use></svg>
+                Звуки на странице не найдены. Здесь только реплика — её переводим как диалог.
+              </p>
+              <div class="region-card__actions">
+                <button type="button" class="btn" disabled>Подобрать стиль заново</button>
+              </div>
+            </div>
+
+            <div class="sfx-block" data-state="loading" aria-busy="true" hidden>
+              <article class="region-card">
+                <div class="region-card__head">
+                  <span class="region-card__num">1</span>
+                  <span class="region-card__title">I'M HUNGRYYY.</span>
+                </div>
+                <p class="muted">Я ГОЛОДЕН! · диалог · Кирби</p>
+              </article>
+              <article class="region-card region-card--sfx">
+                <div class="region-card__head">
+                  <span class="region-card__num">2</span>
+                  <span class="region-card__title">GROWL GROWL</span>
+                  <span class="region-card__flag">звук</span>
+                </div>
+                <label class="field" for="sfx-orig-loading">Оригинал
+                  <textarea id="sfx-orig-loading" class="textarea" lang="en" rows="2" readonly>GROWL GROWL</textarea>
+                </label>
+                <label class="field" for="sfx-tr-loading">По-русски
+                  <textarea id="sfx-tr-loading" class="textarea" lang="ru" rows="2" disabled>РРР / УРР</textarea>
+                </label>
+                <p class="field-hint">
+                  <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#play"></use></svg>
+                  Сверяем рисовку букв с библиотекой образцов.
+                </p>
+                <div class="region-card__actions">
+                  <button type="button" class="btn btn-accent" disabled>Подобрать стиль заново</button>
+                </div>
+              </article>
+            </div>
+
+            <div class="sfx-block" data-state="error" hidden>
+              <article class="region-card">
+                <div class="region-card__head">
+                  <span class="region-card__num">1</span>
+                  <span class="region-card__title">I'M HUNGRYYY.</span>
+                </div>
+                <p class="muted">Я ГОЛОДЕН! · диалог · Кирби</p>
+              </article>
+              <article class="region-card region-card--sfx">
+                <div class="region-card__head">
+                  <span class="region-card__num">2</span>
+                  <span class="region-card__title">GROWL GROWL</span>
+                  <span class="region-card__flag">звук</span>
+                </div>
+                <label class="field" for="sfx-orig-error">Оригинал
+                  <textarea id="sfx-orig-error" class="textarea" lang="en" rows="2" readonly>GROWL GROWL</textarea>
+                </label>
+                <label class="field" for="sfx-tr-error">По-русски
+                  <textarea id="sfx-tr-error" class="textarea" lang="ru" rows="2" readonly>РРР / УРР</textarea>
+                </label>
+                <p id="sfx-error-reason" class="sfx-reason">
+                  <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#error"></use></svg>
+                  <span>В библиотеке образцов нет совпадения для этой рисовки букв.</span>
+                </p>
+                <div class="region-card__actions">
+                  <button type="button" class="btn btn-accent" aria-describedby="sfx-error-reason">Повторить</button>
+                </div>
+              </article>
+            </div>
+
+            <div class="sfx-block" data-state="ready">
+              <article class="region-card">
+                <div class="region-card__head">
+                  <span class="region-card__num">1</span>
+                  <span class="region-card__title">I'M HUNGRYYY.</span>
+                </div>
+                <p class="muted">Я ГОЛОДЕН! · диалог · Кирби</p>
+              </article>
+              <article class="region-card region-card--sfx">
+                <div class="region-card__head">
+                  <span class="region-card__num">2</span>
+                  <span class="region-card__title">GROWL GROWL</span>
+                  <span class="region-card__flag">звук</span>
+                </div>
+                <label class="field" for="sfx-orig-ready">Оригинал
+                  <textarea id="sfx-orig-ready" class="textarea" lang="en" rows="2" readonly>GROWL GROWL</textarea>
+                </label>
+                <label class="field" for="sfx-tr-ready">По-русски
+                  <textarea id="sfx-tr-ready" class="textarea" lang="ru" rows="2">РРР / УРР</textarea>
+                </label>
+                <p id="sfx-style-note" class="field-hint">
+                  <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#info"></use></svg>
+                  Звук остаётся в рисованном стиле букв, не шрифтом баллона.
+                </p>
+                <div class="region-card__actions">
+                  <button type="button" class="btn btn-accent" aria-describedby="sfx-style-note">Подобрать стиль заново</button>
+                </div>
+              </article>
+            </div>
+          </div>
+        </div>
+        <div class="inspector__panel" id="panel-page" role="tabpanel" data-role="inspector-page" data-tabpanel="page" aria-labelledby="tab-page" hidden>
+          <div class="inspector__scroll">
+            <dl class="kv">
+              <dt>Файл</dt><dd>002.jpg</dd>
+              <dt>Откуда</dt><dd>en</dd>
+              <dt>Куда</dt><dd>ru</dd>
+              <dt>OCR</dt><dd>VLM</dd>
+              <dt>Перевод</dt><dd>LLM</dd>
+              <dt>Очистка</dt><dd>LaMa</dd>
+            </dl>
+            <p class="field-hint">
+              <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#info"></use></svg>
+              Режим звуков задаётся переключателем «Звуки» на панели инструментов.
+            </p>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <footer class="statusbar" data-role="statusbar">
+      <span class="statusbar__job" aria-live="polite">
+        <span data-state="empty" hidden>Нет звуков · страница 2</span>
+        <span data-state="loading" hidden>Подбираем стиль звука · страница 2</span>
+        <span data-state="error" hidden>Стиль звука не подобран · страница 2</span>
+        <span data-state="ready">Звук на странице · страница 2</span>
+      </span>
+      <span class="statusbar__llm">
+        <span class="bullet bullet--on" aria-hidden="true">●</span>
+        <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#llm"></use></svg>
+        <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg>
+        <span>LLM</span>
+      </span>
+      <span class="statusbar__device">
+        <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#gpu"></use></svg>
+        GPU
+      </span>
+      <span class="statusbar__zoom">Вписать</span>
+      <nav class="sfx-review" aria-label="Состояние макета">
+        <a data-state-link="empty" href="?state=empty">Пусто</a>
+        <a data-state-link="loading" href="?state=loading">Загрузка</a>
+        <a data-state-link="error" href="?state=error">Ошибка</a>
+        <a data-state-link="ready" href="?state=ready" aria-current="page">Готово</a>
+      </nav>
+    </footer>
+  </div>
+  <script>
+  (function () {
+    var known = { empty: 1, loading: 1, error: 1, ready: 1 };
+    var state = "ready";
+    try {
+      var raw = new URLSearchParams(location.search).get("state") || "";
+      if (known[raw]) state = raw;
+    } catch (err) {}
+    document.querySelectorAll("[data-state]").forEach(function (el) {
+      el.hidden = el.getAttribute("data-state") !== state;
+    });
+    var viewer = document.getElementById("viewer");
+    if (viewer) {
+      if (state === "loading") viewer.setAttribute("aria-busy", "true");
+      else viewer.removeAttribute("aria-busy");
+    }
+    var theme = document.documentElement.getAttribute("data-theme") || "";
+    var scale = 100;
+    var rawScale = document.documentElement.style.getPropertyValue("--ui-scale");
+    if (rawScale) scale = Math.round(parseFloat(rawScale) * 100);
+    document.querySelectorAll("a[data-state-link]").forEach(function (link) {
+      var name = link.getAttribute("data-state-link");
+      var q = ["state=" + name];
+      if (theme === "dark" || theme === "light") q.push("theme=" + theme);
+      if (scale !== 100) q.push("scale=" + scale);
+      link.setAttribute("href", "?" + q.join("&"));
+      if (name === state) link.setAttribute("aria-current", "page");
+      else link.removeAttribute("aria-current");
+    });
+    document.querySelectorAll("[data-tabs]").forEach(function (root) {
+      root.querySelectorAll("[data-tab]").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          var name = btn.getAttribute("data-tab");
+          root.querySelectorAll("[data-tab]").forEach(function (item) {
+            item.setAttribute("aria-selected", item === btn ? "true" : "false");
+          });
+          root.querySelectorAll("[data-tabpanel]").forEach(function (panel) {
+            panel.hidden = panel.getAttribute("data-tabpanel") !== name;
+          });
+        });
+      });
+    });
+  })();
+  </script>
+</body>
+</html>

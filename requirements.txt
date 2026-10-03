@@ -1,0 +1,25 @@
+# Translation (Argos Translate - оффлайн)
+argos-translate @ git+https://github.com/argosopentech/argos-translate.git
+
+# Image processing / ML
+torch>=2.0.0
+opencv-python>=4.8.0
+Pillow>=10.0.0
+fonttools
+numpy>=1.24.0
+rapidocr>=3.0.0
+onnxruntime>=1.16.0
+
+# Utilities
+requests>=2.31.0
+pyphen>=0.14.0
+keyring>=25.0.0
+pywebview>=5.1
+
+# CUDA-сборка torch для локальной GPU: python scripts/setup_models.py --torch-cuda
+
+# Development
+pytest>=7.4.0
+black>=23.0.0
+ruff>=0.0.290
+playwright>=1.40.0

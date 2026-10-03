@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>
+  (function () {
+    var theme = "";
+    var scale = "";
+    try {
+      var params = new URLSearchParams(location.search);
+      theme = params.get("theme") || "";
+      scale = params.get("scale") || "";
+      if (!theme) theme = localStorage.getItem("ilt-mockup-theme") || "";
+      if (!scale) scale = localStorage.getItem("ilt-mockup-scale") || "";
+    } catch (err) {}
+    if (theme === "dark" || theme === "light") {
+      document.documentElement.setAttribute("data-theme", theme);
+    }
+    var n = parseInt(scale, 10);
+    if (n >= 100 && n <= 150 && n !== 100) {
+      document.documentElement.style.setProperty("--ui-scale", String(n / 100));
+    }
+  })();
+  </script>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>Image Localization Tool — первый запуск</title>
+  <link rel="stylesheet" href="../css/tokens.css">
+  <link rel="stylesheet" href="../css/base.css">
+  <link rel="stylesheet" href="../css/components.css">
+  <link rel="stylesheet" href="../css/settings.css">
+</head>
+<body>
+  <div class="app wizard">
+    <header class="toolbar">
+      <h1>Первый запуск</h1>
+    </header>
+    <div class="wizard__body">
+      <nav class="stepper" aria-label="Шаги мастера">
+        <button type="button" class="stepper__btn is-done" data-step-btn="1">
+          <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg>
+          1. Тема
+        </button>
+        <button type="button" class="stepper__btn is-active" data-step-btn="2" aria-current="step">
+          <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg>
+          2. Модели
+        </button>
+        <button type="button" class="stepper__btn" data-step-btn="3">
+          <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg>
+          3. Сервер LLM
+        </button>
+        <button type="button" class="stepper__btn" data-step-btn="4">
+          <svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg>
+          4. Языки
+        </button>
+      </nav>
+      <div class="wizard__panel">
+        <section class="wizard__step" data-step="1" hidden>
+          <h2>Тема</h2>
+          <p class="settings__intro">Её можно сменить позже в настройках. «Как в системе» следует за Windows.</p>
+          <hr class="settings__rule">
+          <div class="choice-col" role="radiogroup" aria-label="Тема">
+            <label class="choice"><input type="radio" name="theme" value="dark"> Тёмная</label>
+            <label class="choice"><input type="radio" name="theme" value="light"> Светлая</label>
+            <label class="choice"><input type="radio" name="theme" value="system" checked> Как в системе</label>
+          </div>
+        </section>
+
+        <section class="wizard__step" data-step="2">
+          <h2>Модели</h2>
+          <p class="settings__intro">Проверка файлов и докачка. Без них глава не обработается.</p>
+          <hr class="settings__rule">
+          <div class="model-row">
+            <span class="model-row__name">Детектор RT-DETR</span>
+            <span class="badge badge--ok"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> готово</span>
+            <span></span>
+          </div>
+          <div class="model-row">
+            <span class="model-row__main">
+              <span class="model-row__name">LaMa</span>
+              <progress max="100" value="62" aria-label="Загрузка LaMa">62 %</progress>
+            </span>
+            <span class="badge"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#play"></use></svg> 62 %</span>
+            <span></span>
+          </div>
+          <div class="model-row">
+            <span class="model-row__name">RapidOCR</span>
+            <span class="badge badge--ok"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#check"></use></svg> готово</span>
+            <span></span>
+          </div>
+          <div class="model-row">
+            <span class="model-row__name">Argos en → ru</span>
+            <span class="badge badge--warn"><svg class="icon" aria-hidden="true"><use href="../icons/icons.svg#warning"></use></svg> не установлена</span>
+            <button type="button" class="btn btn-accent">Установить</button>
+          </div>
+        </section>
+
+        <section class="wizard__step" data-step="3" hidden>
+          <h2>Сервер LLM</h2>
+          <p class="settings__intro">Необязательно. Без сервера останутся RapidOCR и Argos.</p>
+          <hr class="settings__rule">
+          <div class="form">
+            <label class="form__label" for="wiz-url">Адрес</label>
+            <input id="wiz-url" class="input" type="url" value="" placeholder="http://127.0.0.1:1234/v1" spellcheck="false">
+            <label class="form__label" for="wiz-model">Модель</label>
+            <input id="wiz-model" class="input" type="text" value="" placeholder="имя модели" spellcheck="false">
+            <div class="form__actions form__full">
+              <button type="button" class="btn btn-accent">Проверить</button>
+            </div>
+            <p class="field-hint form__full">Проверка убеждается, что модель принимает картинки. Сейчас: не проверено.</p>
+          </div>
+        </section>
+
+        <section class="wizard__step" data-step="4" hidden>
+          <h2>Языки</h2>
+          <p class="settings__intro">Языки по умолчанию. На каждой главе их можно сменить.</p>
+          <hr class="settings__rule">
+          <div class="form">
+            <label class="form__label" for="wiz-src">Откуда</label>
+            <select id="wiz-src" class="select">
+              <option value="en" selected>en — English</option>
+              <option value="ja">ja — 日本語</option>
+              <option value="ko">ko — 한국어</option>
+            </select>
+            <label class="form__label" for="wiz-dst">Куда</label>
+            <select id="wiz-dst" class="select">
+              <option value="ru" selected>ru — Русский</option>
+              <option value="en">en — English</option>
+            </select>
+          </div>
+        </section>
+      </div>
+    </div>
+    <div class="wizard__nav">
+      <button type="button" class="btn btn-accent" id="wizard-prev">Назад</button>
+      <div class="wizard__nav-right">
+        <button type="button" class="btn btn-primary" id="wizard-next">Далее</button>
+      </div>
+    </div>
+  </div>
+  <script>
+  (function () {
+    var key = "ilt-mockup-theme";
+    function currentTheme() {
+      return document.documentElement.getAttribute("data-theme") || "system";
+    }
+    function applyTheme(theme) {
+      if (theme === "dark" || theme === "light") {
+        document.documentElement.setAttribute("data-theme", theme);
+      } else {
+        document.documentElement.removeAttribute("data-theme");
+        theme = "system";
+      }
+      try { localStorage.setItem(key, theme); } catch (err) {}
+      document.querySelectorAll('input[name="theme"]').forEach(function (input) {
+        input.checked = input.value === theme;
+      });
+    }
+    document.querySelectorAll('input[name="theme"]').forEach(function (input) {
+      input.addEventListener("change", function () {
+        if (input.checked) applyTheme(input.value);
+      });
+    });
+    applyTheme(currentTheme());
+
+    var current = 2;
+    function show(n) {
+      current = n;
+      document.querySelectorAll("[data-step]").forEach(function (panel) {
+        panel.hidden = panel.getAttribute("data-step") !== String(n);
+      });
+      document.querySelectorAll("[data-step-btn]").forEach(function (btn) {
+        var step = Number(btn.getAttribute("data-step-btn"));
+        var on = step === n;
+        btn.classList.toggle("is-active", on);
+        btn.classList.toggle("is-done", step < n);
+        if (on) btn.setAttribute("aria-current", "step");
+        else btn.removeAttribute("aria-current");
+      });
+      var prev = document.getElementById("wizard-prev");
+      var next = document.getElementById("wizard-next");
+      if (prev) prev.disabled = n === 1;
+      if (next) next.textContent = n === 4 ? "Готово" : "Далее";
+    }
+    document.querySelectorAll("[data-step-btn]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        show(Number(btn.getAttribute("data-step-btn")));
+      });
+    });
+    var prevBtn = document.getElementById("wizard-prev");
+    var nextBtn = document.getElementById("wizard-next");
+    if (prevBtn) prevBtn.addEventListener("click", function () { if (current > 1) show(current - 1); });
+    if (nextBtn) nextBtn.addEventListener("click", function () { if (current < 4) show(current + 1); });
+    show(2);
+  })();
+  </script>
+</body>
+</html>
