@@ -32,6 +32,7 @@ env/
 .cursor/
 .ruff_cache/
 AGENTS.md
+docs/PROBLEMS.md
 *.swp
 *.swo
 *~

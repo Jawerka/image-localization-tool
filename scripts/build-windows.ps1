@@ -12,7 +12,8 @@
 param(
     [string] $OutputDir = "",
     [switch] $SkipPyInstaller,
-    [switch] $SkipInno
+    [switch] $SkipInno,
+    [switch] $SkipModels
 )
 
 $ErrorActionPreference = 'Stop'
@@ -127,7 +128,15 @@ if (Test-Path -LiteralPath $DistDir) {
     if ($LASTEXITCODE -ne 0) {
         throw "Staging web and fonts failed with exit code $LASTEXITCODE"
     }
-    Copy-ModelsBesideExe -DistDir $DistDir
+    if ($SkipModels) {
+        $modelsDest = Join-Path $DistDir 'models'
+        if (Test-Path -LiteralPath $modelsDest) {
+            Write-Host "==> Remove models from dist"
+            Remove-Item -LiteralPath $modelsDest -Recurse -Force
+        }
+    } else {
+        Copy-ModelsBesideExe -DistDir $DistDir
+    }
 }
 
 $smoke = Join-Path $RepoRoot 'scripts\smoke_dist.py'

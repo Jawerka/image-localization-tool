@@ -24,6 +24,42 @@ _VERSION_RE = re.compile(
     r"""^[ \t]*__version__\s*=\s*(['"])([^'"]+)\1\s*$""",
     re.MULTILINE,
 )
+# Имена без подстроки cuda: cublas, cufft, npp*. «cuda» ловит torch_cuda, cudart, cudnn.
+_CUDA_MARKERS = (
+    "cuda",
+    "cublas",
+    "cufft",
+    "curand",
+    "cusolver",
+    "cusparse",
+    "nvrtc",
+    "nvjitlink",
+    "cupti",
+    "nvjpeg",
+    "nppc",
+    "nppi",
+    "npps",
+)
+_BINARY_SUFFIXES = (".dll", ".so", ".dylib", ".pyd")
+
+
+def is_cuda_binary(path: str) -> bool:
+    """DLL CUDA по имени файла. ``torch_cpu.dll`` сюда не попадает."""
+    name = Path(str(path)).name.casefold()
+    if not name.endswith(_BINARY_SUFFIXES):
+        return False
+    return any(marker in name for marker in _CUDA_MARKERS)
+
+
+def drop_cuda_entries(entries):
+    """Убрать из списка PyInstaller записи, чьё имя — библиотека CUDA."""
+    kept = []
+    for entry in entries:
+        name = entry[0] if isinstance(entry, (tuple, list)) and entry else entry
+        if is_cuda_binary(str(name)):
+            continue
+        kept.append(entry)
+    return kept
 
 
 def repo_root() -> Path:

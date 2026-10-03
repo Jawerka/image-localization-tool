@@ -113,7 +113,7 @@ ZIP, CBZ, CBR/RAR, CB7/7Z и CBT/TAR распаковываются в ката�
 | POST | `/api/settings/secret` | Записать непустой `api_key` в keyring |
 | POST | `/api/llm/check` | Проверить адрес LLM. В ответе `vision` всегда `false` |
 | GET | `/api/models` | Есть ли на диске `detector`, `lama` и `font` (`present`, `path`) |
-| POST | `/api/models/download` | Скачать `kind`: `detector`, `lama` или `font`. Ответ 202 уходит после окончания загрузки. По ходу шлётся `model.progress` |
+| POST | `/api/models/download` | Скачать `kind`: `detector` и `lama` в каталог моделей, `font` в `fonts` рядом с программой. Ответ 202 уходит после окончания загрузки. По ходу шлётся `model.progress` |
 | GET | `/api/fonts` | Каталог шрифтов: `id`, `family`, `category`, `cyrillic` |
 | GET | `/api/fonts/{id}/preview` | Образец `image/png`. Query `text` необязателен, по умолчанию «Привет», не длиннее 40 символов |
 | POST | `/api/drop` | Добавить пути из `paths`: картинки, папки и архивы. Нет проекта — создаётся. Несуществующий путь в этом запросе — ошибка. Пустой архив среди других файлов попадает в `warnings`; если архив один и в нём нечего переводить — ошибка, проект не создаётся |

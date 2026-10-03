@@ -10,7 +10,9 @@ from pathlib import Path
 
 from scripts.smoke_dist import (
     dist_problems,
+    drop_cuda_entries,
     expected_font_names,
+    is_cuda_binary,
     read_app_version,
     stage_runtime_files,
 )
@@ -61,10 +63,30 @@ def test_build_script_is_ascii_and_checks_exit_codes():
     assert "$LASTEXITCODE" in text
     assert "SkipPyInstaller" in text
     assert "SkipInno" in text
+    assert "SkipModels" in text
     assert "read_app_version" in text
     assert "/DAppVersion=" in text
     assert "smoke_dist.py" in text
     assert "ISCC.exe not found" in text
+
+
+def test_cuda_dlls_are_dropped_and_cpu_torch_stays():
+    assert is_cuda_binary("torch/lib/torch_cuda.dll")
+    assert is_cuda_binary("cublasLt64_13.dll")
+    assert is_cuda_binary("onnxruntime_providers_cuda.dll")
+    assert not is_cuda_binary("torch/lib/torch_cpu.dll")
+    assert not is_cuda_binary("torch/cuda/__init__.py")
+    kept = drop_cuda_entries([
+        ("torch/lib/torch_cuda.dll", "src", "BINARY"),
+        ("torch/lib/torch_cpu.dll", "src", "BINARY"),
+        ("torch/cuda/__init__.py", "src", "DATA"),
+    ])
+    assert [item[0] for item in kept] == ["torch/lib/torch_cpu.dll", "torch/cuda/__init__.py"]
+
+
+def test_spec_drops_cuda_binaries_without_excluding_torch():
+    text = SPEC.read_text(encoding="utf-8")
+    assert "drop_cuda_entries" in text
 
 
 def test_spec_does_not_exclude_torch():

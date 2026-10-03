@@ -13,9 +13,19 @@ from src.app.model_manager import (
     LAMA_FILENAME,
     LAMA_URL,
     check_llm,
+    dest_dir,
     download,
     status,
 )
+
+
+def test_font_goes_beside_program_and_models_follow_override(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.app.model_manager.install_root", lambda: tmp_path)
+    monkeypatch.setattr("src.app.model_manager.models_dir", lambda override=None: Path(override) if override else tmp_path / "models")
+    assert dest_dir("font") == tmp_path / "fonts"
+    custom = tmp_path / "custom"
+    assert dest_dir("lama", str(custom)) == custom
+    assert dest_dir("detector", "  ") == tmp_path / "models"
 
 
 def test_urls_match_setup_script():

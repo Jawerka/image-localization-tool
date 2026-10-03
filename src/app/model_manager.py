@@ -10,7 +10,7 @@ import json
 import urllib.request
 from pathlib import Path
 
-from src.utils.paths import resolve_font, resolve_model
+from src.utils.paths import install_root, models_dir, resolve_font, resolve_model
 
 # Совпадает с scripts/setup_models.py (LAMA_URL, FONT_URL).
 LAMA_URL = (
@@ -58,6 +58,14 @@ FONT_PACK = (
         "Creepster-Regular.ttf",
     ),
 )
+
+
+def dest_dir(kind: str, models_override: str | Path | None = None) -> Path:
+    """Куда класть файл: шрифт в ``fonts`` рядом с программой, остальное в модели."""
+    if kind == "font":
+        return install_root() / "fonts"
+    override = str(models_override).strip() if models_override else ""
+    return models_dir(override or None)
 
 
 def status(models_override: str = "") -> dict:

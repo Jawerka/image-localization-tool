@@ -146,8 +146,9 @@ begin
   end;
 end;
 
-procedure OnWebView2DownloadProgress(const Url, FileName: String; const Progress, ProgressMax: Int64);
+function OnWebView2DownloadProgress(const Url, FileName: String; const Progress, ProgressMax: Int64): Boolean;
 begin
+  Result := True;
   try
     WizardForm.StatusLabel.Caption := 'Downloading Microsoft Edge WebView2 Runtime...';
   except

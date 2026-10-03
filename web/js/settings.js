@@ -7,8 +7,9 @@ import { clone, getState, patch, setBanner, settingsForSave, subscribe } from ".
 const LABELS = {
   detector: "Детектор RT-DETR",
   lama: "LaMa",
-  font: "Шрифт",
+  font: "Шрифт Heroika",
 };
+const REQUIRED = ["detector", "lama", "font"];
 
 let screen;
 let wizardScreen;
@@ -19,6 +20,8 @@ let previewing = false;
 let secretDirty = false;
 let modelItems = [];
 let modelProgress = {};
+let downloading = false;
+let modelError = "";
 let remoteActionError = "";
 
 export function isOpen() {
@@ -74,8 +77,9 @@ export function init() {
   document.querySelector("[data-role='open-models-dir']").addEventListener("click", () => {
     dialogReveal({ kind: "models" }).catch((error) => notify(error.message));
   });
-  document.querySelector("[data-role='model-list']").addEventListener("click", onDownloadClick);
-  document.querySelector("[data-role='wizard-models']").addEventListener("click", onDownloadClick);
+  document.querySelectorAll("[data-role='models-download']").forEach((button) => {
+    button.addEventListener("click", () => downloadMissing());
+  });
   document.getElementById("wizard-prev").addEventListener("click", () => showWizardStep(wizardStep - 1));
   document.getElementById("wizard-next").addEventListener("click", onWizardNext);
   wizardScreen.querySelectorAll("[data-step-btn]").forEach((button) => {
@@ -301,6 +305,7 @@ function choose(list) {
 }
 
 async function onWizardNext() {
+  if (wizardStep === 2 && !requiredReady()) return;
   if (wizardStep < 4) {
     showWizardStep(wizardStep + 1);
     return;
@@ -327,7 +332,9 @@ async function onWizardNext() {
 }
 
 function showWizardStep(step) {
-  wizardStep = Math.min(4, Math.max(1, step));
+  const target = Math.min(4, Math.max(1, step));
+  if (target > 2 && !requiredReady()) return;
+  wizardStep = target;
   wizardScreen.querySelectorAll("[data-step]").forEach((panel) => {
     panel.hidden = Number(panel.dataset.step) !== wizardStep;
   });
@@ -341,6 +348,7 @@ function showWizardStep(step) {
   });
   document.getElementById("wizard-prev").disabled = wizardStep === 1;
   document.getElementById("wizard-next").textContent = wizardStep === 4 ? "Готово" : "Далее";
+  paintModelGate();
   if (wizardStep === 2) refreshModels();
 }
 
@@ -359,6 +367,7 @@ function renderModelLists() {
   const wizardHost = document.querySelector("[data-role='wizard-models']");
   if (settingsHost) settingsHost.innerHTML = modelItems.map((item) => modelRow(item, "settings")).join("");
   if (wizardHost) wizardHost.innerHTML = modelItems.map((item) => modelRow(item, "wizard")).join("");
+  paintModelGate();
 }
 
 function modelRow(model, place) {
@@ -370,25 +379,73 @@ function modelRow(model, place) {
   const name = percent != null && !model.present
     ? `<span class="model-row__main"><span class="model-row__name">${escapeText(model.name)}</span><progress max="100" value="${Math.round(percent)}" aria-label="Загрузка ${escapeAttr(model.name)}">${Math.round(percent)} %</progress></span>`
     : `<span class="model-row__name">${escapeText(model.name)}</span>`;
-  const button = !model.present && ["detector", "lama", "font"].includes(model.kind)
-    ? `<button type="button" class="btn btn-accent" data-download="${escapeAttr(model.kind)}">Установить</button>`
-    : "<span></span>";
-  return `<div class="model-row">${name}${badge}${button}</div>`;
+  return `<div class="model-row">${name}${badge}<span></span></div>`;
 }
 
-async function onDownloadClick(event) {
-  const button = event.target.closest("[data-download]");
-  if (!button) return;
-  const kind = button.dataset.download;
-  modelProgress[kind] = 0;
-  renderModelLists();
+function requiredReady() {
+  return REQUIRED.every((kind) => modelItems.some((item) => item.kind === kind && item.present));
+}
+
+function missingKinds() {
+  return REQUIRED.filter((kind) => !modelItems.some((item) => item.kind === kind && item.present));
+}
+
+function modelNote() {
+  if (downloading) return "Скачиваем недостающие файлы…";
+  if (modelError) return modelError;
+  if (!modelItems.length) return "Проверяем файлы…";
+  if (requiredReady()) return "Модели готовы.";
+  const names = missingKinds().map((kind) => LABELS[kind] || kind).join(", ");
+  return `Нужно скачать: ${names}. Без них глава не обработается.`;
+}
+
+function paintModelGate() {
+  const text = modelNote();
+  document.querySelectorAll("[data-role='models-note']").forEach((node) => {
+    node.textContent = text;
+  });
+  const ready = requiredReady();
+  document.querySelectorAll("[data-role='models-download']").forEach((button) => {
+    button.hidden = ready;
+    button.disabled = downloading;
+  });
+  const next = document.getElementById("wizard-next");
+  if (next && wizard && wizardStep === 2) next.disabled = downloading || !ready;
+  else if (next && wizard) next.disabled = false;
+  if (modelItems.length && getState().modelsReady !== ready) patch({ modelsReady: ready });
+}
+
+async function downloadMissing() {
+  if (downloading) return;
+  await refreshModels();
+  const missing = missingKinds();
+  if (!missing.length) {
+    modelError = "";
+    paintModelGate();
+    return;
+  }
+  downloading = true;
+  modelError = "";
+  paintModelGate();
   try {
-    await downloadModel(kind);
-    await refreshModels();
-    if (modelItems.find((item) => item.kind === kind && item.present)) delete modelProgress[kind];
-    renderModelLists();
+    for (const kind of missing) {
+      modelProgress[kind] = 0;
+      renderModelLists();
+      await downloadModel(kind);
+      await refreshModels();
+      const item = modelItems.find((entry) => entry.kind === kind);
+      if (!item || !item.present) {
+        throw new Error(`${LABELS[kind] || kind} скачан, но проверка его не видит.`);
+      }
+      delete modelProgress[kind];
+    }
+    modelError = "";
   } catch (error) {
-    notify(error.message || "Не удалось скачать модель");
+    modelError = error.message || "Не удалось скачать модели";
+    notify(modelError);
+  } finally {
+    downloading = false;
+    renderModelLists();
   }
 }
 

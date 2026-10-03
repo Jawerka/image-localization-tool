@@ -23,7 +23,7 @@ project_dir = Path(SPEC).parent.resolve() if "SPEC" in globals() else Path.cwd()
 if str(project_dir) not in sys.path:
     sys.path.insert(0, str(project_dir))
 
-from scripts.smoke_dist import read_app_version, stage_runtime_files
+from scripts.smoke_dist import drop_cuda_entries, read_app_version, stage_runtime_files
 
 # Разбор page_pipeline тянет torch и легко упирается в лимит рекурсии.
 sys.setrecursionlimit(max(sys.getrecursionlimit(), 5000))
@@ -119,7 +119,8 @@ VSVersionInfo(
 """
 
 
-_version_file = Path(WORKPATH) / "ImageLocalizationTool-version.txt"
+# PyInstaller 6.22 отдаёт путь сборки как workpath (раньше WORKPATH).
+_version_file = Path(workpath) / "ImageLocalizationTool-version.txt"
 _version_file.parent.mkdir(parents=True, exist_ok=True)
 _version_file.write_text(_version_info_text(app_version), encoding="utf-8")
 
@@ -153,6 +154,10 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
+
+# torch остаётся. Из сборки уходят только DLL CUDA, чтобы установщик влез в релиз.
+a.binaries = drop_cuda_entries(a.binaries)
+a.datas = drop_cuda_entries(a.datas)
 
 pyz = PYZ(a.pure)
 

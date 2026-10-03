@@ -32,7 +32,7 @@ from src.app.jobs import JobQueue
 from src.app.settings import AppSettings, get_api_key
 from src.app.store import ProjectStore, VersionConflict
 from src.app.worker import queue_has_unfinished
-from src.utils.paths import install_root, models_dir as default_models_dir
+from src.utils.paths import install_root
 
 logger = logging.getLogger("ilt.app.server")
 
@@ -991,8 +991,7 @@ def _download_model(state: AppState, body: dict) -> None:
     kind = str(body.get("kind") or "")
     if kind not in ("detector", "lama", "font"):
         raise ValueError("Неизвестный файл для скачивания")
-    folder = state.settings.models_dir.strip()
-    dest = Path(folder) if folder else default_models_dir()
+    dest = model_manager.dest_dir(kind, state.settings.models_dir)
 
     def progress(done, total) -> None:
         state.fanout(WorkerEvent("model.progress", {

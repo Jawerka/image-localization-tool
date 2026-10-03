@@ -340,9 +340,12 @@
           </section>
           <section class="wizard__step" data-step="2" hidden>
             <h2>Модели</h2>
-            <p class="settings__intro">Проверка файлов и докачка. Без них глава не обработается.</p>
+            <p class="settings__intro" data-role="models-note">Проверяем файлы…</p>
             <hr class="settings__rule">
             <div data-role="wizard-models"></div>
+            <div class="form__actions stack-top">
+              <button type="button" class="btn btn-primary" data-role="models-download">Скачать</button>
+            </div>
           </section>
           <section class="wizard__step" data-step="3" hidden>
             <h2>Сервер LLM</h2>
@@ -562,10 +565,11 @@
           </section>
           <section class="settings__section" id="sec-models" role="tabpanel" data-tabpanel="models" aria-labelledby="nav-models" hidden>
             <h2>Модели</h2>
-            <p class="settings__intro">Файлы лежат в папке models рядом с программой, их можно заменить.</p>
+            <p class="settings__intro" data-role="models-note">Проверяем файлы…</p>
             <hr class="settings__rule">
             <div data-role="model-list"></div>
             <div class="form__actions stack-top">
+              <button type="button" class="btn btn-primary" data-role="models-download">Скачать</button>
               <button type="button" class="btn btn-accent" data-role="open-models-dir">
                 <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#folder"></use></svg>
                 Открыть папку моделей
