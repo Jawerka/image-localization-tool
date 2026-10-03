@@ -187,12 +187,14 @@ class ProjectStore:
         recursive: bool = False,
         chapter_mode: str = "subdir",
     ) -> list[dict]:
-        """Импорт папки или zip/cbz в открытый проект.
+        """Импорт папки или архива в открытый проект.
 
-        Картинки идут в естественном порядке. ``chapter_mode`` — ``subdir``
-        или ``flat`` (правило глав — в ``plan_chapters``). ``recursive``
-        относится к папке. Архив распаковывается в ``imports`` проекта,
-        zip-slip отсекает ``extract_archive``. Оригиналы папки не копируются.
+        Архив: zip, cbz, cbr, rar, cb7, 7z, cbt, tar. Картинки идут
+        в естественном порядке, не глубже пяти папок. ``chapter_mode`` —
+        ``subdir`` или ``flat`` (правило глав — в ``plan_chapters``).
+        ``recursive`` относится к папке. Архив распаковывается в ``imports``
+        проекта, zip-slip отсекает ``extract_archive``. Оригиналы папки
+        не копируются. Архив без изображений поднимает ``NoImagesError``.
         """
         mode = str(chapter_mode or "flat")
         if mode not in ("subdir", "flat"):

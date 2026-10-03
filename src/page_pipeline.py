@@ -127,6 +127,7 @@ class PagePipeline:
             max_font_size=max(128, self.config.max_font_size),
             lang=self.config.target_lang,
             stroke_ratio=self.config.text_stroke_ratio,
+            margin_ratio=self.config.text_margin,
         )
         self.ocr_name = ""
         self.translator_name = ""
@@ -251,7 +252,7 @@ class PagePipeline:
             timings["ocr"] = time.perf_counter() - started
             stages.append("ocr")
             if debug:
-                draw_marked_page(image, regions).save(debug / "02_marked.jpg", quality=90)
+                self._save_marked(image, regions, debug)
 
             report(45, "Перевод", "translate")
             started = time.perf_counter()
@@ -524,10 +525,22 @@ class PagePipeline:
             timeout=self.config.llm_timeout,
         )
 
+    def _save_marked(self, image, regions, debug: Path) -> None:
+        """Картинки проходов OCR: ровно то, что уходит в VLM."""
+        bubbles = [region for region in regions if region.bubble_bbox is not None]
+        free = [region for region in regions if region.bubble_bbox is None]
+        side = self.config.vlm_max_side
+        if bubbles:
+            draw_marked_page(image, bubbles, max_side=side).save(debug / "02_marked_bubbles.jpg", quality=90)
+        if free:
+            draw_marked_page(image, free, max_side=side).save(debug / "02_marked_free.jpg", quality=90)
+
     def _recognize(self, image, regions, warnings: list[str]):
         self._prepare_ocr(warnings)
         try:
-            return self.ocr.recognize(image, regions, reading_order=self.config.reading_order)
+            direction, recognized = self.ocr.recognize(
+                image, regions, reading_order=self.config.reading_order,
+            )
         except Exception as exc:
             logger.warning(f"OCR failed, RapidOCR fallback: {exc}")
             warnings.append(f"OCR переключён на RapidOCR: {exc}")
@@ -535,6 +548,8 @@ class PagePipeline:
             self.ocr_name = "rapid"
             self._llm_down = True
             return self.ocr.recognize(image, regions, reading_order=self.config.reading_order)
+        warnings.extend(getattr(self.ocr, "warnings", []) or [])
+        return direction, recognized
 
     def _prepare_ocr(self, warnings: list[str]) -> None:
         if self.ocr is not None:
@@ -547,7 +562,7 @@ class PagePipeline:
             return
         client = self._client()
         if client.available():
-            self.ocr = VlmOcr(client)
+            self.ocr = VlmOcr(client, max_side=self.config.vlm_max_side)
             self.ocr_name = "vlm"
             self._shared_client = client
             return

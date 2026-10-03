@@ -63,8 +63,9 @@ def _text_width(
 
 
 def _line_height(font, size: int) -> int:
+    """Высота строки с диакритикой и выносными элементами."""
     try:
-        bbox = font.getbbox("Аy")
+        bbox = font.getbbox("ЙАygрд")
         measured = bbox[3] - bbox[1]
     except Exception:
         measured = size
@@ -169,6 +170,38 @@ def _wrap(
     return lines
 
 
+def _layout_spans(area: np.ndarray, region: TextRegion) -> list[tuple[int, int] | None]:
+    """Полосы для раскладки. Крутой поворот сначала кладёт баллон горизонтально."""
+    angle = float(getattr(region.style, "rotation", 0) or 0.0)
+    if abs(angle) < 15 or not np.any(area):
+        return _row_spans(area)
+    height, width = area.shape[:2]
+    cx = float(region.bbox[0]) + float(region.bbox[2]) / 2.0
+    cy = float(region.bbox[1]) + float(region.bbox[3]) / 2.0
+    matrix = cv2.getRotationMatrix2D((cx, cy), -angle, 1.0)
+    turned = cv2.warpAffine(
+        area,
+        matrix,
+        (width, height),
+        flags=cv2.INTER_NEAREST,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=0,
+    )
+    if not np.any(turned):
+        return _row_spans(area)
+    return _row_spans(turned)
+
+
+def _keep_own_ink(overlay: Image.Image, before: np.ndarray, area: np.ndarray) -> Image.Image:
+    """Убрать чернила региона, вышедшие за его собственный баллон."""
+    arr = np.array(overlay)
+    leaked = (arr[..., 3] > before) & (area == 0)
+    if not np.any(leaked):
+        return overlay
+    arr[..., 3] = np.where(leaked, before, arr[..., 3])
+    return Image.fromarray(arr)
+
+
 def _row_spans(mask: np.ndarray) -> list[tuple[int, int] | None]:
     spans = []
     for y in range(mask.shape[0]):
@@ -242,6 +275,26 @@ def interior_mask(image_rgb: np.ndarray, region: TextRegion) -> np.ndarray:
     return mask
 
 
+def layout_inset_px(region: TextRegion, margin_ratio: float) -> int:
+    """На сколько сжать внутренность баллона перед раскладкой. 0 — без запаса."""
+    if margin_ratio <= 0 or region.bubble_bbox is None or region.block_type == "sfx":
+        return 0
+    _x, _y, width, height = region.bubble_bbox
+    side = max(1, min(int(width), int(height)))
+    return max(3, int(round(side * float(margin_ratio))))
+
+
+def inset_layout_mask(area: np.ndarray, inset: int) -> np.ndarray:
+    """Сжать маску внутрь. Пустой результат — исходная маска, чтобы мелкий баллон не пропал."""
+    if inset <= 0 or not np.any(area):
+        return area
+    kernel = np.ones((inset * 2 + 1, inset * 2 + 1), np.uint8)
+    shrunk = cv2.erode(area, kernel, iterations=1)
+    if not np.any(shrunk):
+        return area
+    return shrunk
+
+
 def _layout(
     text: str,
     font,
@@ -252,16 +305,20 @@ def _layout(
     strict: bool = True,
     letter_spacing: float = 0.0,
     line_spacing: float = 0.0,
+    stroke_pad: int = 0,
 ) -> tuple[list[tuple[str, int, int]], bool]:
     words = [word for word in text.replace("\n", " ").split(" ") if word]
     if not words:
         return [], True
     size = getattr(font, "size", 12)
     line_h = _advance(font, size, line_spacing)
+    pad = max(0, int(stroke_pad))
     ys = [index for index, span in enumerate(spans) if span is not None]
     if not ys:
         return [], False
     top, bottom = ys[0], ys[-1] + 1
+    limit = bottom - pad
+    usable_h = limit - (top + pad)
     mid = (top + bottom) // 2
     center = _band_span(spans, mid - line_h // 2, mid + max(line_h // 2, 1))
     if center is None:
@@ -269,17 +326,23 @@ def _layout(
     if center is None:
         return [], False
     lines = _wrap(
-        words, font, draw, max(8, center[1] - center[0] - 4), hyphenator, letter_spacing
+        words,
+        font,
+        draw,
+        max(8, center[1] - center[0] - 4 - 2 * pad),
+        hyphenator,
+        letter_spacing,
     )
     if not lines:
         return [], False
     block_h = len(lines) * line_h
-    if block_h > (bottom - top) and strict:
+    if (block_h > usable_h or usable_h < line_h) and strict:
         return [], False
-    y = top + max(0, (bottom - top - min(block_h, bottom - top)) // 2)
+    room = max(0, usable_h)
+    y = top + pad + max(0, (room - min(block_h, room)) // 2)
     placed: list[tuple[str, int, int]] = []
     for line in lines:
-        if y + line_h > bottom + 1:
+        if y + line_h > limit + 1:
             if strict:
                 return [], False
             break
@@ -289,7 +352,7 @@ def _layout(
                 return [], False
             break
         width = _text_width(draw, line, font, letter_spacing)
-        available = span[1] - span[0] - 4
+        available = span[1] - span[0] - 4 - 2 * pad
         if width > available + 1 and strict:
             return [], False
         if align == "left":
@@ -612,7 +675,10 @@ def _composite_styled_layer(
             spacing * scale,
         )
 
-    point = (0.0, 0.0)
+    # Через скос и поворот ведём центр блока и ставим его в центр исходного текста.
+    cx = min_x + box_w / 2.0
+    cy = min_y + box_h / 2.0
+    point = ((pad + box_w / 2.0) * scale, (pad + box_h / 2.0) * scale)
     if style.skew_x:
         layer, point = _skew_layer(layer, float(style.skew_x), point)
     if style.rotation:
@@ -627,13 +693,96 @@ def _composite_styled_layer(
             mesh=_scale_points(mesh, scale),
         )
         layer = Image.fromarray(warped)
+        if kind == "arc" and bend:
+            # Дуга сдвигает середину кадра по X. Центр текста едет вместе с ней.
+            point = (point[0] + float(bend) * float(layer.size[1]), point[1])
     if scale > 1:
         layer = layer.resize(
             (max(1, layer.size[0] // scale), max(1, layer.size[1] // scale)),
             Image.Resampling.LANCZOS,
         )
         point = (point[0] / scale, point[1] / scale)
-    _paste_rgba(overlay, layer, (min_x - pad - point[0], min_y - pad - point[1]))
+    _paste_rgba(overlay, layer, (cx - point[0], cy - point[1]))
+
+
+def _channel_luminance(value: float) -> float:
+    color = max(0.0, min(1.0, value / 255.0))
+    if color <= 0.04045:
+        return color / 12.92
+    return ((color + 0.055) / 1.055) ** 2.4
+
+
+def _relative_luminance(rgb: tuple[int, int, int]) -> float:
+    red, green, blue = rgb
+    return (
+        0.2126 * _channel_luminance(red)
+        + 0.7152 * _channel_luminance(green)
+        + 0.0722 * _channel_luminance(blue)
+    )
+
+
+def _contrast_ratio(left: tuple[int, int, int], right: tuple[int, int, int]) -> float:
+    lighter = max(_relative_luminance(left), _relative_luminance(right))
+    darker = min(_relative_luminance(left), _relative_luminance(right))
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+def _area_color(image_rgb: np.ndarray, area: np.ndarray) -> tuple[int, int, int]:
+    """Медиана цвета внутренности баллона на уже очищенной странице."""
+    pixels = image_rgb[area > 0]
+    if pixels.size == 0:
+        return (255, 255, 255)
+    median = np.median(pixels, axis=0)
+    return tuple(int(channel) for channel in median)
+
+
+def _readable_fill(
+    fill: tuple[int, int, int],
+    background: tuple[int, int, int],
+) -> tuple[int, int, int]:
+    """Чёрный или белый, если заливка почти сливается с фоном баллона."""
+    if _contrast_ratio(fill, background) >= 3.0:
+        return fill
+    black = (0, 0, 0)
+    white = (255, 255, 255)
+    if _contrast_ratio(white, background) >= _contrast_ratio(black, background):
+        return white
+    return black
+
+
+def _fit_size(
+    text: str,
+    draw,
+    spans,
+    word_break,
+    align: str,
+    font_path,
+    low: int,
+    high: int,
+    letter_spacing: float,
+    line_spacing: float,
+    stroke_pad,
+) -> tuple[list | None, ImageFont.ImageFont | None, bool]:
+    """Наибольший кегль из ``[low, high]``, который влезает без обрезки."""
+    placed = None
+    chosen = None
+    fits_any = False
+    while low <= high:
+        mid = (low + high) // 2
+        font = _load_font(font_path, mid)
+        candidate, fits = _layout(
+            text, font, draw, spans, word_break, align,
+            letter_spacing=letter_spacing, line_spacing=line_spacing,
+            stroke_pad=int(stroke_pad(mid)),
+        )
+        if fits:
+            placed = candidate
+            chosen = font
+            fits_any = True
+            low = mid + 1
+        else:
+            high = mid - 1
+    return placed, chosen, fits_any
 
 
 class Typesetter:
@@ -646,11 +795,13 @@ class Typesetter:
         lang: str = "ru",
         stroke_ratio: float = 0.0,
         user_fonts: str | Path | None = None,
+        margin_ratio: float = 0.0,
     ):
         self.min_font_size = min_font_size
         self.max_font_size = max_font_size
         self.lang = lang
         self.stroke_ratio = stroke_ratio
+        self.margin_ratio = margin_ratio
         self.user_fonts = Path(user_fonts) if user_fonts else None
         self._font_faces = None
 
@@ -734,18 +885,26 @@ class Typesetter:
             font_path = self._region_font(region)
             letter_spacing = float(region.style.letter_spacing or 0.0)
             line_spacing = float(region.style.line_spacing or 0.0)
-            spans = _row_spans(area)
+            inset = layout_inset_px(region, self.margin_ratio)
+            layout_area = inset_layout_mask(area, inset)
+            spans = _layout_spans(layout_area, region)
             placed = None
             chosen_font = None
             override = int(region.style.font_size_override or 0)
             is_sfx = region.block_type == "sfx"
             word_break = None if is_sfx else hyphenator
+
+            def stroke_pad(size: int) -> int:
+                _color, width = self._stroke_paint(rgb, area, region, size)
+                return int(width or 0)
+
             if override > 0:
                 size = min(self.max_font_size, max(self.min_font_size, override))
                 chosen_font = _load_font(font_path, size)
                 placed, fits = _layout(
                     text, chosen_font, draw, spans, word_break, align,
                     letter_spacing=letter_spacing, line_spacing=line_spacing,
+                    stroke_pad=stroke_pad(size),
                 )
                 if not fits:
                     overflow.append(region.id)
@@ -754,31 +913,34 @@ class Typesetter:
                         placed, _ = _layout(
                             text, chosen_font, draw, spans, word_break, align, strict=False,
                             letter_spacing=letter_spacing, line_spacing=line_spacing,
+                            stroke_pad=stroke_pad(size),
                         )
             elif is_sfx:
-                # Кегль звукоподражания — от площади бокса, без переносов по слогам.
+                # Кегль звука — от площади бокса, затем поиск наибольшего влезающего.
                 box_w = max(1, int(region.bbox[2]))
                 box_h = max(1, int(region.bbox[3]))
-                size = int(round(math.sqrt(box_w * box_h)))
-                size = min(self.max_font_size, max(self.min_font_size, size))
-                chosen_font = _load_font(font_path, size)
-                placed, fits = _layout(
-                    text, chosen_font, draw, spans, None, align,
-                    letter_spacing=letter_spacing, line_spacing=line_spacing,
+                guess = int(round(math.sqrt(box_w * box_h)))
+                high = min(self.max_font_size, max(self.min_font_size, guess))
+                placed, chosen_font, fits_any = _fit_size(
+                    text, draw, spans, None, align, font_path,
+                    self.min_font_size, high, letter_spacing, line_spacing, stroke_pad,
                 )
-                if not fits:
+                if not fits_any:
                     overflow.append(region.id)
                     placed = None
                     if force:
+                        chosen_font = _load_font(font_path, self.min_font_size)
                         placed, _ = _layout(
                             text, chosen_font, draw, spans, None, align, strict=False,
                             letter_spacing=letter_spacing, line_spacing=line_spacing,
+                            stroke_pad=stroke_pad(self.min_font_size),
                         )
             elif font_path is None:
                 chosen_font = _load_font(None, self.min_font_size)
                 placed, fits = _layout(
                     text, chosen_font, draw, spans, hyphenator, align,
                     letter_spacing=letter_spacing, line_spacing=line_spacing,
+                    stroke_pad=stroke_pad(self.min_font_size),
                 )
                 if not fits:
                     overflow.append(region.id)
@@ -787,22 +949,10 @@ class Typesetter:
                 heights = [index for index, span in enumerate(spans) if span]
                 interior_h = (heights[-1] - heights[0] + 1) if heights else self.max_font_size
                 high = min(self.max_font_size, max(self.min_font_size, interior_h))
-                low = self.min_font_size
-                fits_any = False
-                while low <= high:
-                    mid = (low + high) // 2
-                    font = _load_font(font_path, mid)
-                    candidate, fits = _layout(
-                        text, font, draw, spans, hyphenator, align,
-                        letter_spacing=letter_spacing, line_spacing=line_spacing,
-                    )
-                    if fits:
-                        placed = candidate
-                        chosen_font = font
-                        fits_any = True
-                        low = mid + 1
-                    else:
-                        high = mid - 1
+                placed, chosen_font, fits_any = _fit_size(
+                    text, draw, spans, hyphenator, align, font_path,
+                    self.min_font_size, high, letter_spacing, line_spacing, stroke_pad,
+                )
                 if not fits_any:
                     overflow.append(region.id)
                     placed = None
@@ -811,14 +961,19 @@ class Typesetter:
                         placed, _ = _layout(
                             text, chosen_font, draw, spans, hyphenator, align, strict=False,
                             letter_spacing=letter_spacing, line_spacing=line_spacing,
+                            stroke_pad=stroke_pad(self.min_font_size),
                         )
 
             if not placed or chosen_font is None:
                 continue
+            before_alpha = np.array(overlay)[..., 3].copy()
             size = int(getattr(chosen_font, "size", self.min_font_size))
             region.style.font_size = size
             stroke, stroke_width = self._stroke_paint(rgb, area, region, size)
             fill = region.style.fill_rgb
+            if region.block_type != "sfx":
+                fill = _readable_fill(fill, _area_color(rgb, area))
+                region.style.fill_rgb = fill
             if _style_needs_layer(region.style):
                 _composite_styled_layer(
                     overlay, placed, chosen_font, font_path, fill, stroke, stroke_width,
@@ -834,6 +989,8 @@ class Typesetter:
                         stroke_width=stroke_width,
                         stroke_fill=(stroke + (255,)) if stroke else None,
                     )
+            overlay = _keep_own_ink(overlay, before_alpha, area)
+            draw = ImageDraw.Draw(overlay)
 
         overlay_arr = np.array(overlay)
         overlay_arr[..., 3] = np.where(clip > 0, overlay_arr[..., 3], 0)

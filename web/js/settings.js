@@ -211,6 +211,7 @@ function readForm() {
   next.min_font_size = numberValue("set-font-min", 10);
   next.max_font_size = numberValue("set-font-max", 128);
   next.text_stroke_ratio = numberValue("set-stroke", 0.08);
+  next.text_margin = numberValue("set-margin", 0.08);
   next.font_path = document.getElementById("set-font-path").value.trim();
   next.export_subdir = document.getElementById("set-export-sub").value.trim() || "translated";
   next.export_format = document.getElementById("set-export-format").value;
@@ -251,6 +252,7 @@ function fill(settings) {
   document.getElementById("set-font-min").value = String(settings.min_font_size ?? 10);
   document.getElementById("set-font-max").value = String(settings.max_font_size ?? 128);
   document.getElementById("set-stroke").value = String(settings.text_stroke_ratio ?? 0.08);
+  document.getElementById("set-margin").value = String(settings.text_margin ?? 0.08);
   document.getElementById("set-font-path").value = settings.font_path || "";
   document.getElementById("set-export-sub").value = settings.export_subdir || "translated";
   document.getElementById("set-export-format").value = settings.export_format === "jpg" ? "jpg" : "png";

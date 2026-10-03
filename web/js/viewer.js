@@ -7,6 +7,7 @@ import {
   editDocument,
   findRegion,
   getState,
+  isReadyStatus,
   nextRegionId,
   patch,
   sameId,
@@ -35,6 +36,7 @@ let cursor;
 let sizeLabel;
 let zoomLabel;
 let steps;
+let placeholder;
 let natural = { w: 0, h: 0 };
 let drag = null;
 let previewImage = null;
@@ -59,6 +61,7 @@ export function init() {
   sizeLabel = document.querySelector("[data-role='brush-size-value']");
   zoomLabel = document.querySelector("[data-role='zoom-value']");
   steps = document.querySelector("[data-role='steps']");
+  placeholder = document.querySelector("[data-role='result-placeholder']");
 
   const range = document.querySelector("[data-role='brush-size']");
   range.addEventListener("input", () => {
@@ -89,6 +92,9 @@ export function init() {
   stage.addEventListener("wheel", onWheel, { passive: false });
   stage.addEventListener("scroll", rememberCenter);
   baseImage.addEventListener("load", onImageLoad);
+  baseImage.addEventListener("error", onBaseError);
+  maskImage.addEventListener("load", () => maskImage.classList.remove("is-missing"));
+  maskImage.addEventListener("error", () => maskImage.classList.add("is-missing"));
   window.addEventListener("resize", layout);
   if (window.ResizeObserver) new ResizeObserver(() => layout()).observe(stage);
   subscribe(sync);
@@ -230,10 +236,30 @@ function setRadio(selector, value) {
 }
 
 function setSrc(image, page, kind, version) {
+  if (image === baseImage && kind === "result" && !isReadyStatus(page.status)) {
+    showResultGap(true);
+    return;
+  }
+  if (image === baseImage) showResultGap(false);
   const url = imageUrl(page.id, kind, version);
   if (image.dataset.url === url) return;
   image.dataset.url = url;
+  if (image === maskImage) image.classList.remove("is-missing");
   image.src = url;
+}
+
+function showResultGap(on) {
+  if (!placeholder) return;
+  placeholder.hidden = !on;
+  baseImage.hidden = on;
+  if (!on) return;
+  baseImage.removeAttribute("src");
+  baseImage.dataset.url = "";
+}
+
+function onBaseError() {
+  const view = getState().view;
+  if (view === "result" || view === "compare") showResultGap(true);
 }
 
 function onImageLoad() {

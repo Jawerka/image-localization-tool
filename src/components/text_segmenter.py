@@ -82,10 +82,15 @@ def _background_color(image_rgb: np.ndarray, x0: int, y0: int, x1: int, y1: int)
 
 
 def _snap_fill(color: tuple[int, int, int]) -> tuple[int, int, int]:
-    """Серый от JPEG на белом баллоне приводим к чёрному. Цветной текст оставляем."""
+    """Серый от JPEG приводим к чёрному или белому. Цветной текст оставляем."""
     red, green, blue = color
-    if max(red, green, blue) < 150 and max(red, green, blue) - min(red, green, blue) < 28:
+    spread = max(red, green, blue) - min(red, green, blue)
+    if spread >= 28:
+        return color
+    if max(red, green, blue) < 150:
         return (0, 0, 0)
+    if min(red, green, blue) > 105:
+        return (255, 255, 255)
     return color
 
 
@@ -114,8 +119,12 @@ def _colors(crop: np.ndarray, ink: np.ndarray, background: np.ndarray) -> tuple[
     pixels = crop[ink]
     if pixels.size == 0:
         return (0, 0, 0), None
-    dark = np.percentile(pixels, 20, axis=0)
-    fill = _snap_fill(tuple(int(v) for v in dark))
+    distance = np.linalg.norm(pixels.astype(np.float32) - background, axis=1)
+    cutoff = float(np.percentile(distance, 80))
+    chosen = pixels[distance >= cutoff]
+    if chosen.size == 0:
+        chosen = pixels
+    fill = _snap_fill(tuple(int(v) for v in np.median(chosen, axis=0)))
     kernel = np.ones((3, 3), np.uint8)
     ring = cv2.dilate(ink.astype(np.uint8), kernel, iterations=1) > 0
     ring = ring & ~ink

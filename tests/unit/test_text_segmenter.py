@@ -30,6 +30,15 @@ def test_two_pixel_dot_stays_in_the_mask():
     assert mask[30, 51] == 255
 
 
+def test_white_letters_on_black_read_as_white():
+    image = Image.new("RGB", (120, 60), "black")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((20, 16, 90, 40), fill="white")
+    region = TextRegion(id=1, bbox=(10, 8, 100, 44), text="HELLO")
+    segment_region(np.array(image), region)
+    assert region.style.fill_rgb == (255, 255, 255)
+
+
 def test_antialiased_black_on_white_has_no_stroke():
     crop = np.full((40, 80, 3), 255, dtype=np.uint8)
     ink = np.zeros((40, 80), dtype=bool)

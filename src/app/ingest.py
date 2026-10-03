@@ -4,20 +4,41 @@
 
 - папка: ``list_images(root, recursive)``, затем
   ``plan_chapters(paths, mode, root=root)``;
-- zip/cbz: ``extract_archive(archive, dest)``, затем
+- архив: ``extract_archive(archive, dest)``, затем
   ``plan_chapters(paths, mode, root=dest, archive_stem=archive.stem)``.
+
+Архивы: zip, cbz, cbr, rar, cb7, 7z, cbt, tar. Формат берётся по содержимому,
+суффикс — только запасной вариант: многие ``.cbr`` на деле являются zip.
 """
 
 from __future__ import annotations
 
+import io
+import os
 import re
 import shutil
+import tarfile
 import zipfile
 from collections.abc import Sequence
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"})
-ARCHIVE_SUFFIXES = frozenset({".zip", ".cbz"})
+ARCHIVE_SUFFIXES = frozenset({
+    ".zip", ".cbz", ".cbr", ".rar", ".cb7", ".7z", ".cbt", ".tar",
+})
+# Папок над файлом не больше этого числа. ``a/b/c/d/e/page.png`` — пятый уровень.
+MAX_ARCHIVE_DEPTH = 5
+
+_SUFFIX_KIND = {
+    ".zip": "zip",
+    ".cbz": "zip",
+    ".rar": "rar",
+    ".cbr": "rar",
+    ".7z": "7z",
+    ".cb7": "7z",
+    ".tar": "tar",
+    ".cbt": "tar",
+}
 
 _DIGIT_RUN = re.compile(r"(\d+)")
 # Путь не под корнем импорта. Это не то же самое, что файл прямо в корне.
@@ -45,8 +66,27 @@ def is_image(path: Path) -> bool:
 
 
 def is_archive(path: Path) -> bool:
-    """Суффикс zip или cbz без учёта регистра. Содержимое не проверяется."""
+    """Суффикс zip, cbz, cbr, rar, cb7, 7z, cbt или tar. Содержимое не проверяется."""
     return Path(path).suffix.casefold() in ARCHIVE_SUFFIXES
+
+
+class NoImagesError(ValueError):
+    """В архиве нет изображений на допустимой глубине."""
+
+
+def archive_images(archive: Path) -> list[str]:
+    """Имена изображений в архиве без распаковки.
+
+    Берутся png, jpg, jpeg, bmp, tif и tiff не глубже ``MAX_ARCHIVE_DEPTH``
+    папок. Файлы с ``-mask`` в имени и небезопасные пути пропускаются.
+    Пустой результат — ``NoImagesError``.
+    """
+    archive = Path(archive)
+    with _open_reader(archive) as reader:
+        names = _select_image_members(reader.file_names())
+    if not names:
+        raise _no_images(archive)
+    return names
 
 
 def list_images(root: Path, recursive: bool) -> list[Path]:
@@ -70,11 +110,14 @@ def list_images(root: Path, recursive: bool) -> list[Path]:
 
 
 def extract_archive(archive: Path, dest: Path) -> list[Path]:
-    """Извлечь изображения из zip или cbz в ``dest``.
+    """Извлечь изображения из архива в ``dest``.
 
-    CBZ открывается тем же ``zipfile``. Записи-каталоги и не-изображения
-    пропускаются. Безопасный относительный путь внутри архива сохраняется,
-    поэтому папка главы не теряется. ``dest`` создаётся, если его ещё нет.
+    Подходят zip, cbz, cbr, rar, cb7, 7z, cbt и tar. Формат определяется
+    по содержимому. Записи-каталоги, ссылки и не-изображения пропускаются.
+    Файлы глубже ``MAX_ARCHIVE_DEPTH`` папок не читаются. Имена с ``-mask``
+    тоже пропускаются. Безопасный относительный путь внутри архива
+    сохраняется, поэтому папка главы не теряется. ``dest`` создаётся,
+    только если есть что извлекать.
 
     Zip-slip: член с абсолютным путём, префиксом диска, UNC или ``..``,
     который после нормализации выходит за ``dest``, не записывается.
@@ -83,25 +126,30 @@ def extract_archive(archive: Path, dest: Path) -> list[Path]:
     относительный путь и не ведёт наружу.
 
     Результат — пути извлечённых изображений в естественном порядке.
-    Повреждённый архив поднимает ошибку ``zipfile`` как есть.
+    Если подходящих изображений нет — ``NoImagesError``.
+    Повреждённый архив поднимает ошибку формата как есть.
     """
+    archive = Path(archive)
     dest = Path(dest)
-    dest.mkdir(parents=True, exist_ok=True)
-    dest_root = dest.resolve()
     extracted: list[Path] = []
-    with zipfile.ZipFile(archive) as bundle:
-        for info in bundle.infolist():
-            if info.is_dir():
-                continue
-            target = _safe_member_target(dest, dest_root, info.filename)
-            if target is None or not is_image(target):
+    with _open_reader(archive) as reader:
+        names = _select_image_members(reader.file_names())
+        if not names:
+            raise _no_images(archive)
+        dest.mkdir(parents=True, exist_ok=True)
+        dest_root = dest.resolve()
+        for name in names:
+            target = _safe_member_target(dest, dest_root, name)
+            if target is None:
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
-            with bundle.open(info, "r") as source, target.open("wb") as output:
+            with reader.open(name) as source, target.open("wb") as output:
                 shutil.copyfileobj(source, output)
             extracted.append(target)
     unique = list(dict.fromkeys(extracted))
     unique.sort(key=lambda path: natural_sort_key(path.relative_to(dest).as_posix()))
+    if not unique:
+        raise _no_images(archive)
     return unique
 
 
@@ -154,6 +202,238 @@ def plan_chapters(
         chapter = place if isinstance(place, str) else ""
         chapters.append((path, chapter))
     return chapters
+
+
+def _no_images(archive: Path) -> NoImagesError:
+    return NoImagesError(
+        f"В архиве «{Path(archive).name}» нет изображений — переводить нечего"
+    )
+
+
+def _select_image_members(names: Sequence[str]) -> list[str]:
+    """Имена членов-изображений: безопасный путь, глубина и без ``-mask``."""
+    chosen: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for name in names:
+        parts = _relative_parts(name)
+        if parts is None or len(parts) - 1 > MAX_ARCHIVE_DEPTH:
+            continue
+        leaf = Path(parts[-1])
+        if not is_image(leaf) or "-mask" in leaf.stem.casefold():
+            continue
+        key = "/".join(parts)
+        if key in seen:
+            continue
+        seen.add(key)
+        chosen.append((key, name))
+    chosen.sort(key=lambda item: natural_sort_key(item[0]))
+    return [name for _, name in chosen]
+
+
+def _detect_kind(path: Path) -> str:
+    """zip, rar, 7z или tar. Сначала содержимое, потом суффикс."""
+    if zipfile.is_zipfile(path):
+        return "zip"
+    if _probe_rar(path):
+        return "rar"
+    if _probe_7z(path):
+        return "7z"
+    try:
+        if tarfile.is_tarfile(path):
+            return "tar"
+    except (OSError, tarfile.TarError):
+        pass
+    kind = _SUFFIX_KIND.get(path.suffix.casefold())
+    if kind:
+        return kind
+    raise ValueError(f"Неизвестный архив: {path.name}")
+
+
+def _probe_rar(path: Path) -> bool:
+    try:
+        import rarfile
+    except ImportError:
+        return False
+    try:
+        return bool(rarfile.is_rarfile(path))
+    except (OSError, ValueError):
+        return False
+
+
+def _probe_7z(path: Path) -> bool:
+    try:
+        import py7zr
+    except ImportError:
+        return False
+    try:
+        return bool(py7zr.is_7zfile(path))
+    except (OSError, ValueError):
+        return False
+
+
+def _open_reader(archive: Path):
+    kind = _detect_kind(archive)
+    if kind == "zip":
+        return _ZipReader(archive)
+    if kind == "rar":
+        return _RarReader(archive)
+    if kind == "7z":
+        return _SevenReader(archive)
+    if kind == "tar":
+        return _TarReader(archive)
+    raise ValueError(f"Неизвестный архив: {archive.name}")
+
+
+class _Closable:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.close()
+        return False
+
+
+class _ZipReader(_Closable):
+    def __init__(self, path: Path):
+        self._bundle = zipfile.ZipFile(path)
+
+    def file_names(self) -> list[str]:
+        return [info.filename for info in self._bundle.infolist() if not info.is_dir()]
+
+    def open(self, name: str):
+        return self._bundle.open(name, "r")
+
+    def close(self) -> None:
+        self._bundle.close()
+
+
+class _TarReader(_Closable):
+    def __init__(self, path: Path):
+        self._bundle = tarfile.open(path, "r:*")
+
+    def file_names(self) -> list[str]:
+        return [member.name for member in self._bundle.getmembers() if member.isfile()]
+
+    def open(self, name: str):
+        member = self._bundle.getmember(name)
+        if not member.isfile():
+            raise ValueError(f"Не файл: {name}")
+        handle = self._bundle.extractfile(member)
+        if handle is None:
+            raise ValueError(f"Не удалось прочитать {name}")
+        return handle
+
+    def close(self) -> None:
+        self._bundle.close()
+
+
+def _find_unpack_tool() -> tuple[str | None, str | None]:
+    """Пути unrar и 7z, если они есть на машине."""
+    unrar = shutil.which("unrar")
+    seven = shutil.which("7z") or shutil.which("7za")
+    if seven is None:
+        for env_name in ("ProgramFiles", "ProgramFiles(x86)"):
+            root = os.environ.get(env_name)
+            if not root:
+                continue
+            candidate = Path(root) / "7-Zip" / "7z.exe"
+            if candidate.is_file():
+                seven = str(candidate)
+                break
+    return unrar, seven
+
+
+def _bind_rar_tool(module) -> None:
+    """Подсказать rarfile, где лежит unrar или 7-Zip."""
+    unrar, seven = _find_unpack_tool()
+    if unrar:
+        module.UNRAR_TOOL = unrar
+    if seven:
+        module.SEVENZIP_TOOL = seven
+        if hasattr(module, "SEVENZIP2_TOOL"):
+            module.SEVENZIP2_TOOL = seven
+    if unrar or seven:
+        module.tool_setup(force=True)
+
+
+class _RarReader(_Closable):
+    def __init__(self, path: Path):
+        try:
+            import rarfile
+        except ImportError as exc:
+            raise ValueError("Для CBR/RAR нужен пакет rarfile") from exc
+        _bind_rar_tool(rarfile)
+        try:
+            self._bundle = rarfile.RarFile(path)
+        except rarfile.RarCannotExec as exc:
+            raise ValueError("Для CBR/RAR нужен 7-Zip или UnRAR") from exc
+        self._rarfile = rarfile
+
+    def file_names(self) -> list[str]:
+        return [info.filename for info in self._bundle.infolist() if not info.isdir()]
+
+    def open(self, name: str):
+        try:
+            return self._bundle.open(name)
+        except self._rarfile.RarCannotExec as exc:
+            raise ValueError("Для CBR/RAR нужен 7-Zip или UnRAR") from exc
+
+    def close(self) -> None:
+        self._bundle.close()
+
+
+class _SevenReader(_Closable):
+    def __init__(self, path: Path):
+        try:
+            import py7zr
+        except ImportError as exc:
+            raise ValueError("Для CB7/7Z нужен пакет py7zr") from exc
+        self._py7zr = py7zr
+        self._bundle = py7zr.SevenZipFile(path, mode="r")
+
+    def file_names(self) -> list[str]:
+        names = [
+            info.filename
+            for info in self._bundle.list()
+            if not info.is_directory
+        ]
+        self._bundle.reset()
+        return names
+
+    def open(self, name: str):
+        factory = self._memory_factory()
+        self._bundle.extract(targets=[name], factory=factory)
+        self._bundle.reset()
+        buffer = factory.files.get(name)
+        if buffer is None and len(factory.files) == 1:
+            buffer = next(iter(factory.files.values()))
+        if buffer is None:
+            raise ValueError(f"Не удалось прочитать {name}")
+        buffer.seek(0)
+        return buffer
+
+    def _memory_factory(self):
+        py7zr = self._py7zr
+
+        class _Kept(io.BytesIO):
+            """py7zr закрывает поток после записи, а читаем мы его следом."""
+
+            def close(self) -> None:
+                return None
+
+        class _MemoryFactory(py7zr.WriterFactory):
+            def __init__(self):
+                self.files: dict[str, io.BytesIO] = {}
+
+            def create(self, filename: str) -> io.BytesIO:
+                buffer = _Kept()
+                self.files[filename] = buffer
+                return buffer
+
+        return _MemoryFactory()
+
+    def close(self) -> None:
+        self._bundle.close()
 
 
 def _place_under_root(path: Path, root: Path) -> str | None | object:

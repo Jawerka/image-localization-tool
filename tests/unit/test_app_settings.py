@@ -24,6 +24,7 @@ def test_clamp_limits():
         llm_timeout=1,
         detector_conf=0.01,
         text_stroke_ratio=2,
+        text_margin=2,
         min_font_size=300,
         max_font_size=4,
         export_jpeg_quality=0,
@@ -40,6 +41,11 @@ def test_clamp_limits():
     assert AppSettings(detector_conf=0.99).detector_conf == 0.95
     assert settings.text_stroke_ratio == 0.5
     assert AppSettings(text_stroke_ratio=-1).text_stroke_ratio == 0
+    assert settings.text_margin == 0.3
+    assert AppSettings(text_margin=-1).text_margin == 0
+    assert AppSettings().text_margin == 0.08
+    assert AppSettings().to_dict()["text_margin"] == 0.08
+    assert AppSettings().to_config().text_margin == 0.08
     assert settings.export_jpeg_quality == 1
     assert settings.min_font_size <= settings.max_font_size
     assert 8 <= settings.min_font_size <= 256

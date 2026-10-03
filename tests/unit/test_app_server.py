@@ -267,6 +267,32 @@ def test_bootstrap_requires_cookie(api: Api):
     assert status == 401
 
 
+def test_llm_probe_sends_status_after_check(api: Api, monkeypatch):
+    """Пока проверка идёт, bootstrap не врёт «недоступен». Потом SSE ok: true."""
+    started = threading.Event()
+    release = threading.Event()
+
+    def slow_check(url, key=""):
+        started.set()
+        release.wait(3)
+        return {"ok": True, "models": ["demo"], "reason": ""}
+
+    monkeypatch.setattr("src.app.model_manager.check_llm", slow_check)
+    api.state.settings.llm_base_url = "http://127.0.0.1:9/v1"
+    box = api.state.subscribe()
+    api.state._start_llm_probe()
+    assert started.wait(2)
+    status, _, payload = api.json("GET", "/api/bootstrap")
+    assert status == 200
+    assert payload["llm"] == {"ok": None, "models": []}
+    release.set()
+    event = box.get(timeout=3)
+    assert event["type"] == "llm.status"
+    assert event["payload"]["ok"] is True
+    assert event["payload"]["models"] == ["demo"]
+    assert api.state.llm_status["ok"] is True
+
+
 def test_host_and_origin(api: Api):
     status, _, payload = api.json("GET", "/api/bootstrap", host="evil.example")
     assert status == 403
@@ -642,6 +668,59 @@ def test_drop_missing_path_is_rejected(api: Api, tmp_path):
     status, _, payload = api.json("POST", "/api/drop", {"paths": [str(tmp_path / "missing.png")]})
     assert status == 400
     assert payload["error"]
+    assert api.state.project_id is None
+
+
+def test_drop_empty_archive_does_not_create_project(api: Api, tmp_path):
+    import zipfile
+
+    archive = tmp_path / "empty.zip"
+    with zipfile.ZipFile(archive, "w") as bundle:
+        bundle.writestr("readme.txt", b"no")
+    status, _, payload = api.json("POST", "/api/drop", {"paths": [str(archive)]})
+    assert status == 400
+    assert "переводить нечего" in payload["error"]
+    assert api.state.project_id is None
+
+
+def test_drop_cbz_adds_pages(api: Api, tmp_path):
+    import io
+    import zipfile
+
+    archive = tmp_path / "vol.cbz"
+    with zipfile.ZipFile(archive, "w") as bundle:
+        for name in ("page10.png", "page2.png"):
+            buffer = io.BytesIO()
+            Image.new("RGB", (4, 4), "white").save(buffer, format="PNG")
+            bundle.writestr(name, buffer.getvalue())
+    status, _, payload = api.json("POST", "/api/drop", {"paths": [str(archive)]})
+    assert status == 200, payload
+    assert [page["name"] for page in payload["pages"]] == ["page2.png", "page10.png"]
+
+
+def test_drop_empty_archive_with_image_warns(api: Api, tmp_path):
+    import zipfile
+
+    image = tmp_path / "page.png"
+    Image.new("RGB", (4, 4), "white").save(image)
+    archive = tmp_path / "empty.zip"
+    with zipfile.ZipFile(archive, "w") as bundle:
+        bundle.writestr("notes.txt", b"no")
+    status, _, payload = api.json("POST", "/api/drop", {"paths": [str(archive), str(image)]})
+    assert status == 200, payload
+    assert payload["warnings"]
+    assert "переводить нечего" in payload["warnings"][0]
+    assert [page["name"] for page in payload["pages"]] == ["page.png"]
+
+
+def test_import_empty_archive_does_not_create_project(api: Api, tmp_path):
+    import zipfile
+
+    archive = tmp_path / "empty.cbz"
+    zipfile.ZipFile(archive, "w").close()
+    status, _, payload = api.json("POST", "/api/import", {"path": str(archive)})
+    assert status == 400
+    assert "переводить нечего" in payload["error"]
     assert api.state.project_id is None
 
 

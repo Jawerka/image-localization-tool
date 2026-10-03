@@ -173,6 +173,7 @@ def _pipeline_fingerprint(settings: AppSettings) -> str:
             "glossary_path": settings.glossary_path,
             "detector_conf": settings.detector_conf,
             "text_stroke_ratio": settings.text_stroke_ratio,
+            "text_margin": settings.text_margin,
             "min_font_size": settings.min_font_size,
             "max_font_size": settings.max_font_size,
         }

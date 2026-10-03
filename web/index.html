@@ -176,7 +176,7 @@
         <div class="drop-wrap" data-role="empty">
           <div class="drop" data-role="empty-drop">
             <svg class="icon icon--lg" aria-hidden="true"><use href="icons/icons.svg#folder"></use></svg>
-            <p>Перетащите сюда папку главы или файлы страниц</p>
+            <p>Перетащите сюда папку главы, архив (cbz, cbr, zip) или файлы страниц</p>
             <div class="drop__actions">
               <button type="button" class="btn btn-primary" data-role="open-files">
                 <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#file"></use></svg>
@@ -197,6 +197,10 @@
           <div class="stage__fit">
             <div class="frame" data-role="frame">
               <img class="frame__img" data-role="img-base" alt="">
+              <div class="frame__placeholder" data-role="result-placeholder" hidden>
+                <svg class="icon icon--lg" aria-hidden="true"><use href="icons/icons.svg#translate"></use></svg>
+                <p>Ещё нет перевода</p>
+              </div>
               <div class="curtain" data-role="curtain" hidden>
                 <img data-role="img-curtain" alt="">
               </div>
@@ -516,6 +520,8 @@
               <input id="set-font-max" class="input" type="number" min="8" value="128">
               <label class="form__label" for="set-stroke">Ореол, доля кегля</label>
               <input id="set-stroke" class="input" type="number" min="0" max="0.5" step="0.01" value="0.08">
+              <label class="form__label" for="set-margin">Запас от края баллона</label>
+              <input id="set-margin" class="input" type="number" min="0" max="0.3" step="0.01" value="0.08">
               <label class="form__label" for="set-font-path">Шрифт</label>
               <input id="set-font-path" class="input" type="text" value="" placeholder="встроенный" spellcheck="false">
             </div>

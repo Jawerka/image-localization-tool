@@ -134,6 +134,8 @@ a = Analysis(
         "src",
         "src.app",
         "src.page_pipeline",
+        "rarfile",
+        "py7zr",
         *rapidocr_hidden,
         *webview_hidden,
     ],

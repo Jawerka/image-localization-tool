@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import queue
 import threading
@@ -28,11 +29,12 @@ from src.app.events import (
     WorkerEvent,
 )
 from src.app.jobs import BATCH_KINDS, Job, skip_ready
-from src.app.store import ProjectStore
+from src.app.store import ProjectStore, VersionConflict
 from src.errors import PipelineCancelled
 from src.models import TextRegion
 
 _TERMINAL = frozenset({JOB_FINISHED, JOB_FAILED, JOB_CANCELLED})
+logger = logging.getLogger("ilt.app.worker")
 
 
 class RestartPolicy:
@@ -855,7 +857,11 @@ def _run_region(job: dict, ctx: _Runtime) -> None:
     else:
         plan = ""
     if not plan:
-        saved = _commit(store, job, document, page_id, snapshot=False, base_version=_base_version(payload))
+        saved = _commit_fresh(
+            store, job, document, page_id, snapshot=False, base_version=_base_version(payload),
+        )
+        if saved is None:
+            return
         ctx.emit(WorkerEvent(PAGE_UPDATED, {**_dict_ids(job, page_id), "plan": "none", "version": saved.version}))
         return
     _paint(
@@ -976,9 +982,7 @@ def _paint(
     for region in document.regions:
         region.overflow = region.id in overflow_ids
     document.warnings = warnings
-    store.save_image(project_id, page_id, "result", rendered)
-    store.save_image(project_id, page_id, "thumb", rendered)
-    saved = _commit(
+    saved = _commit_fresh(
         store,
         job,
         document,
@@ -986,6 +990,10 @@ def _paint(
         snapshot=snapshot,
         base_version=base_version,
     )
+    if saved is None:
+        return
+    store.save_image(project_id, page_id, "result", rendered)
+    store.save_image(project_id, page_id, "thumb", rendered)
     _finish_status(store, job, document, page_id)
     ctx.emit(WorkerEvent(PAGE_UPDATED, {
         **_dict_ids(job, page_id),
@@ -1029,6 +1037,7 @@ def _pipeline(ctx: _Runtime, settings: dict, *, reset_clients: bool):
     pipe.typesetter.min_font_size = config.min_font_size
     pipe.typesetter.max_font_size = max(config.min_font_size, config.max_font_size)
     pipe.typesetter.stroke_ratio = config.text_stroke_ratio
+    pipe.typesetter.margin_ratio = config.text_margin
     pipe.typesetter.lang = config.target_lang
     return pipe, config
 
@@ -1056,6 +1065,45 @@ def _commit(
     if snapshot:
         store.write_auto(project_id, page_id, PageDocument.from_dict(document.to_dict()))
     return store.write_document(project_id, page_id, document, base_version=base_version)
+
+
+def _commit_fresh(
+    store: ProjectStore,
+    job: dict,
+    document: PageDocument,
+    page_id: str,
+    *,
+    snapshot: bool,
+    base_version: int | None,
+) -> PageDocument | None:
+    """Записать вёрстку. ``None`` — на диске уже более новая правка, результат отброшен."""
+    if base_version is None:
+        return _commit(
+            store, job, document, page_id, snapshot=snapshot, base_version=None,
+        )
+    try:
+        return _commit(
+            store, job, document, page_id, snapshot=snapshot, base_version=base_version,
+        )
+    except VersionConflict:
+        logger.info("Правка страницы %s новее вёрстки, результат отброшен", page_id)
+        _release_running(store, job, page_id)
+        return None
+
+
+def _release_running(store: ProjectStore, job: dict, page_id: str) -> None:
+    """Прогресс вёрстки ставит «running». Если более новая задача уже не бежит, вернуть «edited»."""
+    project_id = str(job.get("project_id") or "")
+    try:
+        current = store.page_status(project_id, page_id)
+    except (FileNotFoundError, OSError, ValueError):
+        return
+    if current.get("status") != "running":
+        return
+    try:
+        store.update_status(project_id, page_id, status="edited", stage="", error="")
+    except (FileNotFoundError, OSError, ValueError):
+        return
 
 
 def _finish_status(store: ProjectStore, job: dict, document: PageDocument, page_id: str) -> None:

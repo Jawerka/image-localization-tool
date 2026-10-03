@@ -26,8 +26,8 @@ from urllib.parse import parse_qs, unquote, urlparse
 from src.app import __version__, model_manager
 from src.app.dialogs import DialogBridge
 from src.app.document import PageDocument, diff_plan
-from src.app.events import WorkerEvent
-from src.app.ingest import is_archive
+from src.app.events import LLM_STATUS, WorkerEvent
+from src.app.ingest import NoImagesError, archive_images, is_archive
 from src.app.jobs import JobQueue
 from src.app.settings import AppSettings, get_api_key
 from src.app.store import ProjectStore, VersionConflict
@@ -167,7 +167,7 @@ class AppState:
         self.subscribers: list[queue.Queue] = []
         self.export_dir: Path | None = None
         self.reveal_path: Path | None = None
-        self.llm_status = {"ok": False, "models": []}
+        self.llm_status = {"ok": None, "models": []}
         self.port = 0
         self._lock = threading.Lock()
         self._sub_lock = threading.Lock()
@@ -192,6 +192,37 @@ class AppState:
         self._stop.clear()
         self._pump = threading.Thread(target=self._pump_loop, name="ilt-events", daemon=True)
         self._pump.start()
+        self._start_llm_probe()
+
+    def _start_llm_probe(self) -> None:
+        """Проверить LLM в фоне. Пустой адрес — сразу «нет», без баннера до ответа."""
+        url = str(self.settings.llm_base_url or "").strip()
+        if not url:
+            self.llm_status = {"ok": False, "models": [], "reason": "empty"}
+            return
+        self.llm_status = {"ok": None, "models": []}
+        threading.Thread(target=self._probe_llm, name="ilt-llm", daemon=True).start()
+
+    def _probe_llm(self) -> None:
+        from src.app.settings import get_api_key
+
+        url = str(self.settings.llm_base_url or "").strip()
+        result = model_manager.check_llm(url, get_api_key())
+        if not result.get("ok") and url:
+            if self._stop.wait(2):
+                return
+            result = model_manager.check_llm(url, get_api_key())
+        models = [str(item) for item in result.get("models") or []]
+        self.llm_status = {
+            "ok": bool(result.get("ok")),
+            "models": models,
+            "reason": str(result.get("reason") or ""),
+        }
+        self.fanout(WorkerEvent(LLM_STATUS, {
+            "ok": bool(result.get("ok")),
+            "models": models,
+            "reason": str(result.get("reason") or ""),
+        }))
 
     def close(self) -> None:
         """Остановить раздачу и разбудить висящие SSE."""
@@ -597,7 +628,9 @@ def _bootstrap(state: AppState) -> dict:
     if state.settings_warnings:
         warning = str(state.settings_warnings[0] or "")
     llm = state.llm_status
-    if not llm.get("ok"):
+    if llm.get("ok") is None:
+        llm_view = {"ok": None, "models": []}
+    elif not llm.get("ok"):
         llm_view = {"ok": False, "models": []}
     else:
         llm_view = {"ok": True, "models": [str(item) for item in llm.get("models") or []]}
@@ -1013,8 +1046,14 @@ def _add_paths(state: AppState, paths: list[Path], *, strict: bool) -> dict:
         prepared = list(paths)
     else:
         prepared = [path for path in paths if path.exists()]
+    archives = [path for path in prepared if path.is_file() and is_archive(path)]
+    rest = [path for path in prepared if path not in archives]
+    usable, warnings = _usable_archives(archives)
+    if not usable and not rest and warnings:
+        raise NoImagesError(" ".join(warnings))
+    usable_keys = {_path_key(path) for path in usable}
     with state._lock:
-        if prepared:
+        if usable or rest:
             if state.project_id is None:
                 created = state.store.create_project(
                     _project_title(prepared),
@@ -1022,10 +1061,44 @@ def _add_paths(state: AppState, paths: list[Path], *, strict: bool) -> dict:
                     state.settings.target_lang,
                 )
                 state.project_id = str(created["id"])
-            state.store.add_sources(state.project_id, prepared)
+            for path in prepared:
+                if _path_key(path) in usable_keys:
+                    state.store.import_path(
+                        state.project_id,
+                        path,
+                        chapter_mode="subdir",
+                    )
+                elif path.is_file() and is_archive(path):
+                    continue
+                else:
+                    state.store.add_sources(state.project_id, [path])
             _remember_project(state, state.project_id)
         payload = _collection(state)
+    if warnings:
+        payload["warnings"] = warnings
     return payload
+
+
+def _usable_archives(archives: list[Path]) -> tuple[list[Path], list[str]]:
+    """Архивы с картинками и тексты про пустые.
+
+    Проверка до создания проекта: пустой архив не оставляет пустой проект,
+    если кроме него ничего нет.
+    """
+    usable: list[Path] = []
+    warnings: list[str] = []
+    for archive in archives:
+        try:
+            archive_images(archive)
+        except NoImagesError as exc:
+            warnings.append(str(exc))
+            continue
+        usable.append(archive)
+    return usable, warnings
+
+
+def _path_key(path: Path) -> str:
+    return os.path.normcase(str(path))
 
 
 def _project_title(paths: list[Path]) -> str:
@@ -1177,6 +1250,8 @@ def _import_sources(state: AppState, body: dict) -> dict:
     path = Path(raw.strip())
     if not path.exists():
         raise ValueError("Путь не найден")
+    if path.is_file() and is_archive(path):
+        archive_images(path)
     mode = str(body.get("chapter_mode") or "subdir")
     if mode not in ("subdir", "flat"):
         raise ValueError("Неизвестный режим глав")
@@ -1370,6 +1445,7 @@ def _typeset_crop(state: AppState, page_id: str, record: dict, region) -> tuple[
         max_font_size=int(getattr(settings, "max_font_size", 128) or 128),
         lang=str(getattr(settings, "target_lang", "ru") or "ru"),
         stroke_ratio=float(getattr(settings, "text_stroke_ratio", 0) or 0),
+        margin_ratio=float(getattr(settings, "text_margin", 0) or 0),
     )
     rendered, _overflow = setter.render(image.copy(), [region_copy], force=True)
     x, y, width, height = (int(value) for value in region.bbox)

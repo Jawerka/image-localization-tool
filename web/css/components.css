@@ -168,6 +168,53 @@ legend {
   font-size: var(--font-size-ui);
 }
 
+.field-hint--warn {
+  color: var(--warning);
+}
+
+.num-field {
+  display: inline-flex;
+  align-items: stretch;
+  width: 100%;
+  max-width: 11rem;
+  height: var(--btn-h);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--input);
+  overflow: hidden;
+}
+
+.num-field:focus-within {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.num-field__btn {
+  width: var(--btn-h);
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.num-field__btn:disabled {
+  opacity: 0.35;
+}
+
+.num-field__input {
+  flex: 1;
+  width: 5ch;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
 .field-hint .icon {
   display: inline-block;
   vertical-align: -3px;

@@ -261,7 +261,7 @@ function renderBanners(state) {
   if (state.modelsReady === false) {
     items.push({ id: "models", text: "Нет моделей.", actions: [{ id: "models", label: "Установить" }] });
   }
-  if (!state.llm?.ok) {
+  if (state.llm?.ok === false) {
     items.push({
       id: "llm",
       text: "LLM недоступен. Страницы пойдут через RapidOCR и Argos.",
@@ -355,6 +355,8 @@ async function openFolder() {
 function takeProject(data) {
   if (!data || data.cancelled || data.canceled) return;
   if (data.project || data.pages) setProject(data.project, data.pages || data.project?.pages);
+  const warnings = Array.isArray(data.warnings) ? data.warnings.filter(Boolean) : [];
+  if (warnings.length) setBanner("import", { text: warnings.join(" ") });
 }
 
 async function saveLanguages() {
@@ -482,7 +484,7 @@ function onEvent(type, payload) {
   if (type === "llm.status") {
     patch({
       llm: {
-        ok: Boolean(payload.ok ?? payload.available),
+        ok: payload.ok === true || payload.ok === false ? payload.ok : Boolean(payload.available),
         models: payload.models || [],
         vision: Boolean(payload.vision),
         reason: payload.reason || "",

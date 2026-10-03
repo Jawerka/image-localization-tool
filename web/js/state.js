@@ -26,6 +26,7 @@ export const DEFAULT_SETTINGS = {
   glossary_path: "",
   detector_conf: 0.3,
   text_stroke_ratio: 0.08,
+  text_margin: 0.08,
   min_font_size: 10,
   max_font_size: 128,
   export_format: "png",
@@ -74,7 +75,7 @@ function emptyState() {
     project: null,
     pages: [],
     recent: [],
-    llm: { ok: false, models: [], vision: false },
+    llm: { ok: null, models: [], vision: false },
     device: "",
     modelsReady: true,
     busy: false,
@@ -249,8 +250,10 @@ function normalizePages(list) {
 }
 
 function normalizeLlm(raw) {
-  if (!raw || typeof raw !== "object") return { ok: false, models: [], vision: false, reason: "" };
-  const ok = typeof raw.ok === "boolean" ? raw.ok : Boolean(raw.available);
+  if (!raw || typeof raw !== "object") return { ok: null, models: [], vision: false, reason: "" };
+  let ok = null;
+  if (raw.ok === true || raw.ok === false) ok = raw.ok;
+  else if (typeof raw.available === "boolean") ok = raw.available;
   return {
     ok,
     models: Array.isArray(raw.models) ? raw.models : [],
@@ -565,23 +568,20 @@ async function flush(pageId) {
   const base = acked.has(pageId) ? acked.get(pageId) : Number(body.version) || 0;
   body.version = base;
   try {
-    const response = await putDocument(pageId, base, body);
-    const version = readVersion(response, base);
-    acked.set(pageId, version);
-    if (state.activePageId === pageId && state.document && !pendingBody.has(pageId)) {
-      if (response && response.document) {
-        const normalized = normalizeDocument(response.document);
-        normalized.version = version;
-        state = { ...state, document: normalized };
-      } else {
-        state = { ...state, document: { ...state.document, version } };
-      }
+    let response;
+    try {
+      response = await putDocument(pageId, base, body);
+    } catch (error) {
+      if (error.status !== 409) throw error;
+      const serverVersion = await conflictVersion(pageId, error);
+      if (serverVersion == null) throw error;
+      acked.set(pageId, serverVersion);
+      const latest = pendingBody.get(pageId) || body;
+      pendingBody.delete(pageId);
+      latest.version = serverVersion;
+      response = await putDocument(pageId, serverVersion, latest);
     }
-    state = {
-      ...state,
-      pages: state.pages.map((page) => (page.id === pageId ? { ...page, version } : page)),
-    };
-    if (state.activePageId === pageId) coalesceKey = "";
+    acceptSave(pageId, response, base);
   } catch (error) {
     coalesceKey = "";
     pendingBody.delete(pageId);
@@ -612,6 +612,36 @@ async function flush(pageId) {
     queuedPage = "";
     if (next) flush(next);
     else emit();
+  }
+}
+
+function acceptSave(pageId, response, fallback) {
+  const version = readVersion(response, fallback);
+  acked.set(pageId, version);
+  if (state.activePageId === pageId && state.document && !pendingBody.has(pageId)) {
+    if (response && response.document) {
+      const normalized = normalizeDocument(response.document);
+      normalized.version = version;
+      state = { ...state, document: normalized };
+    } else {
+      state = { ...state, document: { ...state.document, version } };
+    }
+  }
+  state = {
+    ...state,
+    pages: state.pages.map((page) => (page.id === pageId ? { ...page, version } : page)),
+  };
+  if (state.activePageId === pageId) coalesceKey = "";
+}
+
+async function conflictVersion(pageId, error) {
+  const fromBody = readVersion(error && error.body, null);
+  if (fromBody != null) return fromBody;
+  try {
+    const fresh = await getPage(pageId);
+    return readVersion(fresh, null);
+  } catch (loadError) {
+    return null;
   }
 }
 

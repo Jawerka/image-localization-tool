@@ -159,6 +159,29 @@
   right: 6px;
 }
 
+.frame__placeholder {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: var(--bg-card);
+  color: var(--text-muted);
+  line-height: 1.3;
+  text-align: center;
+}
+
+.frame__placeholder[hidden] {
+  display: none;
+}
+
+.frame__mask.is-missing {
+  display: none !important;
+}
+
 .frame__progress {
   position: absolute;
   left: 8px;

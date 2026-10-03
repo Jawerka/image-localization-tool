@@ -1,6 +1,10 @@
-"""Список изображений, распаковка zip/cbz и план глав."""
+"""Список изображений, распаковка архивов и план глав."""
 
 import io
+import os
+import shutil
+import subprocess
+import tarfile
 import zipfile
 from pathlib import Path
 
@@ -8,6 +12,8 @@ import pytest
 from PIL import Image
 
 from src.app.ingest import (
+    NoImagesError,
+    archive_images,
     extract_archive,
     is_archive,
     list_images,
@@ -125,8 +131,143 @@ def test_extract_archive_skips_zip_slip(tmp_path, suffix):
 def test_is_archive_suffix():
     assert is_archive(Path("Book.CBZ"))
     assert is_archive(Path("book.zip"))
-    assert not is_archive(Path("book.rar"))
+    assert is_archive(Path("book.rar"))
+    assert is_archive(Path("book.cbr"))
+    assert is_archive(Path("book.cb7"))
+    assert is_archive(Path("book.7z"))
+    assert is_archive(Path("book.cbt"))
+    assert is_archive(Path("book.tar"))
     assert not is_archive(Path("page.PNG"))
+    assert not is_archive(Path("notes.txt"))
+
+
+def test_extract_archive_empty_raises(tmp_path):
+    archive = tmp_path / "empty.zip"
+    with zipfile.ZipFile(archive, "w") as bundle:
+        bundle.writestr("notes.txt", b"skip")
+    dest = tmp_path / "out"
+    with pytest.raises(NoImagesError, match="переводить нечего"):
+        extract_archive(archive, dest)
+    assert not dest.exists()
+
+
+def test_extract_archive_depth_and_mask(tmp_path):
+    archive = tmp_path / "deep.cbz"
+    png = _png_bytes()
+    keep = "a/b/c/d/e/page.png"
+    too_deep = "a/b/c/d/e/f/page.png"
+    with zipfile.ZipFile(archive, "w") as bundle:
+        bundle.writestr(keep, png)
+        bundle.writestr(too_deep, png)
+        bundle.writestr("cover-mask.png", png)
+    only_deep = tmp_path / "only-deep.zip"
+    with zipfile.ZipFile(only_deep, "w") as bundle:
+        bundle.writestr(too_deep, png)
+    dest = tmp_path / "out"
+    extracted = extract_archive(archive, dest)
+    assert [path.relative_to(dest).as_posix() for path in extracted] == [keep]
+    assert archive_images(archive) == [keep]
+    assert not (dest / "cover-mask.png").exists()
+    with pytest.raises(NoImagesError, match="переводить нечего"):
+        archive_images(only_deep)
+
+
+def test_cbr_with_zip_payload(tmp_path):
+    archive = tmp_path / "book.cbr"
+    png = _png_bytes()
+    with zipfile.ZipFile(archive, "w") as bundle:
+        bundle.writestr("page.png", png)
+    extracted = extract_archive(archive, tmp_path / "out")
+    assert [path.name for path in extracted] == ["page.png"]
+
+
+def test_extract_tar_skips_link_and_slip(tmp_path):
+    archive = tmp_path / "book.cbt"
+    png = _png_bytes()
+    with tarfile.open(archive, "w") as bundle:
+        info = tarfile.TarInfo("ch/page.png")
+        info.size = len(png)
+        bundle.addfile(info, io.BytesIO(png))
+        link = tarfile.TarInfo("ch/link.png")
+        link.type = tarfile.SYMTYPE
+        link.linkname = "page.png"
+        bundle.addfile(link)
+        slip = tarfile.TarInfo("../evil.png")
+        slip.size = len(png)
+        bundle.addfile(slip, io.BytesIO(png))
+    dest = tmp_path / "out"
+    extracted = extract_archive(archive, dest)
+    assert [path.relative_to(dest).as_posix() for path in extracted] == ["ch/page.png"]
+    assert not (tmp_path / "evil.png").exists()
+    assert not (dest / "ch" / "link.png").exists()
+
+
+def test_extract_7z(tmp_path):
+    py7zr = pytest.importorskip("py7zr")
+    archive = tmp_path / "book.cb7"
+    png = _png_bytes()
+    with py7zr.SevenZipFile(archive, "w") as bundle:
+        bundle.writestr(png, "page10.png")
+        bundle.writestr(png, "page2.png")
+        bundle.writestr(b"no", "notes.txt")
+    dest = tmp_path / "out"
+    extracted = extract_archive(archive, dest)
+    assert [path.relative_to(dest).as_posix() for path in extracted] == [
+        "page2.png",
+        "page10.png",
+    ]
+    assert not (dest / "notes.txt").exists()
+
+
+def _rar_exe() -> str | None:
+    found = shutil.which("rar")
+    if found:
+        return found
+    root = os.environ.get("ProgramFiles", "")
+    candidate = Path(root) / "WinRAR" / "Rar.exe"
+    if candidate.is_file():
+        return str(candidate)
+    return None
+
+
+def test_extract_rar(tmp_path):
+    pytest.importorskip("rarfile")
+    rar = _rar_exe()
+    if rar is None:
+        pytest.skip("нет rar для сборки архива")
+    page = tmp_path / "page2.png"
+    _save(page)
+    archive = tmp_path / "book.cbr"
+    subprocess.run(
+        [rar, "a", "-ep", str(archive), str(page)],
+        check=True,
+        capture_output=True,
+    )
+    extracted = extract_archive(archive, tmp_path / "out")
+    assert [path.name for path in extracted] == ["page2.png"]
+
+
+def test_rar_without_tool_explains(tmp_path, monkeypatch):
+    rarfile = pytest.importorskip("rarfile")
+    rar = _rar_exe()
+    if rar is None:
+        pytest.skip("нет rar для сборки архива")
+    page = tmp_path / "page.png"
+    _save(page)
+    archive = tmp_path / "book.rar"
+    subprocess.run(
+        [rar, "a", "-ep", str(archive), str(page)],
+        check=True,
+        capture_output=True,
+    )
+
+    def _boom(self, info, pwd=None):
+        raise rarfile.RarCannotExec("Cannot find working tool")
+
+    monkeypatch.setattr(rarfile.RAR5Parser, "open", _boom)
+    monkeypatch.setattr(rarfile.RAR3Parser, "open", _boom)
+    with pytest.raises(ValueError, match="7-Zip или UnRAR"):
+        extract_archive(archive, tmp_path / "out")
 
 
 def test_plan_chapters_flat_is_empty(tmp_path):

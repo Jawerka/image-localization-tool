@@ -177,6 +177,32 @@ def test_layer_path_draws_rotation_skew_spacing_and_arc():
         assert dark > 10
 
 
+def test_rotated_layer_stays_on_block_center():
+    image = Image.new("RGB", (400, 400), "white")
+    region = TextRegion(
+        id=1,
+        bbox=(140, 140, 120, 120),
+        translation="СЖАТЬ",
+        block_type="sfx",
+        style=TextStyle(
+            fill_rgb=(0, 0, 0),
+            alignment="center",
+            font_size_override=28,
+            rotation=72,
+            stroke_mode="none",
+        ),
+    )
+    result, overflow = Typesetter(min_font_size=12, max_font_size=40, lang="ru").render(
+        image, [region]
+    )
+    assert overflow == []
+    ink = np.any(np.array(result) < 40, axis=2)
+    ys, xs = np.nonzero(ink)
+    assert len(xs) > 10
+    assert abs(float(xs.mean()) - 200) < 24
+    assert abs(float(ys.mean()) - 200) < 24
+
+
 def test_arc_calls_warp_fast_stroke_does_not(monkeypatch):
     calls = []
     real = typesetter_module.warp_image

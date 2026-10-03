@@ -225,6 +225,7 @@ class AppSettings:
     glossary_path: str = ""
     detector_conf: float = 0.3
     text_stroke_ratio: float = 0.08
+    text_margin: float = 0.08
     min_font_size: int = 10
     max_font_size: int = 128
     export_format: str = "png"
@@ -274,6 +275,7 @@ class AppSettings:
         self.glossary_path = _raw_text(self.glossary_path, "")
         self.detector_conf = _as_float(self.detector_conf, 0.3, 0.05, 0.95)
         self.text_stroke_ratio = _as_float(self.text_stroke_ratio, 0.08, 0.0, 0.5)
+        self.text_margin = _as_float(self.text_margin, 0.08, 0.0, 0.3)
         min_size = _as_int(self.min_font_size, 10, 8, 256)
         max_size = _as_int(self.max_font_size, 128, 8, 256)
         if min_size > max_size:
@@ -329,6 +331,7 @@ class AppSettings:
             "glossary_path": self.glossary_path,
             "detector_conf": self.detector_conf,
             "text_stroke_ratio": self.text_stroke_ratio,
+            "text_margin": self.text_margin,
             "min_font_size": self.min_font_size,
             "max_font_size": self.max_font_size,
             "export_format": self.export_format,
@@ -420,6 +423,7 @@ class AppSettings:
         config.glossary_path = self.glossary_path
         config.detector_conf = self.detector_conf
         config.text_stroke_ratio = self.text_stroke_ratio
+        config.text_margin = self.text_margin
         config.min_font_size = self.min_font_size
         config.max_font_size = self.max_font_size
         config.llm_base_url = self.llm_base_url

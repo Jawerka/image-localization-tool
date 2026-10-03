@@ -32,6 +32,9 @@ class Config:
     llm_timeout: int = 300
     # vlm | rapid
     ocr_backend: str = "vlm"
+    # Длинная сторона страницы, которую видит VLM при OCR. Крупный скан
+    # сжимается до неё, чтобы номера рамок остались читаемыми.
+    vlm_max_side: int = 1536
     # llm | argos
     translator_backend: str = "llm"
     # lama | opencv
@@ -46,6 +49,8 @@ class Config:
     detector_conf: float = 0.3
     # Ореол цвета фона вокруг перевода. 0 — без ореола.
     text_stroke_ratio: float = 0.08
+    # Доля меньшей стороны баллона, которую не занимает текст.
+    text_margin: float = 0.08
 
     @classmethod
     def load(cls, path: str | Path | None = None) -> "Config":

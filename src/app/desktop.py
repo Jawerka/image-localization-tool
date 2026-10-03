@@ -34,7 +34,11 @@ DEFAULT_WIDTH = 1280
 DEFAULT_HEIGHT = 800
 MIN_SIZE = (1100, 700)
 INSTANCE_FILENAME = "instance.json"
-_IMAGE_FILTER = ("Изображения (*.png;*.jpg;*.jpeg;*.bmp;*.tif;*.tiff)",)
+_IMAGE_FILTER = (
+    "Изображения и архивы (*.png;*.jpg;*.jpeg;*.bmp;*.tif;*.tiff;*.zip;*.cbz;*.cbr;*.rar;*.cb7;*.7z;*.cbt;*.tar)",
+    "Изображения (*.png;*.jpg;*.jpeg;*.bmp;*.tif;*.tiff)",
+    "Архивы (*.zip;*.cbz;*.cbr;*.rar;*.cb7;*.7z;*.cbt;*.tar)",
+)
 _WEBVIEW2_TEXT = (
     "Не удалось открыть окно: не найден WebView2 Runtime.\n\n"
     "Установите Microsoft Edge WebView2 Runtime и запустите программу снова."
