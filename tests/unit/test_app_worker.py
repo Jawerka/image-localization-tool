@@ -137,3 +137,140 @@ def test_paint_reports_done(tmp_path, monkeypatch):
     assert updated[0].payload["status"] == "done"
     assert updated[0].payload["progress"] == 100
     assert store.page_status(project["id"], page_id)["status"] == "done"
+
+
+def test_cancel_keeps_flag_while_job_is_held():
+    import queue as queue_mod
+
+    ctx = worker._Runtime(queue_mod.Queue())
+    ctx.hold("batch", {"id": "job1", "kind": "translate_page"})
+    worker._cancel_lanes(ctx, queue_mod.Queue(), queue_mod.Queue(), None)
+    assert ctx.cancel_all is True
+    assert ctx.should_skip("job1") is True
+
+
+def test_held_job_is_cancelled_without_starting():
+    import queue as queue_mod
+    import time
+
+    events = queue_mod.Queue()
+    ctx = worker._Runtime(events)
+    ctx.pause_lane()
+    work = queue_mod.Queue()
+    work.put({"id": "job1", "kind": "no-such", "page_id": "p", "project_id": "proj", "payload": {}})
+    thread = threading.Thread(target=worker._lane_loop, args=("batch", work, ctx), daemon=True)
+    thread.start()
+    for _ in range(40):
+        if ctx.held["batch"]:
+            break
+        time.sleep(0.02)
+    assert ctx.held["batch"]
+    worker._cancel_lanes(ctx, work, queue_mod.Queue(), None)
+    seen = []
+    deadline = time.time() + 2
+    while time.time() < deadline and "job.cancelled" not in seen:
+        try:
+            raw = events.get(timeout=0.1)
+        except queue_mod.Empty:
+            continue
+        seen.append(raw.get("type"))
+    work.put(None)
+    thread.join(1)
+    assert "job.cancelled" in seen
+    assert "job.started" not in seen
+    assert "job.failed" not in seen
+
+
+def test_batch_failure_idles_queued_tail(tmp_path):
+    import queue as queue_mod
+
+    store = ProjectStore(tmp_path)
+    project = store.create_project("Глава", "en", "ru")
+    first = tmp_path / "a.png"
+    second = tmp_path / "b.png"
+    Image.new("RGB", (8, 8), "white").save(first)
+    Image.new("RGB", (8, 8), "white").save(second)
+    pages = store.add_sources(project["id"], [first, second])
+    store.update_status(project["id"], pages[0]["id"], status="running")
+    store.update_status(project["id"], pages[1]["id"], status="queued")
+    ctx = worker._Runtime(queue_mod.Queue())
+    ctx.page_id = pages[0]["id"]
+    worker._dispatch({
+        "id": "job",
+        "kind": "no-such",
+        "project_id": project["id"],
+        "page_id": "",
+        "payload": {
+            "store_root": str(tmp_path),
+            "pages": [{"page_id": pages[0]["id"]}, {"page_id": pages[1]["id"]}],
+        },
+    }, ctx)
+    assert store.page_status(project["id"], pages[0]["id"])["status"] == "error"
+    assert store.page_status(project["id"], pages[1]["id"])["status"] == "idle"
+
+
+def test_dead_worker_fails_inflight_and_clears_queue_tail(tmp_path):
+    store = ProjectStore(tmp_path)
+    project = store.create_project("Глава", "en", "ru")
+    first = tmp_path / "a.png"
+    second = tmp_path / "b.png"
+    Image.new("RGB", (8, 8), "white").save(first)
+    Image.new("RGB", (8, 8), "white").save(second)
+    pages = store.add_sources(project["id"], [first, second])
+    store.update_status(project["id"], pages[0]["id"], status="running")
+    store.update_status(project["id"], pages[1]["id"], status="queued")
+    proc = worker.ProcessWorker()
+    seen = []
+    proc.event_sink = seen.append
+    proc._inflight["job"] = {
+        "id": "job",
+        "kind": "translate_all",
+        "project_id": project["id"],
+        "page_id": "",
+        "payload": {
+            "store_root": str(tmp_path),
+            "pages": [{"page_id": pages[0]["id"]}, {"page_id": pages[1]["id"]}],
+        },
+    }
+    proc._abandon_inflight("Процесс воркера завершился")
+    assert proc._inflight == {}
+    assert store.page_status(project["id"], pages[0]["id"])["status"] == "error"
+    assert store.page_status(project["id"], pages[1]["id"])["status"] == "idle"
+    assert any(event.type == "job.failed" for event in seen)
+
+
+def test_full_stop_does_not_resubmit_edits():
+    proc = worker.ProcessWorker()
+    proc._stop_process = lambda: None
+    started = []
+    proc._start = lambda: started.append(True)
+    seen = []
+    proc.event_sink = seen.append
+    proc._inflight["edit"] = {
+        "id": "edit",
+        "kind": "apply_document",
+        "project_id": "proj",
+        "page_id": "page",
+        "payload": {},
+    }
+    proc._restart_stuck(resubmit_edits=False)
+    assert proc._inflight == {}
+    assert started == [True]
+    assert [event.type for event in seen if event.type in ("job.cancelled", "job.failed")] == ["job.cancelled"]
+
+
+def test_restore_turns_running_page_into_queued(tmp_path):
+    store = ProjectStore(tmp_path)
+    project = store.create_project("Глава", "en", "ru")
+    image = tmp_path / "a.png"
+    Image.new("RGB", (8, 8), "white").save(image)
+    page = store.add_sources(project["id"], [image])[0]
+    store.update_status(project["id"], page["id"], status="running", stage="ocr")
+    worker.demote_restored_running(store, [{
+        "project_id": project["id"],
+        "page_id": page["id"],
+        "payload": {},
+    }])
+    status = store.page_status(project["id"], page["id"])
+    assert status["status"] == "queued"
+    assert status["stage"] == ""

@@ -68,6 +68,8 @@ class _Runtime:
         self.cancel_all = False
         self.cancelled_ids: set[str] = set()
         self.running = {"batch": False, "edit": False}
+        # Задание уже снято с очереди полосы, но ещё не начато (ждёт паузу).
+        self.held = {"batch": None, "edit": None}
         self.pipeline = None
         self.clients_sig = None
         self.page_id = ""
@@ -90,12 +92,27 @@ class _Runtime:
         self.run_gate.set()
 
     def wait_to_start(self) -> bool:
-        """Дождаться разрешения начать задание. False — процесс останавливается."""
+        """Дождаться разрешения начать задание. False — процесс останавливается.
+
+        Отмена снятого, но ещё не начатого задания будит ожидание сразу.
+        """
         while not self.run_gate.is_set():
             if self.stop.is_set():
                 return False
+            if self._held_cancelled():
+                return True
             self.run_gate.wait(0.2)
         return not self.stop.is_set()
+
+    def hold(self, lane: str, job: dict) -> None:
+        """Запомнить задание, которое полоса уже забрала из очереди."""
+        with self.lock:
+            self.held[lane] = job
+
+    def _held_cancelled(self) -> bool:
+        with self.lock:
+            jobs = [job for job in self.held.values() if isinstance(job, dict)]
+        return any(self.should_skip(str(job.get("id") or "")) for job in jobs)
 
     def emit(self, event: WorkerEvent) -> None:
         try:
@@ -124,8 +141,10 @@ class _Runtime:
     def finish_job(self, lane: str, job_id: str) -> None:
         with self.lock:
             self.running[lane] = False
+            self.held[lane] = None
             self.cancelled_ids.discard(job_id)
-            busy = self.running["batch"] or self.running["edit"]
+            pending = any(self.held.values())
+            busy = self.running["batch"] or self.running["edit"] or pending
             if not busy and not self.cancelled_ids:
                 self.cancel_all = False
                 self.cancel_event.clear()
@@ -426,7 +445,21 @@ class ProcessWorker:
         self._commands.put({"cmd": "cancel", "job_id": job_id})
         if self._wait_idle(3.0, job_id):
             return
-        self._restart_stuck()
+        self._restart_stuck(resubmit_edits=job_id is not None)
+
+    def _abandon_inflight(self, error: str) -> None:
+        """Процесс умер: закрыть задания и отпустить слот очереди."""
+        with self._lock:
+            pending = list(self._inflight.values())
+            self._inflight.clear()
+        for item in pending:
+            if not isinstance(item, dict):
+                continue
+            for page_id in _close_stuck_pages(item, current_id="", error=error, fail_current=False):
+                self._emit(WorkerEvent(PAGE_UPDATED, _page_update(_store(item), item, page_id)))
+            failed = WorkerEvent(JOB_FAILED, {**_dict_ids(item), "error": error})
+            self._emit(failed)
+            _notify_page_done(self, item, failed)
 
     def shutdown(self) -> None:
         self._closed = True
@@ -483,6 +516,7 @@ class ProcessWorker:
                     and not process.is_alive()
                     and not self._closed
                 ):
+                    self._abandon_inflight("Процесс воркера завершился")
                     self._emit(WorkerEvent(WORKER_FAILED, {"reason": "Процесс воркера завершился"}))
                     return
                 continue
@@ -518,21 +552,28 @@ class ProcessWorker:
             time.sleep(0.05)
         return False
 
-    def _restart_stuck(self) -> None:
+    def _restart_stuck(self, *, resubmit_edits: bool = True) -> None:
         with self._lock:
             pending = list(self._inflight.values())
             self._inflight.clear()
         edits = [item for item in pending if item.get("kind") not in BATCH_KINDS]
         batches = [item for item in pending if item.get("kind") in BATCH_KINDS]
+        # Полный «Стоп» уже выкинул правки из очереди. Возвращать их нельзя.
+        dropped = batches if resubmit_edits else pending
+        kept = edits if resubmit_edits else []
         self._stop_process()
-        for item in batches:
+        for item in dropped:
+            for page_id in _close_stuck_pages(
+                item, current_id="", error="", fail_current=False, running_status="idle",
+            ):
+                self._emit(WorkerEvent(PAGE_UPDATED, _page_update(_store(item), item, page_id)))
             cancelled = WorkerEvent(JOB_CANCELLED, _dict_ids(item))
             self._emit(cancelled)
             _notify_page_done(self, item, cancelled)
         if self._closed:
             return
         if not self.policy.allow(time.time()):
-            for item in edits:
+            for item in kept:
                 failed = WorkerEvent(
                     JOB_FAILED,
                     {**_dict_ids(item), "error": "Воркер не перезапущен"},
@@ -543,7 +584,7 @@ class ProcessWorker:
             return
         self._emit(WorkerEvent(WORKER_RESTARTING, {}))
         self._start()
-        for item in edits:
+        for item in kept:
             with self._lock:
                 self._inflight[str(item.get("id") or "")] = item
             self._commands.put({"cmd": "submit", "job": item})
@@ -632,19 +673,20 @@ def _lane_loop(lane: str, work_queue: queue.Queue, ctx: _Runtime) -> None:
         job = work_queue.get()
         if job is None:
             return
-        if not ctx.wait_to_start():
-            return
         job_id = str(job.get("id") or "")
-        if ctx.should_skip(job_id):
-            ctx.emit(WorkerEvent(JOB_CANCELLED, _dict_ids(job)))
-            ctx.finish_job(lane, job_id)
-            continue
-        ctx.mark_running(lane)
+        ctx.hold(lane, job)
         try:
-            _dispatch(job, ctx)
-        except Exception as exc:
-            _log_failure(exc)
-            ctx.emit(WorkerEvent(JOB_FAILED, {**_dict_ids(job), "error": str(exc)}))
+            if not ctx.wait_to_start():
+                return
+            if ctx.should_skip(job_id):
+                ctx.emit(WorkerEvent(JOB_CANCELLED, _dict_ids(job)))
+                continue
+            ctx.mark_running(lane)
+            try:
+                _dispatch(job, ctx)
+            except Exception as exc:
+                _log_failure(exc)
+                ctx.emit(WorkerEvent(JOB_FAILED, {**_dict_ids(job), "error": str(exc)}))
         finally:
             ctx.finish_job(lane, job_id)
 
@@ -663,7 +705,8 @@ def _cancel_lanes(ctx: _Runtime, batch_queue: queue.Queue, edit_queue: queue.Que
         ctx.cancelled_ids.discard(str(job.get("id") or ""))
         ctx.emit(WorkerEvent(JOB_CANCELLED, _dict_ids(job)))
     with ctx.lock:
-        busy = ctx.running["batch"] or ctx.running["edit"]
+        pending = any(ctx.held.values())
+        busy = ctx.running["batch"] or ctx.running["edit"] or pending
         if not busy and not ctx.cancelled_ids:
             ctx.cancel_all = False
             ctx.cancel_event.clear()
@@ -705,12 +748,12 @@ def _dispatch(job: dict, ctx: _Runtime) -> None:
         else:
             raise RuntimeError(f"Неизвестное задание: {kind}")
     except PipelineCancelled:
-        _mark_page(job, ctx, status="idle", error="")
+        _report_stuck_pages(job, ctx, error="", fail_current=False)
         ctx.emit(WorkerEvent(JOB_CANCELLED, _dict_ids(job, ctx.page_id or None)))
         return
     except Exception as exc:
         _log_failure(exc)
-        _mark_page(job, ctx, status="error", error=str(exc))
+        _report_stuck_pages(job, ctx, error=str(exc), fail_current=True)
         ctx.emit(WorkerEvent(JOB_FAILED, {**_dict_ids(job, ctx.page_id or None), "error": str(exc)}))
         return
     ctx.emit(WorkerEvent(JOB_FINISHED, _dict_ids(job, ctx.page_id or None)))
@@ -1137,19 +1180,110 @@ def _finish_status(store: ProjectStore, job: dict, document: PageDocument, page_
     )
 
 
-def _mark_page(job: dict, ctx: _Runtime, *, status: str, error: str) -> None:
-    page_id = ctx.page_id or str(job.get("page_id") or "")
-    if not page_id:
-        return
+def _job_page_ids(job: dict) -> list[str]:
+    found: list[str] = []
+    for page in _page_list(job):
+        page_id = str(page.get("page_id") or "")
+        if page_id and page_id not in found:
+            found.append(page_id)
+    own = str(job.get("page_id") or "")
+    if own and own not in found:
+        found.append(own)
+    return found
+
+
+def _close_stuck_pages(
+    job: dict,
+    *,
+    current_id: str,
+    error: str,
+    fail_current: bool,
+    running_status: str = "error",
+) -> list[str]:
+    """Снять статусы задания, которое уже не выполняется.
+
+    Текущая страница становится ``error`` или ``idle``. Любая другая
+    ``running`` — ошибка, хвост ``queued`` — снова ``idle``.
+    """
+    if not isinstance(job, dict):
+        return []
     try:
-        _store(job).update_status(
-            str(job.get("project_id") or ""),
-            page_id,
-            status=status,
-            error=error,
-        )
+        store = _store(job)
+    except Exception:
+        return []
+    project_id = str(job.get("project_id") or "")
+    ids = _job_page_ids(job)
+    if current_id and current_id not in ids:
+        ids.append(current_id)
+    changed: list[str] = []
+    for page_id in ids:
+        try:
+            current = store.page_status(project_id, page_id)
+        except (FileNotFoundError, OSError, ValueError):
+            continue
+        status = current.get("status")
+        if page_id == current_id and current_id:
+            new_status = "error" if fail_current else "idle"
+            new_error = error if fail_current else ""
+        elif status == "running":
+            new_status = running_status
+            new_error = error if running_status == "error" else ""
+        elif status == "queued":
+            new_status = "idle"
+            new_error = ""
+        else:
+            continue
+        try:
+            store.update_status(
+                project_id,
+                page_id,
+                status=new_status,
+                progress=0,
+                stage="",
+                error=new_error,
+            )
+        except (FileNotFoundError, OSError, ValueError):
+            continue
+        changed.append(page_id)
+    return changed
+
+
+def _report_stuck_pages(job: dict, ctx: _Runtime, *, error: str, fail_current: bool) -> None:
+    current_id = ctx.page_id or str(job.get("page_id") or "")
+    try:
+        store = _store(job)
     except Exception:
         return
+    running_status = "error" if fail_current else "idle"
+    for page_id in _close_stuck_pages(
+        job,
+        current_id=current_id,
+        error=error,
+        fail_current=fail_current,
+        running_status=running_status,
+    ):
+        ctx.emit(WorkerEvent(PAGE_UPDATED, _page_update(store, job, page_id)))
+
+
+def demote_restored_running(store: ProjectStore, jobs: list[dict]) -> None:
+    """После загрузки очереди страница ждёт продолжения, а не числится идущей."""
+    for job in jobs:
+        if not isinstance(job, dict):
+            continue
+        project_id = str(job.get("project_id") or "")
+        if not project_id:
+            continue
+        for page_id in _job_page_ids(job):
+            try:
+                current = store.page_status(project_id, page_id)
+            except (FileNotFoundError, OSError, ValueError):
+                continue
+            if current.get("status") != "running":
+                continue
+            try:
+                store.update_status(project_id, page_id, status="queued", progress=0, stage="")
+            except (FileNotFoundError, OSError, ValueError):
+                continue
 
 
 def _mentions_fallback(warnings: list[str]) -> bool:

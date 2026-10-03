@@ -143,17 +143,118 @@ def _colors(crop: np.ndarray, ink: np.ndarray, background: np.ndarray) -> tuple[
     return fill, stroke
 
 
+# Сжатие контура до ретуши. LaMa потом расширяет маску эллипсом 5×5, около 2px.
+_BUBBLE_INSET_PX = 12
+
+
+def _fill_contour(mask: np.ndarray) -> np.ndarray:
+    """Залить дыры по внешнему контуру."""
+    contours, _hierarchy = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return mask
+    filled = np.zeros_like(mask)
+    cv2.drawContours(filled, contours, -1, 255, thickness=-1)
+    return filled
+
+
+def _bubble_seed(image_rgb: np.ndarray, region: TextRegion) -> tuple[int, int] | None:
+    """Пиксель цвета фона облачка ближе всего к центру текста, не буква."""
+    if region.bubble_bbox is None:
+        return None
+    height, width = image_rgb.shape[:2]
+    bx, by, bw, bh = region.bubble_bbox
+    x0, y0 = max(0, bx), max(0, by)
+    x1, y1 = min(width, bx + bw), min(height, by + bh)
+    crop = image_rgb[y0:y1, x0:x1]
+    if crop.size == 0:
+        return None
+    median = np.median(crop.reshape(-1, 3), axis=0)
+    distance = np.linalg.norm(crop.astype(np.float32) - median, axis=2)
+    close = distance <= 28
+    if not np.any(close):
+        close = distance <= float(np.percentile(distance, 40))
+    ys, xs = np.where(close)
+    cx = float(region.bbox[0] + region.bbox[2] / 2) - x0
+    cy = float(region.bbox[1] + region.bbox[3] / 2) - y0
+    nearest = int(np.argmin((xs - cx) ** 2 + (ys - cy) ** 2))
+    return int(xs[nearest] + x0), int(ys[nearest] + y0)
+
+
+def _bubble_contour(image_rgb: np.ndarray, region: TextRegion) -> np.ndarray:
+    """Заливка внутренности баллона. Пустая, если заливка не собрала треть бокса."""
+    height, width = image_rgb.shape[:2]
+    mask = np.zeros((height, width), dtype=np.uint8)
+    if region.bubble_bbox is None:
+        return mask
+    seed = _bubble_seed(image_rgb, region)
+    if seed is None:
+        return mask
+    bx, by, bw, bh = region.bubble_bbox
+    flood_mask = np.zeros((height + 2, width + 2), np.uint8)
+    bgr = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
+    flags = 4 | cv2.FLOODFILL_MASK_ONLY | (255 << 8)
+    cv2.floodFill(
+        bgr, flood_mask, seed, (255, 255, 255),
+        (20, 20, 20), (20, 20, 20), flags,
+    )
+    filled = flood_mask[1:-1, 1:-1]
+    x0, y0 = max(0, bx), max(0, by)
+    x1, y1 = min(width, bx + bw), min(height, by + bh)
+    mask[y0:y1, x0:x1] = filled[y0:y1, x0:x1]
+    box_area = max(1, (x1 - x0) * (y1 - y0))
+    if int(np.sum(mask > 0)) < 0.33 * box_area:
+        return np.zeros((height, width), dtype=np.uint8)
+    return _fill_contour(mask)
+
+
+def _inset_mask(mask: np.ndarray, radius: int) -> np.ndarray:
+    """Сжать маску внутрь эллиптическим ядром."""
+    if radius <= 0 or not np.any(mask):
+        return mask
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (radius * 2 + 1, radius * 2 + 1))
+    return cv2.erode(mask, kernel, iterations=1)
+
+
+def _inscribed_ellipse(
+    shape: tuple[int, int],
+    bubble_bbox: tuple[int, int, int, int],
+    radius: int,
+) -> np.ndarray:
+    """Эллипс, вписанный в бокс баллона и уже отступленный от его краёв."""
+    mask = np.zeros(shape, dtype=np.uint8)
+    x, y, bw, bh = bubble_bbox
+    axes = (max(1, int(bw / 2) - radius), max(1, int(bh / 2) - radius))
+    center = (int(x + bw / 2), int(y + bh / 2))
+    cv2.ellipse(mask, center, axes, 0, 0, 360, 255, thickness=-1)
+    return mask
+
+
+def _bubble_retouch_mask(image_rgb: np.ndarray, region: TextRegion) -> np.ndarray | None:
+    """Маска ретуши диалога по контуру облачка. Для звука и текста без баллона — None."""
+    if region.bubble_bbox is None or region.block_type == "sfx":
+        return None
+    contour = _bubble_contour(image_rgb, region)
+    if np.any(contour):
+        shrunk = _inset_mask(contour, _BUBBLE_INSET_PX)
+        if np.any(shrunk):
+            return shrunk
+    return _inscribed_ellipse(image_rgb.shape[:2], region.bubble_bbox, _BUBBLE_INSET_PX)
+
+
 def segment_region(
     image_rgb: np.ndarray,
     region: TextRegion,
     capture_ink: dict[int, np.ndarray] | None = None,
 ) -> np.ndarray:
-    """Маска букв региона в координатах всей страницы. Обновляет цвета и кегль стиля.
+    """Маска региона в координатах всей страницы. Обновляет цвета и кегль стиля.
 
+    Диалог с баллоном закрашивает контур облачка, сжатый на ``_BUBBLE_INSET_PX``.
+    Звук и текст без баллона остаются маской чернил.
     Остальные поля стиля (шрифт, поворот, дуга, режим обводки) сохраняются.
     ``capture_ink`` пишет маску чернил до дилатации по id региона.
     """
     height, width = image_rgb.shape[:2]
+    bubble = _bubble_retouch_mask(image_rgb, region)
     full = np.zeros((height, width), dtype=np.uint8)
     x, y, box_w, box_h = region.bbox
     x0 = max(0, x)
@@ -161,7 +262,7 @@ def segment_region(
     x1 = min(width, x + box_w)
     y1 = min(height, y + box_h)
     if x1 - x0 < 2 or y1 - y0 < 2:
-        return full
+        return bubble if bubble is not None else full
 
     pad = 3
     height, width = image_rgb.shape[:2]
@@ -198,6 +299,8 @@ def segment_region(
         ink = np.zeros((height, width), dtype=np.uint8)
         ink[cy0:cy1, cx0:cx1] = binary
         capture_ink[int(region.id)] = ink
+    if bubble is not None:
+        return bubble
     full[cy0:cy1, cx0:cx1] = dilated
     return full
 

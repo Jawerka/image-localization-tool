@@ -188,6 +188,7 @@ async function boot() {
     const settings = getState().settings;
     applyAppearance(settings.theme, settings.ui_scale);
     connectEvents(onEvent);
+    window.setInterval(renderRunClock, 1000);
     syncJobs();
     refreshRemote();
     remoteTimer = window.setInterval(refreshRemote, 5000);
@@ -305,12 +306,67 @@ function renderStatus(state) {
   const spoken = liveText(state);
   if (job.textContent !== visual) job.textContent = visual;
   if (live.textContent !== spoken) live.textContent = spoken;
+  renderImageSize(state);
+  renderRunClock();
   const llm = document.querySelector("[data-role='llm']");
   const on = Boolean(state.llm?.ok);
   llm.querySelector("[data-role='llm-bullet']").className = on ? "bullet bullet--on" : "bullet bullet--off";
   llm.querySelector("[data-role='llm-text']").textContent = on ? "LLM" : "LLM нет";
   llm.querySelector("[data-role='llm-mark']").innerHTML = icon(on ? "check" : "warning");
   document.querySelector("[data-role='device-label']").textContent = deviceLabel(state.device);
+}
+
+function renderImageSize(state) {
+  const node = document.querySelector("[data-role='image-size']");
+  if (!node) return;
+  const width = Number(state.imageSize && state.imageSize.w) || 0;
+  const height = Number(state.imageSize && state.imageSize.h) || 0;
+  if (!width || !height) {
+    node.hidden = true;
+    node.textContent = "";
+    return;
+  }
+  const text = `${width}×${height}`;
+  node.hidden = false;
+  if (node.textContent !== text) node.textContent = text;
+}
+
+function ensureRunStart() {
+  const batch = getState().batch || {};
+  if ((batch.status === "running" || batch.status === "paused") && batch.startedAt) return batch;
+  return {
+    status: "running",
+    startedAt: Date.now(),
+    pausedAt: null,
+    done: settledCount(getState().pages),
+    error: "",
+    currentId: "",
+  };
+}
+
+function formatRun(ms) {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = String(total % 60).padStart(2, "0");
+  if (hours) return `${hours}:${String(minutes).padStart(2, "0")}:${seconds}`;
+  return `${minutes}:${seconds}`;
+}
+
+function renderRunClock() {
+  const node = document.querySelector("[data-role='run-time']");
+  if (!node) return;
+  const batch = getState().batch || {};
+  const live = batch.status === "running" || batch.status === "paused";
+  if (!live || !batch.startedAt) {
+    node.hidden = true;
+    node.textContent = "";
+    return;
+  }
+  const end = batch.status === "paused" && batch.pausedAt ? batch.pausedAt : Date.now();
+  const text = formatRun(end - batch.startedAt);
+  node.hidden = false;
+  if (node.textContent !== text) node.textContent = text;
 }
 
 function onBannerClick(event) {
@@ -379,7 +435,7 @@ async function translatePage() {
   if (!pageId) return;
   try {
     await translate("page", pageId);
-    patch({ busy: true });
+    patch({ busy: true, batch: ensureRunStart() });
   } catch (error) {
     showError(error);
   }
@@ -449,7 +505,7 @@ async function onPageCommand(action, ids, pageId) {
   try {
     if (action === "translate" || action === "retranslate") {
       await translate("page", pageId);
-      patch({ busy: true });
+      patch({ busy: true, batch: ensureRunStart() });
       return;
     }
     if (action === "reveal") {
@@ -475,7 +531,7 @@ async function onPageCommand(action, ids, pageId) {
 
 function onEvent(type, payload) {
   if (type === "job.started" || type === "worker.restarting") {
-    patch({ busy: true });
+    patch({ busy: true, batch: ensureRunStart() });
     if (type === "worker.restarting") setBanner("restart", { text: "Обработка перезапускается" });
   }
   if (type === "job.progress") onProgress(payload);
@@ -759,12 +815,25 @@ function batchState(state) {
 }
 
 const batchActions = {
-  pause: () => pauseJobs().then((data) => patch({ batch: { ...getState().batch, status: "paused" }, jobs: data })).catch(showError),
-  resume: () => resumeJobs().then((data) => patch({
-    batch: { ...getState().batch, status: "running", error: "" },
+  pause: () => pauseJobs().then((data) => patch({
+    batch: { ...getState().batch, status: "paused", pausedAt: Date.now() },
     jobs: data,
-    busy: true,
   })).catch(showError),
+  resume: () => {
+    const batch = getState().batch || {};
+    const pausedFor = batch.pausedAt ? Date.now() - batch.pausedAt : 0;
+    return resumeJobs().then((data) => patch({
+      batch: {
+        ...batch,
+        status: "running",
+        error: "",
+        startedAt: (batch.startedAt || Date.now()) + pausedFor,
+        pausedAt: null,
+      },
+      jobs: data,
+      busy: true,
+    })).catch(showError);
+  },
   retryErrors: () => retryErrors().then(() => patch({
     batch: { ...getState().batch, status: "running", error: "", startedAt: Date.now() },
     busy: true,

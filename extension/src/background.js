@@ -231,6 +231,7 @@ function makeJob(key, pageUrl, imageUrl) {
     base64Task: null,
     remoteId: "",
     langsReady: false,
+    fresh: false,
   };
 }
 
@@ -271,10 +272,10 @@ function markError(job, message) {
   recomputePositions();
 }
 
-function reserveJob(pageUrl, imageUrl) {
+function reserveJob(pageUrl, imageUrl, force) {
   const key = cacheKey(pageUrl, imageUrl);
   const existing = jobs.get(key);
-  if (existing && existing.status === "done" && existing.blob) {
+  if (!force && existing && existing.status === "done" && existing.blob) {
     return { job: existing, created: false };
   }
   if (existing && (existing.status === "queued" || existing.status === "running")) {
@@ -283,6 +284,7 @@ function reserveJob(pageUrl, imageUrl) {
   removeKey(pending, key);
   removeKey(activeKeys, key);
   const job = makeJob(key, pageUrl, imageUrl);
+  job.fresh = force === true;
   jobs.set(key, job);
   if (isBlobUrl(imageUrl)) {
     job.status = "error";
@@ -430,6 +432,7 @@ async function postTranslate(serverUrl, token, imageBlob, job) {
   form.append("file", imageBlob, fileNameFromUrl(job.imageUrl));
   form.append("source_lang", job.sourceLang);
   form.append("target_lang", job.targetLang);
+  if (job.fresh) form.append("fresh", "1");
   const response = await fetchApi(apiUrl(serverUrl, "/v1/translate"), {
     method: "POST",
     headers: authHeaders(token),
@@ -589,7 +592,7 @@ async function handleTranslateUrl(message) {
   if (!message || typeof message.imageUrl !== "string" || !message.imageUrl || typeof message.pageUrl !== "string" || !message.pageUrl) {
     return errorPayload("не указан адрес");
   }
-  const reserved = reserveJob(message.pageUrl, message.imageUrl);
+  const reserved = reserveJob(message.pageUrl, message.imageUrl, message.force === true);
   if (!reserved.created || reserved.job.status === "error") return snapshot(reserved.job);
   await prepareFresh([reserved.job], message.sourceLang, message.targetLang);
   return snapshot(reserved.job);

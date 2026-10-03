@@ -559,6 +559,84 @@ def test_cache_hit_does_not_call_runner_twice(serve_remote, tmp_path):
     assert store.page_status(inbox[0]["id"], page_id)["status"] == "done"
 
 
+def test_fresh_skips_cache_and_replaces_it(serve_remote):
+    calls: list[str] = []
+    first_png = _png((0, 255, 0))
+    second_png = _png((0, 0, 255))
+
+    def runner(job):
+        calls.append(job.id)
+        job.finish(second_png if len(calls) > 1 else first_png)
+
+    server = serve_remote(runner=runner)
+    token = json.loads(_pair(server.port, server.pairing.issue_code())[2])["token"]
+    image = _png((255, 0, 0))
+    status, _headers, body = _translate(server.port, token, image)
+    assert status == 202
+    done = _wait_job(server.port, token, json.loads(body)["job_id"])
+    assert done["status"] == "done"
+    assert len(calls) == 1
+
+    status, _headers, body = _translate(server.port, token, image)
+    cached = _wait_job(server.port, token, json.loads(body)["job_id"])
+    assert cached["stage"] == "cache"
+    assert len(calls) == 1
+
+    boundary = "----iltFreshBoundary7f3a"
+    payload = b"".join(
+        [
+            f"--{boundary}\r\n".encode("ascii"),
+            b'Content-Disposition: form-data; name="source_lang"\r\n\r\nen\r\n',
+            f"--{boundary}\r\n".encode("ascii"),
+            b'Content-Disposition: form-data; name="target_lang"\r\n\r\nru\r\n',
+            f"--{boundary}\r\n".encode("ascii"),
+            b'Content-Disposition: form-data; name="fresh"\r\n\r\n1\r\n',
+            f"--{boundary}\r\n".encode("ascii"),
+            (
+                b'Content-Disposition: form-data; name="file"; filename="a.png"\r\n'
+                b"Content-Type: image/png\r\n\r\n"
+            ),
+            image,
+            b"\r\n",
+            f"--{boundary}--\r\n".encode("ascii"),
+        ]
+    )
+    status, _headers, body = _request(
+        server.port,
+        "POST",
+        "/v1/translate",
+        body=payload,
+        headers=_auth_headers(token, {"Content-Type": f"multipart/form-data; boundary={boundary}"}),
+    )
+    assert status == 202
+    fresh_id = json.loads(body)["job_id"]
+    fresh = _wait_job(server.port, token, fresh_id)
+    assert fresh["status"] == "done"
+    assert fresh["stage"] != "cache"
+    assert len(calls) == 2
+    image_status, _headers, image_body = _request(
+        server.port,
+        "GET",
+        f"/v1/jobs/{fresh_id}/result",
+        headers=_auth_headers(token),
+    )
+    assert image_status == 200
+    assert image_body == second_png
+
+    status, _headers, body = _translate(server.port, token, image)
+    replaced = _wait_job(server.port, token, json.loads(body)["job_id"])
+    assert replaced["stage"] == "cache"
+    assert len(calls) == 2
+    image_status, _headers, image_body = _request(
+        server.port,
+        "GET",
+        f"/v1/jobs/{json.loads(body)['job_id']}/result",
+        headers=_auth_headers(token),
+    )
+    assert image_status == 200
+    assert image_body == second_png
+
+
 def test_revoked_token_is_401(serve_remote):
     server = serve_remote(runner=lambda job: job.finish(_png((0, 255, 0))))
     token = json.loads(_pair(server.port, server.pairing.issue_code())[2])["token"]

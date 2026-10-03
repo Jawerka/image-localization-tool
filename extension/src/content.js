@@ -348,6 +348,8 @@
     if (!rec) return;
     rec.ui.classList.remove("ilt-idle", "ilt-busy", "ilt-done", "ilt-error");
     rec.ui.classList.add("ilt-" + phase);
+    if (phase === "done") rec.btn.textContent = "Заново";
+    else if (phase === "idle" || phase === "error") rec.btn.textContent = "Перевести";
     if (phase === "busy") {
       rec.btn.title = "";
       placeUi(img);
@@ -640,6 +642,7 @@
       pageUrl: page,
       sourceLang: opts.sourceLang || settingsCache.sourceLang || "en",
       targetLang: opts.targetLang || settingsCache.targetLang || "ru",
+      force: opts.force === true,
     };
     let res = null;
     let fallbackUsed = false;
@@ -729,14 +732,15 @@
 
   function onButtonClick(img) {
     const imageUrl = imageKey(img);
+    const force = img.dataset.iltPhase === "done";
     const settingsPromise = storageGet(SETTING_KEYS);
     const permPromise = requestOrigins(originsFor([imageUrl]));
     setPhase(img, "busy");
     showProgress(img, { stage: "", position: 0 });
-    void finishSingle(img, imageUrl, null, settingsPromise, permPromise);
+    void finishSingle(img, imageUrl, null, settingsPromise, permPromise, force);
   }
 
-  async function finishSingle(img, imageUrl, langs, settingsPromise, permPromise) {
+  async function finishSingle(img, imageUrl, langs, settingsPromise, permPromise, force) {
     const settings = await readSettings(settingsPromise);
     // Диалог доступа не задерживает перевод: хост мог быть выдан раньше, сервер может ответить по CORS.
     void permPromise;
@@ -748,6 +752,7 @@
       targetLang,
       skipEnqueue: false,
       allowIdleFallback: false,
+      force: force === true,
     });
   }
 

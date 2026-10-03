@@ -90,7 +90,8 @@
 }
 
 .ilt-ui.ilt-hover.ilt-idle .ilt-btn,
-.ilt-ui.ilt-hover.ilt-error .ilt-btn {
+.ilt-ui.ilt-hover.ilt-error .ilt-btn,
+.ilt-ui.ilt-hover.ilt-done .ilt-btn {
   display: inline-block;
 }
 

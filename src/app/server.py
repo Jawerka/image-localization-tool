@@ -31,7 +31,7 @@ from src.app.ingest import NoImagesError, archive_images, is_archive
 from src.app.jobs import JobQueue
 from src.app.settings import AppSettings, get_api_key
 from src.app.store import ProjectStore, VersionConflict
-from src.app.worker import queue_has_unfinished
+from src.app.worker import demote_restored_running, queue_has_unfinished
 from src.utils.paths import install_root
 
 logger = logging.getLogger("ilt.app.server")
@@ -285,6 +285,11 @@ class AppState:
         self.queue_pending = pending
         if pending and not self.queue.paused:
             self.queue.pause()
+        snap = self.queue.snapshot()
+        demote_restored_running(
+            self.store,
+            list(snap.get("batch") or []) + list(snap.get("edits") or []),
+        )
 
 
 class _AppServer(ThreadingHTTPServer):

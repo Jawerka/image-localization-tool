@@ -219,12 +219,12 @@
               <div class="frame__boxes" data-role="boxes"></div>
               <svg class="stroke-layer" data-role="stroke-layer" aria-hidden="true"></svg>
               <div class="brush-cursor" data-role="brush-cursor" hidden></div>
-              <div class="frame__progress" data-role="frame-progress" hidden>
-                <span data-role="frame-progress-text"></span>
-                <progress max="100" value="0">0 %</progress>
-              </div>
               </div>
             </div>
+          </div>
+          <div class="frame__progress" data-role="frame-progress" hidden>
+            <span data-role="frame-progress-text"></span>
+            <progress max="100" value="0">0 %</progress>
           </div>
           <button type="button" class="stage-nav stage-nav--prev" data-role="page-prev" aria-label="Предыдущая страница" title="Предыдущая страница">
             <svg class="icon icon--left" aria-hidden="true"><use href="icons/icons.svg#chevron"></use></svg>
@@ -266,6 +266,9 @@
 
     <footer class="statusbar" data-role="statusbar">
       <span class="statusbar__job" data-role="job">Нет открытого проекта</span>
+      <span class="statusbar__size" data-role="image-size" hidden></span>
+      <span class="statusbar__time" data-role="run-time" hidden></span>
+      <span class="statusbar__spacer"></span>
       <span class="statusbar__llm" data-role="llm">
         <span class="bullet bullet--off" data-role="llm-bullet" aria-hidden="true">●</span>
         <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#llm"></use></svg>

@@ -89,6 +89,25 @@ def test_segment_region_keeps_font_id_and_warp():
     assert region.style.fill_rgb[0] < 40
 
 
+def test_dialogue_bubble_mask_stays_inside_the_outline():
+    image = Image.new("RGB", (160, 120), "white")
+    draw = ImageDraw.Draw(image)
+    draw.ellipse((24, 20, 136, 100), outline="black", width=3)
+    region = TextRegion(
+        id=1,
+        bbox=(2, 2, 156, 116),
+        bubble_bbox=(8, 8, 144, 104),
+        text="HELLO",
+        block_type="dialogue",
+    )
+    mask = segment_region(np.array(image), region)
+    assert mask[60, 80] == 255
+    assert mask[60, 24] == 0
+    assert mask[60, 34] == 0
+    assert mask[2, 2] == 0
+    assert region.style.uppercase is True
+
+
 def test_sfx_mask_is_dilated_more_than_dialogue():
     image = np.full((80, 140, 3), 255, dtype=np.uint8)
     image[30:50, 30:110] = 0

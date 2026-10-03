@@ -269,12 +269,21 @@
 }
 
 .statusbar__job {
-  margin-right: auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text-primary);
+}
+
+.statusbar__size,
+.statusbar__time {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.statusbar__spacer {
+  margin-right: auto;
 }
 
 .statusbar__llm,

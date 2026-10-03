@@ -194,6 +194,11 @@ def _field_text(value: bytes | None) -> str:
     return value.decode("utf-8", errors="replace").strip()
 
 
+def _fresh_flag(value: str) -> bool:
+    """Поле ``fresh``: заново прогнать пайплайн, не читая кэш результата."""
+    return value.strip().lower() in ("1", "true", "yes")
+
+
 class RemoteJob:
     """Одно входящее изображение. Воркер завершает его через ``finish``."""
 
@@ -656,8 +661,13 @@ class RemoteServer:
         image: bytes,
         source_lang: str,
         target_lang: str,
+        *,
+        fresh: bool = False,
     ) -> RemoteJob:
-        """Поставить перевод. При кэше задание уже ``done`` и раннер не вызывается."""
+        """Поставить перевод. При кэше задание уже ``done`` и раннер не вызывается.
+
+        ``fresh`` пропускает чтение кэша. Готовый результат всё равно записывается.
+        """
         source = source_lang.strip().lower()
         target = target_lang.strip().lower()
         if not source or not target:
@@ -668,7 +678,7 @@ class RemoteServer:
         if pixel_too_large(width, height):
             raise _HttpError(413, "Слишком большое изображение")
         key = CacheKey.build(image, source, target, _pipeline_fingerprint(self.settings))
-        cached = self._cache_get(key)
+        cached = None if fresh else self._cache_get(key)
         job = RemoteJob(
             image=image,
             source_lang=source,
@@ -914,8 +924,10 @@ def _make_handler() -> type[BaseHTTPRequestHandler]:
             return 200
 
         def _translate(self, remote: RemoteServer, device: Device) -> int:
-            image, source_lang, target_lang = self._upload()
-            job = remote.submit_image(device, image, source_lang, target_lang)
+            image, source_lang, target_lang, fresh = self._upload()
+            job = remote.submit_image(
+                device, image, source_lang, target_lang, fresh=fresh
+            )
             self._send_json({"job_id": job.id}, 202)
             return 202
 
@@ -941,7 +953,7 @@ def _make_handler() -> type[BaseHTTPRequestHandler]:
             self._send_empty(204)
             return 204
 
-        def _upload(self) -> tuple[bytes, str, str]:
+        def _upload(self) -> tuple[bytes, str, str, bool]:
             body = self._read_body()
             content_type = self.headers.get("Content-Type") or ""
             if content_type.lower().startswith("multipart/form-data"):
@@ -953,11 +965,13 @@ def _make_handler() -> type[BaseHTTPRequestHandler]:
                 target = _field_text(fields.get("target_lang")) or (
                     self.headers.get("X-Target-Lang") or ""
                 )
-                return image, source, target
+                fresh = _fresh_flag(_field_text(fields.get("fresh")))
+                return image, source, target, fresh
             return (
                 body,
                 self.headers.get("X-Source-Lang") or "",
                 self.headers.get("X-Target-Lang") or "",
+                False,
             )
 
         def _read_body(self) -> bytes:
