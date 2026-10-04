@@ -1,4 +1,4 @@
-// Кнопка «Перевести» на крупных изображениях страницы.
+// Иконка перевода на содержательных изображениях страницы.
 (() => {
   "use strict";
 
@@ -9,9 +9,14 @@
   if (!ext || !ext.runtime || !ext.storage || !ext.storage.local) return;
 
   const DEFAULT_MIN_SIDE = 180;
+  const MIN_SCREEN_LONG = 160;
+  const MIN_SCREEN_SHORT = 80;
+  const HERO_LONG = 400;
+  const HOVER_SHOW_MS = 2000;
+  const DECOR_NAME = /icon|sprite|emoji|avatar/i;
   const DEFAULT_SERVER = "http://127.0.0.1:8765";
   const POLL_MS = 600;
-  const SETTING_KEYS = ["serverUrl", "token", "sourceLang", "targetLang", "autoSites"];
+  const SETTING_KEYS = ["serverUrl", "token", "targetLang", "autoSites"];
 
   const records = new WeakMap();
   const jobs = new WeakMap();
@@ -97,7 +102,6 @@
     return {
       serverUrl: typeof src.serverUrl === "string" && src.serverUrl.trim() ? src.serverUrl.trim() : DEFAULT_SERVER,
       token: typeof src.token === "string" ? src.token : "",
-      sourceLang: typeof src.sourceLang === "string" && src.sourceLang.trim() ? src.sourceLang.trim() : "en",
       targetLang: typeof src.targetLang === "string" && src.targetLang.trim() ? src.targetLang.trim() : "ru",
       autoSites: auto,
     };
@@ -219,8 +223,66 @@
   function isQualifying(img) {
     if (!(img instanceof HTMLImageElement) || !img.isConnected) return false;
     if (isForeignBlob(img)) return false;
+    if (!hasAddress(img)) return false;
     if (!img.complete || longerSide(img) <= DEFAULT_MIN_SIDE) return false;
     return true;
+  }
+
+  // Иконки вёрстки, шапка и сжатые на экране картинки кнопку не получают.
+  function isContentImage(img) {
+    if (!isQualifying(img)) return false;
+    const rect = img.getBoundingClientRect();
+    const longSide = Math.max(rect.width, rect.height);
+    const shortSide = Math.min(rect.width, rect.height);
+    if (longSide < MIN_SCREEN_LONG || shortSide < MIN_SCREEN_SHORT) return false;
+    if (img.getAttribute("aria-hidden") === "true") return false;
+    const role = String(img.getAttribute("role") || "").toLowerCase();
+    if (role === "presentation" || role === "none") return false;
+    const name = [img.className, img.id, img.getAttribute("alt") || ""].join(" ");
+    if (DECOR_NAME.test(name)) return false;
+    if (longSide < HERO_LONG && inPageChrome(img)) return false;
+    return true;
+  }
+
+  function inPageChrome(img) {
+    if (img.parentElement && img.parentElement.tagName === "BUTTON") return true;
+    return Boolean(
+      img.closest("nav, header, footer, [role='banner'], [role='navigation'], [role='contentinfo']")
+    );
+  }
+
+  function translateIcon() {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", "ilt-icon");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("focusable", "false");
+    const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    group.setAttribute("fill", "none");
+    group.setAttribute("stroke", "currentColor");
+    group.setAttribute("stroke-width", "1.75");
+    group.setAttribute("stroke-linecap", "round");
+    group.setAttribute("stroke-linejoin", "round");
+    const paths = [
+      "M3.5 6h7",
+      "M7 6c.2 3.2-1.4 5.4-3.6 6.4",
+      "M4.6 9h4.2",
+      "M13 19.2 15.3 12h1.2l2.3 7.2",
+      "M13.8 16.6h3.6",
+      "M18.2 5.2h3.2",
+      "M19.8 3.6v3.2",
+    ];
+    for (let i = 0; i < paths.length; i++) {
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("d", paths[i]);
+      group.appendChild(path);
+    }
+    svg.appendChild(group);
+    return svg;
+  }
+
+  function buttonLabel(phase) {
+    return phase === "done" ? "Перевести заново" : "Перевести";
   }
 
   function el(tag, className) {
@@ -348,47 +410,22 @@
     if (!rec) return;
     rec.ui.classList.remove("ilt-idle", "ilt-busy", "ilt-done", "ilt-error");
     rec.ui.classList.add("ilt-" + phase);
-    if (phase === "done") rec.btn.textContent = "Заново";
-    else if (phase === "idle" || phase === "error") rec.btn.textContent = "Перевести";
+    if (phase === "done" || phase === "idle" || phase === "error") {
+      const label = buttonLabel(phase);
+      rec.btn.setAttribute("aria-label", label);
+      if (phase !== "error") rec.btn.title = label;
+    }
     if (phase === "busy") {
       rec.btn.title = "";
       placeUi(img);
     }
   }
 
-  const STAGE_LABELS = {
-    load: "Загрузка",
-    queued: "Очередь",
-    detect: "Детекция",
-    detection: "Детекция",
-    ocr: "OCR",
-    translate: "Перевод",
-    translation: "Перевод",
-    segment: "Маска",
-    mask: "Маска",
-    inpaint: "Очистка",
-    clean: "Очистка",
-    typeset: "Вёрстка",
-    cache: "Кэш",
-    done: "Готово",
-  };
-
-  function stageLabel(stage) {
-    if (!stage) return "";
-    const key = String(stage).toLowerCase();
-    return STAGE_LABELS[key] || "";
-  }
-
   function progressCaption(res) {
-    const stage = res && typeof res.stage === "string" ? res.stage.trim() : "";
-    const label = stageLabel(stage);
     const progress = res && typeof res.progress === "number" ? res.progress : null;
-    const hasProgress = progress != null && Number.isFinite(progress);
-    const percent = hasProgress ? Math.max(0, Math.min(100, Math.round(progress))) : null;
-    if (label && percent != null) return label + " " + percent + "%";
-    if (label) return label;
-    if (percent != null) return percent + "%";
-    return "перевод…";
+    if (progress == null || !Number.isFinite(progress)) return "";
+    const percent = Math.max(0, Math.min(100, Math.round(progress)));
+    return percent + "%";
   }
 
   function showProgress(img, res) {
@@ -411,12 +448,20 @@
 
   function bindHover(img, rec) {
     const enter = () => {
-      rec.ui.classList.add("ilt-hover");
-      placeUi(img);
+      if (rec.hoverTimer || rec.ui.classList.contains("ilt-hover")) return;
+      rec.hoverTimer = setTimeout(() => {
+        rec.hoverTimer = 0;
+        rec.ui.classList.add("ilt-hover");
+        placeUi(img);
+      }, HOVER_SHOW_MS);
     };
     const leave = (event) => {
       const next = event.relatedTarget;
       if (next instanceof Node && (next === img || next === rec.ui || rec.ui.contains(next))) return;
+      if (rec.hoverTimer) {
+        clearTimeout(rec.hoverTimer);
+        rec.hoverTimer = 0;
+      }
       rec.ui.classList.remove("ilt-hover");
     };
     const nodes = [img, rec.btn, rec.badge, rec.overlay];
@@ -456,7 +501,9 @@
     const ui = el("div", "ilt-ui ilt-idle");
     const btn = el("button", "ilt-btn");
     btn.type = "button";
-    btn.textContent = "Перевести";
+    btn.appendChild(translateIcon());
+    btn.setAttribute("aria-label", "Перевести");
+    btn.title = "Перевести";
     const overlay = el("div", "ilt-overlay");
     const stage = el("span", "ilt-stage");
     const queue = el("span", "ilt-queue");
@@ -510,7 +557,7 @@
       waitLoad(img);
       return;
     }
-    if (longerSide(img) <= DEFAULT_MIN_SIDE) return;
+    if (!isContentImage(img)) return;
     mount(img);
     if (img.dataset.iltBound === "1" && settingsReady && autoEnabled()) scheduleAuto();
   }
@@ -630,7 +677,7 @@
     const imageUrl = opts.imageUrl || imageKey(img);
     if (!imageUrl || imageUrl.startsWith("blob:")) {
       showFail(img, "Нет адреса изображения");
-      return;
+      return "error";
     }
     ensureOriginalSaved(img, imageUrl);
     setPhase(img, "busy");
@@ -640,7 +687,6 @@
     const payload = {
       imageUrl,
       pageUrl: page,
-      sourceLang: opts.sourceLang || settingsCache.sourceLang || "en",
       targetLang: opts.targetLang || settingsCache.targetLang || "ru",
       force: opts.force === true,
     };
@@ -653,16 +699,16 @@
         ? await sendMessage({ type: "get-status", imageUrl, pageUrl: page })
         : await sendMessage({ type: "translate-url", ...payload });
     } catch (err) {
-      if (!jobAlive(img, token)) return;
+      if (!jobAlive(img, token)) return "aborted";
       showFail(img, humanError(err));
-      return;
+      return "error";
     }
 
     while (jobAlive(img, token)) {
       const kind = classify(res);
       if (kind === "empty") {
         showFail(img, "Нет ответа");
-        return;
+        return "error";
       }
       if (kind === "idle") {
         if (opts.allowIdleFallback && !fallbackUsed) {
@@ -671,54 +717,77 @@
           try {
             res = await sendMessage({ type: "translate-url", ...payload });
           } catch (err) {
-            if (!jobAlive(img, token)) return;
+            if (!jobAlive(img, token)) return "aborted";
             showFail(img, humanError(err));
-            return;
+            return "error";
           }
           continue;
         }
         idleStreak += 1;
         if (idleStreak >= 8) {
           showFail(img, (res && res.error) || "Перевод не запущен");
-          return;
+          return "error";
         }
         showProgress(img, res);
         await sleep(POLL_MS);
-        if (!jobAlive(img, token)) return;
+        if (!jobAlive(img, token)) return "aborted";
         try {
           res = await sendMessage({ type: "get-status", imageUrl, pageUrl: page });
         } catch (err) {
-          if (!jobAlive(img, token)) return;
+          if (!jobAlive(img, token)) return "aborted";
           showFail(img, humanError(err));
-          return;
+          return "error";
         }
         continue;
       }
       idleStreak = 0;
       if (kind === "error") {
         showFail(img, (res && res.error) || "Ошибка перевода");
-        return;
+        return "error";
       }
       if (kind === "done") {
-        if (!jobAlive(img, token)) return;
+        if (!jobAlive(img, token)) return "aborted";
         try {
           applyResult(img, res);
         } catch (err) {
           showFail(img, humanError(err));
+          return "error";
         }
-        return;
+        return "done";
       }
       showProgress(img, res);
       await sleep(POLL_MS);
-      if (!jobAlive(img, token)) return;
+      if (!jobAlive(img, token)) return "aborted";
       try {
         res = await sendMessage({ type: "get-status", imageUrl, pageUrl: page });
       } catch (err) {
-        if (!jobAlive(img, token)) return;
+        if (!jobAlive(img, token)) return "aborted";
         showFail(img, humanError(err));
-        return;
+        return "error";
       }
     }
+    return "aborted";
+  }
+
+  async function playPageChime() {
+    const api = globalThis.iltChime;
+    let chimeId = api ? api.defaultId : "drop";
+    let chimeVolume = api ? api.defaultVolume : 50;
+    try {
+      const data = await storageGet(["chimeId", "chimeVolume"]);
+      if (data && api && api.known(data.chimeId)) chimeId = data.chimeId;
+      if (data && api) chimeVolume = api.clampVolume(data.chimeVolume);
+    } catch (_) {}
+    if (api && chimeId === api.offId) return;
+    let played = false;
+    try {
+      const res = await sendMessage({ type: "play-chime", chimeId, chimeVolume });
+      played = !!(res && res.ok);
+    } catch (_) {}
+    if (played || !api) return;
+    try {
+      await api.play(chimeId, chimeVolume);
+    } catch (_) {}
   }
 
   async function readSettings(settingsPromise) {
@@ -744,11 +813,9 @@
     const settings = await readSettings(settingsPromise);
     // Диалог доступа не задерживает перевод: хост мог быть выдан раньше, сервер может ответить по CORS.
     void permPromise;
-    const sourceLang = (langs && langs.sourceLang) || settings.sourceLang || "en";
     const targetLang = (langs && langs.targetLang) || settings.targetLang || "ru";
     await watchImage(img, {
       imageUrl: imageUrl || imageKey(img),
-      sourceLang,
       targetLang,
       skipEnqueue: false,
       allowIdleFallback: false,
@@ -770,7 +837,7 @@
     const imgs = document.images;
     for (let i = 0; i < imgs.length; i++) {
       const img = imgs[i];
-      if (!isQualifying(img)) continue;
+      if (!isContentImage(img)) continue;
       if (img.dataset.iltBound !== "1") mount(img);
       if (img.dataset.iltBound === "1" && imageKey(img)) out.push(img);
     }
@@ -797,14 +864,12 @@
     // Запрос прав уходит параллельно, очередь перевода от диалога не зависит.
     void permPromise;
     void hostPromise;
-    const sourceLang = (message && message.sourceLang) || settings.sourceLang || "en";
     const targetLang = (message && message.targetLang) || settings.targetLang || "ru";
     try {
       const res = await sendMessage({
         type: "translate-all",
         urls,
         pageUrl: pageUrl(),
-        sourceLang,
         targetLang,
       });
       if (res && res.ok === false) {
@@ -817,15 +882,17 @@
       for (let i = 0; i < images.length; i++) showFail(images[i], text);
       return;
     }
-    for (let i = 0; i < images.length; i++) {
-      void watchImage(images[i], {
-        imageUrl: imageKey(images[i]),
-        sourceLang,
-        targetLang,
-        skipEnqueue: true,
-        allowIdleFallback: true,
-      });
-    }
+    const outcomes = await Promise.all(
+      images.map((img) =>
+        watchImage(img, {
+          imageUrl: imageKey(img),
+          targetLang,
+          skipEnqueue: true,
+          allowIdleFallback: true,
+        }),
+      ),
+    );
+    if (outcomes.some((item) => item === "done")) await playPageChime();
   }
 
   function findImageByUrl(imageUrl) {
@@ -946,7 +1013,6 @@
     }
     if (!allowed.length) return;
 
-    const sourceLang = settingsCache.sourceLang || "en";
     const targetLang = settingsCache.targetLang || "ru";
     const urls = uniqueList(allowed.map((img) => imageKey(img)));
     for (let i = 0; i < allowed.length; i++) {
@@ -958,7 +1024,6 @@
         type: "translate-all",
         urls,
         pageUrl: pageUrl(),
-        sourceLang,
         targetLang,
       });
       if (res && res.ok === false) {
@@ -974,7 +1039,6 @@
     for (let i = 0; i < allowed.length; i++) {
       void watchImage(allowed[i], {
         imageUrl: imageKey(allowed[i]),
-        sourceLang,
         targetLang,
         skipEnqueue: true,
         allowIdleFallback: true,
@@ -993,9 +1057,6 @@
         token: Object.prototype.hasOwnProperty.call(changes, "token")
           ? changes.token.newValue
           : settingsCache.token,
-        sourceLang: Object.prototype.hasOwnProperty.call(changes, "sourceLang")
-          ? changes.sourceLang.newValue
-          : settingsCache.sourceLang,
         targetLang: Object.prototype.hasOwnProperty.call(changes, "targetLang")
           ? changes.targetLang.newValue
           : settingsCache.targetLang,

@@ -56,9 +56,18 @@
 
 .ilt-btn {
   display: none;
-  padding: 4px 8px;
-  font-size: 13px;
-  line-height: 1.2;
+  width: 28px;
+  height: 28px;
+  max-width: none;
+  padding: 4px;
+  line-height: 0;
+}
+
+.ilt-icon {
+  display: block;
+  width: 16px;
+  height: 16px;
+  pointer-events: none;
 }
 
 .ilt-badge {

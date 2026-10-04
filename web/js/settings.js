@@ -99,7 +99,6 @@ export function init() {
   document.querySelector("[data-role='remote-live']")?.addEventListener("click", onRemoteClick);
   subscribe(() => {
     if (!opened) return;
-    syncLang("set-source", "source_lang");
     syncLang("set-target", "target_lang");
     const panel = screen.querySelector("[data-tabpanel='network']");
     if (panel && !panel.hidden) paintRemote();
@@ -133,7 +132,6 @@ export function openWizard() {
   checkRadio("wiz-theme", settings.theme || "system");
   document.getElementById("wiz-url").value = settings.llm_base_url || "";
   document.getElementById("wiz-model").value = settings.llm_model || "";
-  document.getElementById("wiz-src").value = settings.source_lang || "en";
   document.getElementById("wiz-dst").value = settings.target_lang || "ru";
   wizardScreen.hidden = false;
   document.querySelector("[data-role='shell']")?.setAttribute("inert", "");
@@ -194,7 +192,7 @@ function readForm() {
   next.theme = checked("set-theme") || "system";
   next.ui_scale = clampScale(document.getElementById("set-scale").value);
   next.single_key_shortcuts = document.getElementById("set-single").checked;
-  next.source_lang = document.getElementById("set-source").value;
+  next.source_lang = "auto";
   next.target_lang = document.getElementById("set-target").value;
   next.reading_order = document.getElementById("set-reading").value;
   next.translate_sfx = document.getElementById("set-sfx").checked;
@@ -230,7 +228,6 @@ function fill(settings) {
   document.getElementById("set-scale").value = String(scale);
   document.getElementById("set-scale-value").textContent = `${scale} %`;
   document.getElementById("set-single").checked = settings.single_key_shortcuts !== false;
-  document.getElementById("set-source").value = settings.source_lang || "en";
   document.getElementById("set-target").value = settings.target_lang || "ru";
   document.getElementById("set-reading").value = settings.reading_order || "auto";
   document.getElementById("set-sfx").checked = Boolean(settings.translate_sfx);
@@ -314,7 +311,7 @@ async function onWizardNext() {
   current.theme = checked("wiz-theme") || "system";
   current.llm_base_url = document.getElementById("wiz-url").value.trim();
   current.llm_model = document.getElementById("wiz-model").value.trim();
-  current.source_lang = document.getElementById("wiz-src").value;
+  current.source_lang = "auto";
   current.target_lang = document.getElementById("wiz-dst").value;
   current.first_run_complete = true;
   try {

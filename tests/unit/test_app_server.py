@@ -362,7 +362,7 @@ def test_dialog_files_keeps_original(api: Api, tmp_path):
     payload, image = _add_page(api, tmp_path)
     project = payload["project"]
     assert project["name"] == "Проект"
-    assert project["source_lang"] == "en"
+    assert project["source_lang"] == "auto"
     assert project["target_lang"] == "ru"
     page = payload["pages"][0]
     assert set(page) == {

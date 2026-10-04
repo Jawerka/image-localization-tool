@@ -1071,7 +1071,7 @@ def _add_paths(state: AppState, paths: list[Path], *, strict: bool) -> dict:
             if state.project_id is None:
                 created = state.store.create_project(
                     _project_title(prepared),
-                    state.settings.source_lang,
+                    "auto",
                     state.settings.target_lang,
                 )
                 state.project_id = str(created["id"])
@@ -1274,7 +1274,7 @@ def _import_sources(state: AppState, body: dict) -> dict:
         if state.project_id is None:
             created = state.store.create_project(
                 _project_title([path]),
-                state.settings.source_lang,
+                "auto",
                 state.settings.target_lang,
             )
             state.project_id = str(created["id"])

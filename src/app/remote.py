@@ -668,10 +668,10 @@ class RemoteServer:
 
         ``fresh`` пропускает чтение кэша. Готовый результат всё равно записывается.
         """
-        source = source_lang.strip().lower()
+        source = source_lang.strip().lower() or "auto"
         target = target_lang.strip().lower()
-        if not source or not target:
-            raise _HttpError(400, "Нужны языки")
+        if not target:
+            raise _HttpError(400, "Нужен целевой язык")
         if not image:
             raise _HttpError(400, "Пустой файл")
         width, height = _image_size(image)
@@ -774,7 +774,7 @@ class RemoteServer:
         for project in store.list_projects():
             if str(project.get("name") or "") == INBOX_NAME:
                 return project
-        return store.create_project(INBOX_NAME, source_lang, target_lang)
+        return store.create_project(INBOX_NAME, "auto", target_lang)
 
     def _sync_page(self, job: RemoteJob) -> None:
         store = self.store

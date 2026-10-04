@@ -63,6 +63,10 @@ def test_extension_build_manifests():
     assert _png_size(ROOT / "extension" / "icons" / "icon16.png") == (16, 16)
     assert _png_size(ROOT / "extension" / "icons" / "icon48.png") == (48, 48)
 
+    content = (ROOT / "extension" / "src" / "content.js").read_text(encoding="utf-8")
+    assert 'textContent = "Перевести"' not in content
+    assert 'textContent = "Заново"' not in content
+
     background = (ROOT / "extension" / "src" / "background.js").read_text(encoding="utf-8")
     assert "ilt-translate-image" in background
     assert "Перевести изображение" in background

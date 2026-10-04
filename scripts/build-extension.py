@@ -25,6 +25,9 @@ SOURCE_FILES = (
     "popup.js",
     "options.html",
     "options.js",
+    "chime.js",
+    "offscreen.html",
+    "offscreen.js",
 )
 
 ICON_OUTER = (20, 72, 120)

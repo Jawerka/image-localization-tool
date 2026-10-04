@@ -448,6 +448,7 @@ class PagePipeline:
                 glossary=glossary,
                 translate_sfx=_sfx_on(self.config),
             )
+            warnings.extend(getattr(self.translator, "warnings", []) or [])
         except Exception as exc:
             logger.warning(f"Translator failed, Argos fallback: {exc}")
             self.translator = ArgosBlockTranslator()
@@ -461,6 +462,7 @@ class PagePipeline:
                 glossary=glossary,
                 translate_sfx=_sfx_on(self.config),
             )
+            warnings.extend(getattr(self.translator, "warnings", []) or [])
         for region in regions:
             if region.id == int(region_id):
                 return region
@@ -575,7 +577,7 @@ class PagePipeline:
         glossary = load_glossary(self.config.glossary_path)
         self._prepare_translator(warnings)
         try:
-            return self.translator.translate(
+            translated = self.translator.translate(
                 image,
                 regions,
                 source_lang,
@@ -583,12 +585,14 @@ class PagePipeline:
                 glossary=glossary,
                 translate_sfx=_sfx_on(self.config),
             )
+            warnings.extend(getattr(self.translator, "warnings", []) or [])
+            return translated
         except Exception as exc:
             logger.warning(f"Translator failed, Argos fallback: {exc}")
             warnings.append(f"Перевод переключён на Argos: {exc}")
             self.translator = ArgosBlockTranslator()
             self.translator_name = "argos"
-            return self.translator.translate(
+            translated = self.translator.translate(
                 image,
                 regions,
                 source_lang,
@@ -596,6 +600,8 @@ class PagePipeline:
                 glossary=glossary,
                 translate_sfx=_sfx_on(self.config),
             )
+            warnings.extend(getattr(self.translator, "warnings", []) or [])
+            return translated
 
     def _prepare_translator(self, warnings: list[str]) -> None:
         if self.translator is not None:

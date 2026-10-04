@@ -41,17 +41,8 @@
           </div>
         </details>
       </div>
-      <div class="toolbar__group" role="group" aria-label="Языки">
-        <label class="toolbar__lang" for="lang-source">Откуда
-          <select id="lang-source" class="select" data-role="lang-source">
-            <option value="en">en — English</option>
-            <option value="ja">ja — 日本語</option>
-            <option value="ko">ko — 한국어</option>
-            <option value="zh">zh — 中文</option>
-          </select>
-        </label>
-        <span class="toolbar__arrow" aria-hidden="true">→</span>
-        <label class="toolbar__lang" for="lang-target">Куда
+      <div class="toolbar__group" role="group" aria-label="Язык">
+        <label class="toolbar__lang" for="lang-target">Язык
           <select id="lang-target" class="select" data-role="lang-target">
             <option value="ru">ru — Русский</option>
             <option value="en">en — English</option>
@@ -366,18 +357,11 @@
             </div>
           </section>
           <section class="wizard__step" data-step="4" hidden>
-            <h2>Языки</h2>
-            <p class="settings__intro">Языки по умолчанию. На каждой главе их можно сменить.</p>
+            <h2>Язык</h2>
+            <p class="settings__intro">На какой язык переводить. Исходный язык страницы выбирать не нужно.</p>
             <hr class="settings__rule">
             <div class="form">
-              <label class="form__label" for="wiz-src">Откуда</label>
-              <select id="wiz-src" class="select">
-                <option value="en">en — English</option>
-                <option value="ja">ja — 日本語</option>
-                <option value="ko">ko — 한국어</option>
-                <option value="zh">zh — 中文</option>
-              </select>
-              <label class="form__label" for="wiz-dst">Куда</label>
+              <label class="form__label" for="wiz-dst">Язык перевода</label>
               <select id="wiz-dst" class="select">
                 <option value="ru">ru — Русский</option>
                 <option value="en">en — English</option>
@@ -442,16 +426,9 @@
           </section>
           <section class="settings__section" id="sec-translation" role="tabpanel" data-tabpanel="translation" aria-labelledby="nav-translation" hidden>
             <h2>Перевод</h2>
-            <p class="settings__intro">Языки по умолчанию для новой главы. На странице их можно сменить в тулбаре.</p>
+            <p class="settings__intro">На какой язык переводить. Исходный язык страницы выбирать не нужно.</p>
             <hr class="settings__rule">
             <div class="form">
-              <label class="form__label" for="set-source">Язык оригинала</label>
-              <select id="set-source" class="select">
-                <option value="en">en — English</option>
-                <option value="ja">ja — 日本語</option>
-                <option value="ko">ko — 한국어</option>
-                <option value="zh">zh — 中文</option>
-              </select>
               <label class="form__label" for="set-target">Язык перевода</label>
               <select id="set-target" class="select">
                 <option value="ru">ru — Русский</option>

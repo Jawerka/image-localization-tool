@@ -156,7 +156,6 @@ function bindChrome() {
   document.querySelector("[data-role='translate-all']").addEventListener("click", translateAll);
   document.querySelector("[data-role='stop']").addEventListener("click", () => stopJobs());
   document.querySelectorAll("[data-role='llm-retry']").forEach((button) => button.addEventListener("click", retryLlm));
-  document.querySelector("[data-role='lang-source']").addEventListener("change", saveLanguages);
   document.querySelector("[data-role='lang-target']").addEventListener("change", saveLanguages);
   document.querySelectorAll("input[name='sfx-mode']").forEach((input) => {
     input.addEventListener("change", () => {
@@ -225,9 +224,7 @@ function render(state) {
       applyAppearance(state.settings.theme, state.settings.ui_scale);
     }
   }
-  const source = document.querySelector("[data-role='lang-source']");
   const target = document.querySelector("[data-role='lang-target']");
-  if (document.activeElement !== source && source.value !== state.settings.source_lang) source.value = state.settings.source_lang || "en";
   if (document.activeElement !== target && target.value !== state.settings.target_lang) target.value = state.settings.target_lang || "ru";
   const hasPages = state.pages.length > 0;
   const hasPage = Boolean(state.activePageId);
@@ -418,9 +415,8 @@ function takeProject(data) {
 }
 
 async function saveLanguages() {
-  const source = document.querySelector("[data-role='lang-source']").value;
   const target = document.querySelector("[data-role='lang-target']").value;
-  const body = settingsForSave({ ...getState().settings, source_lang: source, target_lang: target });
+  const body = settingsForSave({ ...getState().settings, source_lang: "auto", target_lang: target });
   try {
     const saved = await putSettings(body);
     const settings = saved && saved.settings ? { ...body, ...saved.settings } : (saved && saved.theme ? { ...body, ...saved } : body);

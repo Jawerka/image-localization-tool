@@ -104,7 +104,8 @@ class ApiHandler(BaseHTTPRequestHandler):
         if path == "/page.html":
             page = (
                 "<!DOCTYPE html><html lang=\"ru\"><head><meta charset=\"utf-8\"><title>ilt</title></head>"
-                "<body><img id=\"pic\" alt=\"страница\" src=\"/pic.png\" width=\"220\" height=\"220\"></body></html>"
+                "<body><nav><img id=\"chrome\" alt=\"шапка\" src=\"/pic.png\" width=\"32\" height=\"32\"></nav>"
+                "<img id=\"pic\" alt=\"страница\" src=\"/pic.png\" width=\"220\" height=\"220\"></body></html>"
             )
             self._send(200, page.encode("utf-8"), "text/html; charset=utf-8")
             return
@@ -298,10 +299,27 @@ def test_extension_pairs_and_translates(tmp_path):
             image.goto(f"{base}/page.html")
             image.wait_for_function(
                 """() => {
-                  const img = document.querySelector("#pic");
-                  return img && img.complete && img.naturalWidth > 180 && document.querySelector(".ilt-btn");
+                  const pic = document.querySelector("#pic");
+                  const chrome = document.querySelector("#chrome");
+                  return pic && pic.complete && pic.naturalWidth > 180
+                    && chrome && chrome.complete && chrome.naturalWidth > 180
+                    && document.querySelector(".ilt-btn")
+                    && chrome.dataset.iltBound !== "1";
                 }""",
                 timeout=15000,
+            )
+            shown = image.evaluate(
+                """() => {
+                  const pic = document.querySelector("#pic");
+                  pic.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+                  const btn = document.querySelector(".ilt-btn");
+                  return getComputedStyle(btn).display;
+                }"""
+            )
+            assert shown == "none"
+            image.wait_for_function(
+                """() => getComputedStyle(document.querySelector(".ilt-btn")).display !== "none" """,
+                timeout=4000,
             )
             image.evaluate(
                 """() => {

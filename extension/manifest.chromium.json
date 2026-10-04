@@ -3,7 +3,7 @@
   "name": "Image Localization Tool",
   "version": "1.0.0",
   "description": "Перевод текста на изображениях страницы",
-  "permissions": ["storage", "contextMenus", "activeTab"],
+  "permissions": ["storage", "contextMenus", "activeTab", "offscreen"],
   "optional_host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js",
@@ -12,7 +12,7 @@
   "content_scripts": [
     {
       "matches": ["http://*/*", "https://*/*"],
-      "js": ["content.js"],
+      "js": ["chime.js", "content.js"],
       "css": ["content.css"],
       "run_at": "document_idle"
     }

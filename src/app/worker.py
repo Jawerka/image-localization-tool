@@ -787,7 +787,7 @@ def _translate_page(job: dict, ctx: _Runtime, store: ProjectStore, page: dict) -
         result = pipe.analyze(
             image,
             source,
-            config.source_lang,
+            "auto",
             config.target_lang,
             progress_callback=progress,
             cancel_check=check,
@@ -877,6 +877,8 @@ def _run_region(job: dict, ctx: _Runtime) -> None:
     image = _open_rgb(source)
     kind = job.get("kind")
 
+    notes: list[str] = []
+
     def edit() -> None:
         pipe, config = _pipeline(ctx, job.get("settings") or {}, reset_clients=True)
         if kind == "recognize":
@@ -886,14 +888,20 @@ def _run_region(job: dict, ctx: _Runtime) -> None:
                 image,
                 document.regions,
                 region_id,
-                config.source_lang,
+                "auto",
                 config.target_lang,
             )
+            notes.extend(getattr(pipe.translator, "warnings", []) or [])
         else:
             pipe.shorten_region(region, config.target_lang)
 
     with ctx.llm_lock:
         edit()
+
+    if notes:
+        document.warnings = list(document.warnings or []) + [
+            item for item in notes if item not in (document.warnings or [])
+        ]
 
     if region.text != old_text:
         plan = "clean"

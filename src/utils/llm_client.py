@@ -130,13 +130,18 @@ class LlmClient:
         schema_name: str,
         images: list[Image.Image] | None = None,
         max_tokens: int = 4096,
+        *,
+        system: str = "",
     ) -> dict:
-        """Запрос с картинками и JSON-схемой. Несколько попыток."""
+        """Запрос с картинками и JSON-схемой. Несколько попыток.
+
+        ``system`` — отдельное сообщение роли system. Пустая строка его не добавляет.
+        """
         last_error: Exception | None = None
         for attempt in range(3):
             try:
                 return self._chat_once(
-                    prompt, schema, schema_name, images or [], max_tokens, use_schema=True
+                    prompt, schema, schema_name, images or [], max_tokens, use_schema=True, system=system,
                 )
             except LlmError as exc:
                 last_error = exc
@@ -145,7 +150,13 @@ class LlmClient:
                 ):
                     try:
                         return self._chat_once(
-                            prompt, schema, schema_name, images or [], max_tokens, use_schema=False
+                            prompt,
+                            schema,
+                            schema_name,
+                            images or [],
+                            max_tokens,
+                            use_schema=False,
+                            system=system,
                         )
                     except Exception as inner:
                         last_error = inner
@@ -162,6 +173,7 @@ class LlmClient:
         images: list[Image.Image],
         max_tokens: int,
         use_schema: bool,
+        system: str = "",
     ) -> dict:
         import requests
 
@@ -175,11 +187,15 @@ class LlmClient:
                     "image_url": {"url": f"data:image/jpeg;base64,{encoded}"},
                 })
 
+        messages: list[dict] = []
+        if str(system or "").strip():
+            messages.append({"role": "system", "content": str(system).strip()})
+        messages.append({"role": "user", "content": content})
         payload: dict[str, Any] = {
             "model": self.resolve_model(),
             "temperature": 0.1,
             "max_tokens": max_tokens,
-            "messages": [{"role": "user", "content": content}],
+            "messages": messages,
             "chat_template_kwargs": {"enable_thinking": bool(self.thinking)},
         }
         if use_schema:

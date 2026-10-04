@@ -66,7 +66,7 @@ projects/<id>/
     └── result.png
 ```
 
-`project.json`: `id`, `name`, `source_lang`, `target_lang`, `created`, список `pages` (`id`, `source_path`, `name`).
+`project.json`: `id`, `name`, `source_lang`, `target_lang`, `created`, список `pages` (`id`, `source_path`, `name`). Новые проекты пишут `source_lang` `auto`: переводчик смотрит только на целевой язык. Старые файлы с конкретным исходным кодом по-прежнему читаются. В окне выбирается только язык перевода (`ru`, `en`, `uk`). Кавычки и строки глоссария в переводе могут остаться на другом языке, остальной текст блока должен быть на целевом.
 
 `page.json`: `status`, `progress`, `stage`, `error`, `warnings`, `document`. Статусы: `idle`, `queued`, `running`, `done`, `edited`, `offline`, `error`.
 
@@ -160,7 +160,7 @@ python -m src.app --headless --remote
 |-------|------|------------|
 | GET | `/v1/health` | `version` (строка `dev`) и `ready`: слушатель принял сокет |
 | POST | `/v1/pair` | Тело: `code`, необязательное `name`. Ответ `token` или 401 «Неверный код» |
-| POST | `/v1/translate` | Всегда 202 и `job_id`. Тело — байты картинки или `multipart/form-data` с полем `file`. Языки — поля `source_lang` и `target_lang` либо заголовки `X-Source-Lang` и `X-Target-Lang` |
+| POST | `/v1/translate` | Всегда 202 и `job_id`. Тело — байты картинки или `multipart/form-data` с полем `file`. Нужен `target_lang` или заголовок `X-Target-Lang`. `source_lang` и `X-Source-Lang` необязательны и на промпт не влияют. Ключ кэша — картинка, целевой язык и отпечаток настроек |
 | GET | `/v1/jobs/{id}` | `id`, `status` (`queued`, `running`, `done`, `error`), `stage`, `position`, `error` |
 | GET | `/v1/jobs/{id}/result` | `image/png`, если задание `done`. Иначе 409, нет задания — 404 |
 | DELETE | `/v1/jobs/{id}` | Удалить задание своего устройства. Ответ 204 |

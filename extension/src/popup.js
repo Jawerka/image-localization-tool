@@ -45,13 +45,12 @@ function storageSet(items) {
   return call(ext.storage.local.set.bind(ext.storage.local), items);
 }
 
-const sourceEl = document.getElementById("source");
 const targetEl = document.getElementById("target");
 const autoEl = document.getElementById("auto");
 const statusEl = document.getElementById("status");
 
 function pickLang(value, fallback) {
-  return value === "en" || value === "ru" ? value : fallback;
+  return value === "en" || value === "ru" || value === "uk" ? value : fallback;
 }
 
 function setStatus(text) {
@@ -76,10 +75,6 @@ function queryActiveTab() {
 let host = "";
 let sitesWrite = Promise.resolve();
 
-sourceEl.addEventListener("change", () => {
-  storageSet({ sourceLang: pickLang(sourceEl.value, "en") }).catch(() => {});
-});
-
 targetEl.addEventListener("change", () => {
   storageSet({ targetLang: pickLang(targetEl.value, "ru") }).catch(() => {});
 });
@@ -103,14 +98,13 @@ document.getElementById("open-options").addEventListener("click", () => {
 });
 
 document.getElementById("translate-all").addEventListener("click", () => {
-  const sourceLang = pickLang(sourceEl.value, "en");
   const targetLang = pickLang(targetEl.value, "ru");
-  translatePage(sourceLang, targetLang);
+  translatePage(targetLang);
 });
 
-async function translatePage(sourceLang, targetLang) {
+async function translatePage(targetLang) {
   try {
-    await storageSet({ sourceLang, targetLang });
+    await storageSet({ targetLang });
   } catch (_) {}
   try {
     const tabs = await queryActiveTab();
@@ -121,7 +115,6 @@ async function translatePage(sourceLang, targetLang) {
     }
     await call(ext.tabs.sendMessage.bind(ext.tabs), tab.id, {
       type: "translate-all-page",
-      sourceLang,
       targetLang,
     });
     setStatus("запущено");
@@ -134,9 +127,8 @@ async function init() {
   autoEl.disabled = true;
   let data = {};
   try {
-    data = (await storageGet(["sourceLang", "targetLang", "autoSites"])) || {};
-    sourceEl.value = data.sourceLang === "ru" ? "ru" : "en";
-    targetEl.value = data.targetLang === "en" ? "en" : "ru";
+    data = (await storageGet(["targetLang", "autoSites"])) || {};
+    targetEl.value = data.targetLang === "en" || data.targetLang === "uk" ? data.targetLang : "ru";
   } catch (_) {}
   let tab = null;
   try {

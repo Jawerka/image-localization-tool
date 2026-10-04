@@ -172,3 +172,70 @@ storageGet("serverUrl")
     }
   })
   .catch(() => {});
+
+const chimeRoot = document.getElementById("chimes");
+const chimeApi = globalThis.iltChime;
+const volumeEl = document.getElementById("chime-volume");
+const volumeValueEl = document.getElementById("chime-volume-value");
+
+function paintVolume(value) {
+  const n = chimeApi ? chimeApi.clampVolume(value) : 50;
+  if (volumeEl) volumeEl.value = String(n);
+  if (volumeValueEl) volumeValueEl.textContent = n + "%";
+  return n;
+}
+
+function currentVolume() {
+  return paintVolume(volumeEl ? volumeEl.value : 50);
+}
+
+function bindChimes() {
+  if (!chimeRoot || !chimeApi) return;
+  const list = chimeApi.list;
+  for (let i = 0; i < list.length; i++) {
+    const item = list[i];
+    const row = document.createElement("div");
+    row.className = "chime";
+    const label = document.createElement("label");
+    const radio = document.createElement("input");
+    radio.type = "radio";
+    radio.name = "chime";
+    radio.value = item.id;
+    radio.addEventListener("change", () => {
+      if (!radio.checked) return;
+      storageSet({ chimeId: item.id }).catch(() => {});
+    });
+    label.appendChild(radio);
+    label.appendChild(document.createTextNode(item.title));
+    row.appendChild(label);
+    if (item.id !== chimeApi.offId) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = "Прослушать";
+      button.addEventListener("click", () => {
+        const volume = currentVolume();
+        storageSet({ chimeVolume: volume }).catch(() => {});
+        chimeApi.play(item.id, volume).catch(() => {});
+      });
+      row.appendChild(button);
+    }
+    chimeRoot.appendChild(row);
+  }
+  if (volumeEl) {
+    volumeEl.addEventListener("input", () => {
+      const volume = currentVolume();
+      storageSet({ chimeVolume: volume }).catch(() => {});
+    });
+  }
+  storageGet(["chimeId", "chimeVolume"])
+    .then((data) => {
+      const stored = data && typeof data.chimeId === "string" ? data.chimeId : "";
+      const id = chimeApi.known(stored) ? stored : chimeApi.defaultId;
+      const radio = chimeRoot.querySelector('input[value="' + id + '"]');
+      if (radio) radio.checked = true;
+      paintVolume(data ? data.chimeVolume : chimeApi.defaultVolume);
+    })
+    .catch(() => {});
+}
+
+bindChimes();

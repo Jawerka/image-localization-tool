@@ -14,6 +14,7 @@ const TYPE_TRANSLATE_ALL = "translate-all";
 const TYPE_GET_STATUS = "get-status";
 const TYPE_REQUEST_HOST = "requestHost";
 const TYPE_TRANSLATE_IMAGE = "translate-image";
+const TYPE_PLAY_CHIME = "play-chime";
 
 const jobs = new Map();
 const pending = [];
@@ -77,14 +78,12 @@ function readSettings() {
   return callExt(ext.storage.local.get.bind(ext.storage.local), {
     serverUrl: DEFAULT_SERVER,
     token: "",
-    sourceLang: "en",
     targetLang: "ru",
   }).then((data) => {
     const stored = data && typeof data === "object" ? data : {};
     return {
       serverUrl: normalizeServerUrl(stored.serverUrl),
       token: typeof stored.token === "string" ? stored.token.trim() : "",
-      sourceLang: pickLang(stored.sourceLang, "en"),
       targetLang: pickLang(stored.targetLang, "ru"),
     };
   });
@@ -217,7 +216,6 @@ function makeJob(key, pageUrl, imageUrl) {
     key: key,
     pageUrl: pageUrl,
     imageUrl: imageUrl,
-    sourceLang: "en",
     targetLang: "ru",
     status: "queued",
     stage: "",
@@ -430,7 +428,6 @@ async function downloadImage(imageUrl) {
 async function postTranslate(serverUrl, token, imageBlob, job) {
   const form = new FormData();
   form.append("file", imageBlob, fileNameFromUrl(job.imageUrl));
-  form.append("source_lang", job.sourceLang);
   form.append("target_lang", job.targetLang);
   if (job.fresh) form.append("fresh", "1");
   const response = await fetchApi(apiUrl(serverUrl, "/v1/translate"), {
@@ -559,7 +556,7 @@ async function executeJob(job) {
   await deleteRemote(settings.serverUrl, settings.token, remoteId);
 }
 
-async function prepareFresh(jobsToStart, sourceLang, targetLang) {
+async function prepareFresh(jobsToStart, targetLang) {
   let settings;
   try {
     settings = await readSettings();
@@ -576,12 +573,10 @@ async function prepareFresh(jobsToStart, sourceLang, targetLang) {
     pump();
     return;
   }
-  const source = pickLang(sourceLang, settings.sourceLang);
   const target = pickLang(targetLang, settings.targetLang);
   for (let i = 0; i < jobsToStart.length; i += 1) {
     const job = jobsToStart[i];
     if (job.status !== "queued" || job.langsReady) continue;
-    job.sourceLang = source;
     job.targetLang = target;
     job.langsReady = true;
   }
@@ -594,7 +589,7 @@ async function handleTranslateUrl(message) {
   }
   const reserved = reserveJob(message.pageUrl, message.imageUrl, message.force === true);
   if (!reserved.created || reserved.job.status === "error") return snapshot(reserved.job);
-  await prepareFresh([reserved.job], message.sourceLang, message.targetLang);
+  await prepareFresh([reserved.job], message.targetLang);
   return snapshot(reserved.job);
 }
 
@@ -612,7 +607,7 @@ async function handleTranslateAll(message) {
     if (reserved.job.status === "queued" || reserved.job.status === "running") count += 1;
     if (reserved.created && reserved.job.status === "queued") fresh.push(reserved.job);
   }
-  if (fresh.length) await prepareFresh(fresh, message.sourceLang, message.targetLang);
+  if (fresh.length) await prepareFresh(fresh, message.targetLang);
   return { ok: true, count: count };
 }
 
@@ -648,8 +643,48 @@ async function handleRequestHost(message) {
   }
 }
 
+async function playChimeMessage(message) {
+  const chimeId = message && typeof message.chimeId === "string" ? message.chimeId : "drop";
+  if (!ext.offscreen || typeof ext.offscreen.createDocument !== "function") return { ok: false };
+  try {
+    let open = false;
+    if (typeof ext.offscreen.hasDocument === "function") {
+      open = await callExt(ext.offscreen.hasDocument.bind(ext.offscreen));
+    }
+    if (!open) {
+      await callExt(ext.offscreen.createDocument.bind(ext.offscreen), {
+        url: "offscreen.html",
+        reasons: ["AUDIO_PLAYBACK"],
+        justification: "Короткий сигнал, когда перевод страницы закончился",
+      });
+    }
+    return await callExt(ext.runtime.sendMessage.bind(ext.runtime), {
+      type: "offscreen-play",
+      chimeId,
+      chimeVolume: message ? message.chimeVolume : undefined,
+    });
+  } catch (_) {
+    return { ok: false };
+  }
+}
+
 function onRuntimeMessage(message, _sender, sendResponse) {
   if (!message || typeof message !== "object" || typeof message.type !== "string") return undefined;
+  if (message.type === TYPE_PLAY_CHIME) {
+    playChimeMessage(message).then(
+      (payload) => {
+        try {
+          sendResponse(payload && payload.ok ? { ok: true } : { ok: false });
+        } catch (_) {}
+      },
+      () => {
+        try {
+          sendResponse({ ok: false });
+        } catch (_) {}
+      },
+    );
+    return true;
+  }
   let task = null;
   if (message.type === TYPE_TRANSLATE_URL) task = handleTranslateUrl(message);
   else if (message.type === TYPE_TRANSLATE_ALL) task = handleTranslateAll(message);

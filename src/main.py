@@ -81,7 +81,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Минимальная уверенность OCR (0.0-1.0)",
     )
     parser.add_argument("--verbose", action="store_true", help="Подробный вывод")
-    parser.add_argument("--source-lang", type=str, default=None, help="Язык оригинала, ISO 639-1")
+    parser.add_argument(
+        "--source-lang",
+        type=str,
+        default=None,
+        help="Явная пара Argos, ISO 639-1. LLM это поле игнорирует",
+    )
     parser.add_argument("--llm-url", type=str, default=None, help="OpenAI-совместимый URL LLM")
     parser.add_argument("--llm-think", action="store_true", help="Включить thinking на сервере LLM")
     parser.add_argument("--ocr", choices=["vlm", "rapid"], default=None, help="OCR: vlm или rapid")
@@ -149,9 +154,11 @@ def apply_v2_config(args, config: Config) -> None:
 
 
 def source_language(args, config: Config) -> str:
+    """Явная пара для Argos. Без флага — ``auto``, исходный язык определяется по письменности."""
+    del config
     if args.source_lang:
         return args.source_lang
-    return config.source_lang
+    return "auto"
 
 
 def plan_batch_io(

@@ -173,7 +173,7 @@ class ProjectStore:
         project = {
             "id": project_id,
             "name": title,
-            "source_lang": str(source_lang or "en").strip() or "en",
+            "source_lang": str(source_lang or "auto").strip() or "auto",
             "target_lang": str(target_lang or "ru").strip() or "ru",
             "created": datetime.now(timezone.utc).isoformat(),
             "pages": [],

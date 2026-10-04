@@ -2,7 +2,12 @@
 
 from PIL import Image
 
-from src.components.llm_translator import ArgosBlockTranslator, LlmTranslator, build_translation_prompt
+from src.components.llm_translator import (
+    ArgosBlockTranslator,
+    LlmTranslator,
+    _retry_prompt,
+    build_translation_prompt,
+)
 from src.models import TextRegion
 
 
@@ -111,8 +116,10 @@ def test_sfx_prompt_asks_for_onomatopoeia_and_caller_glossary_wins():
         translate_sfx=True,
     )
     prompt = seen[0]
+    assert "from en to ru" not in prompt
+    assert "only in ru" in prompt
     assert "Blocks marked [sfx] are sound effects" in prompt
-    assert "short Russian onomatopoeia" in prompt
+    assert "short ru onomatopoeia" in prompt
     assert "no explanations" in prompt
     assert "no quotes" in prompt
     assert "POW = ПИФ" in prompt
@@ -125,7 +132,8 @@ def test_sfx_prompt_asks_for_onomatopoeia_and_caller_glossary_wins():
         regions,
         {"POW": "ПИФ"},
     )
-    assert "short Russian onomatopoeia" in direct
+    assert "short ru onomatopoeia" in direct
+    assert "from en to ru" not in direct
 
 
 class _FakeArgos:
@@ -158,3 +166,20 @@ def test_argos_sfx_lookup_skips_known_blocks(monkeypatch):
     assert regions[0].translation == "БАМ"
     assert service.texts == ["Hello"]
     assert regions[1].translation == "tr:Hello"
+
+
+def test_retry_prompt_locks_target_language():
+    regions = [TextRegion(id=3, bbox=(0, 0, 10, 10), text="こんにちは", block_type="dialogue")]
+    prompt = _retry_prompt("ru", regions)
+    assert "only in ru" in prompt
+    assert "from ja to ru" not in prompt
+    assert "3. [dialogue] こんにちは" in prompt
+
+
+def test_english_target_skips_russian_sfx_glossary():
+    regions = [TextRegion(id=1, bbox=(0, 0, 10, 10), text="Pow!", block_type="sfx")]
+    prompt = build_translation_prompt("ja", "en", regions, None)
+    assert "only in en" in prompt
+    assert "BANG = БАМ" not in prompt
+    assert "Polivanov" not in prompt
+    assert "short en onomatopoeia" in prompt

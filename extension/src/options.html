@@ -19,7 +19,7 @@
     input, button {
       font: inherit;
     }
-    input {
+    input[type="text"] {
       box-sizing: border-box;
       width: 100%;
       padding: 6px 8px;
@@ -34,6 +34,30 @@
     #status {
       min-height: 1.2em;
     }
+    h2 {
+      margin: 28px 0 4px;
+      font-size: 16px;
+    }
+    .hint {
+      margin: 0 0 8px;
+      color: #444;
+    }
+    .chime {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 6px 0;
+    }
+    .chime label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0;
+      flex: 1;
+    }
+    #chime-volume {
+      width: 100%;
+    }
   </style>
 </head>
 <body>
@@ -46,6 +70,12 @@
     <button id="check" type="button">Проверить связь</button>
   </div>
   <p id="status"></p>
+  <h2>Сигнал</h2>
+  <p class="hint">Когда перевод страницы закончился.</p>
+  <label for="chime-volume">Громкость <span id="chime-volume-value">50%</span></label>
+  <input id="chime-volume" type="range" min="0" max="100" value="50">
+  <div id="chimes"></div>
+  <script src="chime.js"></script>
   <script src="options.js"></script>
 </body>
 </html>
