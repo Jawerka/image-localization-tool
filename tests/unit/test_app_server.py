@@ -20,7 +20,7 @@ from src.app import __version__
 from src.app.dialogs import DialogBridge
 from src.app.document import PageDocument
 from src.app.jobs import JobQueue
-from src.app.server import AppState, serve
+from src.app.server import AppState, _merge_style, serve
 from src.app.settings import AppSettings, get_api_key
 from src.app.store import ProjectStore
 from src.app.worker import FakeWorker
@@ -754,3 +754,31 @@ def test_fonts_preview_region_and_remote_status(api: Api, monkeypatch):
         "recent": [],
         "clients": 0,
     }
+
+
+def test_merge_style_skips_rotation_and_warp():
+    """Оценка цвета ложится на стиль. Угол, дуга и уже заданные точки сетки остаются."""
+    current = {
+        "fill_rgb": [0, 0, 0],
+        "rotation": 12.0,
+        "warp": {
+            "kind": "perspective",
+            "bend": 0.2,
+            "quad": [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0]],
+            "mesh": [[0.0, 0.0], [1.0, 1.0]],
+        },
+    }
+    estimated = {
+        "fill_rgb": [10, 20, 30],
+        "rotation": 80.0,
+        "stroke_width": 4.0,
+        "warp": {"kind": "arc", "bend": 0.5, "quad": None, "mesh": None},
+    }
+    merged = _merge_style(current, estimated)
+    assert merged["fill_rgb"] == [10, 20, 30]
+    assert merged["stroke_width"] == 4.0
+    assert merged["rotation"] == 12.0
+    assert merged["warp"]["kind"] == "perspective"
+    assert merged["warp"]["bend"] == 0.2
+    assert merged["warp"]["quad"] == [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0]]
+    assert merged["warp"]["mesh"] == [[0.0, 0.0], [1.0, 1.0]]

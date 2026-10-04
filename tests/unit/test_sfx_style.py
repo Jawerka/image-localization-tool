@@ -91,3 +91,24 @@ def test_empty_mask_returns_defaults():
     assert style["stroke_mode"] == "auto"
     assert style["rotation"] == 0.0
     assert style["warp"] == {"kind": "none", "bend": 0.0, "quad": None, "mesh": None}
+
+
+def test_merge_sfx_keeps_straight_layout_and_copies_fill():
+    """Вертикальные чернила не поворачивают блок. Заливка при auto всё ещё берётся с маски."""
+    from src.models import TextRegion
+    from src.page_pipeline import _merge_sfx_style
+
+    image = np.zeros((180, 80, 3), dtype=np.uint8)
+    mask = np.zeros((180, 80), dtype=np.uint8)
+    image[20:160, 30:50] = (240, 10, 10)
+    mask[20:160, 30:50] = 255
+    region = TextRegion(id=1, bbox=(0, 0, 80, 180), block_type="sfx")
+    _merge_sfx_style(region, image, mask)
+    assert region.style.rotation == 0.0
+    assert region.style.warp["kind"] == "none"
+    assert region.style.warp["bend"] == 0.0
+    assert region.style.warp["quad"] is None
+    assert region.style.warp["mesh"] is None
+    fill = np.asarray(region.style.fill_rgb, dtype=np.float32)
+    assert fill[0] > 200.0
+    assert fill[1] < 40.0

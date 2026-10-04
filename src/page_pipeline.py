@@ -56,20 +56,12 @@ def _sfx_on(config: Config) -> bool:
 
 
 def _merge_sfx_style(region: TextRegion, image_rgb: np.ndarray, ink: np.ndarray) -> None:
-    """Стартовые поворот и дуга SFX. Цвета — только при stroke_mode auto.
+    """Стартовые цвета SFX. Угол и изгиб не копируем: первая вёрстка прямая.
 
-    Перевод и font_id не трогаем.
+    Цвета — только при stroke_mode auto. Перевод и font_id не трогаем.
     """
     estimated = estimate_style(image_rgb, ink)
     style = region.style
-    style.rotation = float(estimated.get("rotation") or 0.0)
-    warp = estimated.get("warp") if isinstance(estimated.get("warp"), dict) else {}
-    style.warp = {
-        "kind": str(warp.get("kind") or "none"),
-        "bend": float(warp.get("bend") or 0.0),
-        "quad": warp.get("quad"),
-        "mesh": warp.get("mesh"),
-    }
     if str(style.stroke_mode or "auto").strip().lower() != "auto":
         return
     fill = estimated.get("fill_rgb")

@@ -1568,18 +1568,12 @@ def _region_mask(state: AppState, page_id: str, image_rgb, region):
 
 
 def _merge_style(current: dict, estimated: dict) -> dict:
-    """Поля оценки поверх стиля. Пустые ``quad`` и ``mesh`` не затирают уже заданные."""
+    """Цвет и обводка оценки поверх стиля. Угол и искривление не копируем."""
     merged = dict(current)
     for key, value in estimated.items():
-        if key == "warp" and isinstance(value, dict):
-            warp = dict(merged.get("warp") or {})
-            for warp_key, warp_value in value.items():
-                if warp_value is None and warp_key in ("quad", "mesh"):
-                    continue
-                warp[warp_key] = warp_value
-            merged["warp"] = warp
-        elif value is not None:
-            merged[key] = value
+        if key in ("rotation", "warp") or value is None:
+            continue
+        merged[key] = value
     return merged
 
 

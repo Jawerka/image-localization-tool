@@ -201,6 +201,7 @@ function card(region, index, state) {
       <button type="button" class="btn btn-accent" data-region-action="shorten">Сократить</button>
       <button type="button" class="btn btn-ghost" data-region-action="skip" aria-pressed="${region.skip ? "true" : "false"}">Не переводить</button>
       ${(region.type || region.block_type) === "sfx" ? sfxButton(region) : ""}
+      <button type="button" class="btn btn-ghost" data-region-action="reset-style">Сбросить стили</button>
       <button type="button" class="btn btn-ghost" data-region-action="delete">${icon("delete")}Удалить</button>
     </div>
     <div class="region-card__row">
@@ -536,6 +537,22 @@ async function onAction(button) {
   }
   if (action === "sfx") {
     await restyleSfx(pageId, id, button);
+    return;
+  }
+  if (action === "reset-style") {
+    editDocument((document) => {
+      const region = findRegion(document, id);
+      if (!region) return;
+      region.edited = true;
+      region.style = { ...(region.style || {}) };
+      region.style.rotation = 0;
+      const warp = { ...(region.style.warp || {}) };
+      warp.kind = "none";
+      warp.bend = 0;
+      warp.quad = null;
+      warp.mesh = null;
+      region.style.warp = warp;
+    });
     return;
   }
   patch({ pendingAction: { pageId, regionId: id, action } });
