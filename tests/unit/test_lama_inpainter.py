@@ -3,7 +3,7 @@
 import numpy as np
 from PIL import Image
 
-from src.components.lama_inpainter import LamaInpainter
+from src.components.lama_inpainter import LamaInpainter, _TILE, _ceil_mod, _window_bounds
 
 
 def test_close_lines_on_white_are_filled_without_lama():
@@ -91,3 +91,49 @@ def test_lama_crop_mask_includes_the_whole_window():
         crop_mask = item[0, 0]
         assert crop_mask[40:70, 40:90].mean() > 0.9
         assert crop_mask[40:70, 110:160].mean() > 0.9
+
+
+def _stub_sizes():
+    sizes: list[tuple[int, int]] = []
+
+    class FakeLama:
+        def __call__(self, image_t, mask_t):
+            sizes.append((int(image_t.shape[-2]), int(image_t.shape[-1])))
+            return image_t * 0 + 1
+
+    return sizes, FakeLama()
+
+
+def test_large_window_is_tiled_without_downscale():
+    rng = np.random.default_rng(2)
+    image = rng.integers(0, 256, size=(100, 1800, 3), dtype=np.uint8)
+    mask = np.zeros((100, 1800), dtype=np.uint8)
+    mask[40:60, 100:1700] = 255
+    outside = image[10, 10].copy()
+
+    sizes, model = _stub_sizes()
+    inpainter = LamaInpainter(device="cpu")
+    inpainter._model = model
+    result = np.array(inpainter.inpaint(Image.fromarray(image), mask))
+
+    assert len(sizes) > 1
+    assert all(side <= _TILE for height, width in sizes for side in (height, width))
+    assert int(result[50, 400].min()) == 255
+    assert np.array_equal(result[10, 10], outside)
+
+
+def test_short_stroke_is_one_full_size_pass():
+    rng = np.random.default_rng(3)
+    image = rng.integers(0, 256, size=(400, 400, 3), dtype=np.uint8)
+    mask = np.zeros((400, 400), dtype=np.uint8)
+    mask[180:200, 180:230] = 255
+    bounds = _window_bounds(mask, image.shape[:2], pad=128)
+    assert bounds is not None
+    y0, x0, y1, x1 = bounds
+
+    sizes, model = _stub_sizes()
+    inpainter = LamaInpainter(device="cpu")
+    inpainter._model = model
+    inpainter.inpaint(Image.fromarray(image), mask)
+
+    assert sizes == [(_ceil_mod(y1 - y0), _ceil_mod(x1 - x0))]

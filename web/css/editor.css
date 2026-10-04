@@ -85,6 +85,8 @@
 
 .frame--mask .frame__mask {
   display: block;
+  /* Чёрное поле маски наполовину прозрачное, страница под ним остаётся видна. */
+  opacity: 0.5;
 }
 
 .curtain {

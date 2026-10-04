@@ -1,5 +1,9 @@
 """Хранилище проектов: сортировка, миниатюры, версии."""
 
+import os
+import stat
+from pathlib import Path
+
 from PIL import Image
 
 from src.app.document import PageDocument
@@ -83,3 +87,41 @@ def test_version_conflict_and_auto_snapshot(tmp_path):
     picture = Image.new("RGB", (6, 6), "white")
     store.save_image(project["id"], page["id"], "result", picture)
     assert store.image_path(project["id"], page["id"], "result").is_file()
+
+
+def _one_page(tmp_path):
+    store = ProjectStore(tmp_path)
+    project = store.create_project("Глава", "en", "ru")
+    image = tmp_path / "page.png"
+    _png(image, (40, 20))
+    page = store.add_sources(project["id"], [image])[0]
+    return store, project["id"], page["id"]
+
+
+def test_write_json_replaces_readonly_target(tmp_path):
+    store, project_id, page_id = _one_page(tmp_path)
+    target = store._page_file(project_id, page_id)
+    os.chmod(target, stat.S_IREAD)
+    store.update_status(project_id, page_id, status="edited")
+    assert store.page_status(project_id, page_id)["status"] == "edited"
+    assert list(target.parent.glob("*.tmp")) == []
+
+
+def test_write_json_retries_permission_error(tmp_path, monkeypatch):
+    store, project_id, page_id = _one_page(tmp_path)
+    target = store._page_file(project_id, page_id)
+    calls = {"n": 0}
+    real = Path.replace
+
+    def flaky(self, dest, *args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            raise PermissionError(5, "Access is denied", str(self))
+        return real(self, dest, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "replace", flaky)
+    monkeypatch.setattr("src.app.store.time.sleep", lambda _delay: None)
+    store.update_status(project_id, page_id, status="edited")
+    assert calls["n"] == 3
+    assert store.page_status(project_id, page_id)["status"] == "edited"
+    assert list(target.parent.glob("*.tmp")) == []

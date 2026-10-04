@@ -32,7 +32,7 @@ let deps = null;
 let fontQuery = "";
 let shown = null;
 let liveKey = "";
-let lastPreviewBusy = false;
+let drawnQuery = "";
 const bound = new WeakSet();
 
 export function mount(root, nextDeps) {
@@ -55,22 +55,25 @@ export function render(state) {
   if (busy) panel.setAttribute("aria-busy", "true");
   else panel.removeAttribute("aria-busy");
   const key = viewKey(shown, region, mode);
-  // Ползунок и цвет не пересобираем: иначе жест обрывается на каждом input.
-  if (key === liveKey && shouldPatch(mode)) {
+  // Тот же вид не пересобираем: иначе список прыгает наверх, а жест ползунка обрывается.
+  if (key === liveKey && panel.querySelector(".style-state:not([hidden])")) {
     syncLive(shown, region, mode);
     paintPreviewNote(busy);
-    lastPreviewBusy = busy;
     return;
   }
-  if (key === liveKey && busy !== lastPreviewBusy && panel.querySelector(".style-state:not([hidden])")) {
-    paintPreviewNote(busy);
-    lastPreviewBusy = busy;
-    return;
-  }
-  lastPreviewBusy = busy;
   const focus = captureFocus();
+  const panelScroll = panel.scrollTop;
+  const fontList = panel.querySelector(".style-font-list");
+  const listScroll = fontList ? fontList.scrollTop : 0;
+  const keepListScroll = fontQuery === drawnQuery;
   panel.innerHTML = frame(mode, bodyFor(shown, region, mode));
   liveKey = key;
+  drawnQuery = fontQuery;
+  panel.scrollTop = panelScroll;
+  if (keepListScroll) {
+    const nextList = panel.querySelector(".style-font-list");
+    if (nextList) nextList.scrollTop = listScroll;
+  }
   restoreFocus(focus);
 }
 
@@ -594,16 +597,8 @@ function viewKey(state, region, mode) {
   const id = region ? String(region.id) : "";
   const fonts = fontsOf(state).map((font) => `${font.id}:${font.family || ""}`).join("\n");
   const chips = chipsOf(state).map((chip) => (chip && chip.name) || "").join("\n");
-  return [mode, id, fontQuery, fonts, chips].join("|");
-}
-
-function shouldPatch(mode) {
-  const active = document.activeElement;
-  if (!panel || !active || !panel.contains(active) || !active.dataset) return false;
-  const keep = active.dataset.keep;
-  if (keep !== "stroke-width" && keep !== "bend" && keep !== "fill" && keep !== "stroke" && keep !== "rotation") return false;
-  const visible = panel.querySelector(".style-state:not([hidden])");
-  return Boolean(visible && visible.dataset.state === mode);
+  const favorites = readFavorites().map((item) => String(item)).join("\n");
+  return [mode, id, fontQuery, fonts, chips, favorites].join("|");
 }
 
 function syncLive(state, region, mode) {
@@ -634,6 +629,9 @@ function syncLive(state, region, mode) {
   scope.querySelectorAll("[data-chip]").forEach((button) => {
     const chip = chips[Number(button.getAttribute("data-chip"))];
     button.setAttribute("aria-pressed", chip && chipMatches(style, chip) ? "true" : "false");
+  });
+  scope.querySelectorAll("input[name='font']").forEach((input) => {
+    input.checked = input.value == style.font_id;
   });
   const sample = scope.querySelector(".style-sample");
   if (sample) {

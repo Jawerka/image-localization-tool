@@ -109,6 +109,7 @@ function renderRegions(state, page) {
   const regionId = focus?.closest?.("[data-region-id]")?.dataset.regionId || "";
   const start = focus?.selectionStart;
   const end = focus?.selectionEnd;
+  const scroll = list.scrollTop;
   rebuilding = true;
   try {
     if (!page) {
@@ -148,11 +149,12 @@ function renderRegions(state, page) {
     if (regionId && field) {
       const next = list.querySelector(`[data-region-id="${cssEscape(regionId)}"] [data-field="${field}"]`);
       if (next) {
-        next.focus();
+        next.focus({ preventScroll: true });
         if (typeof start === "number" && next.setSelectionRange) next.setSelectionRange(start, end);
       }
     }
   } finally {
+    list.scrollTop = scroll;
     rebuilding = false;
   }
 }
@@ -213,8 +215,10 @@ function card(region, index, state) {
 }
 
 function renderPage(state, page) {
+  const scroll = facts.scrollTop;
   if (!page) {
     facts.innerHTML = '<p class="inspector__empty">Нет открытой страницы.</p>';
+    facts.scrollTop = scroll;
     return;
   }
   const document = state.document;
@@ -239,6 +243,7 @@ function renderPage(state, page) {
       <button type="button" class="btn btn-accent" data-page-action="retranslate">Перевести заново</button>
       <button type="button" class="btn btn-ghost" data-page-action="reset">Сбросить правки</button>
     </div>`;
+  facts.scrollTop = scroll;
   facts.querySelector("[data-page-action='retranslate']").addEventListener("click", () => {
     document.dispatchEvent(new CustomEvent("ilt-translate-page"));
   });

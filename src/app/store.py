@@ -10,6 +10,8 @@ import json
 import os
 import re
 import shutil
+import stat
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -73,11 +75,52 @@ def _path_key(path: str | Path) -> str:
     return os.path.normcase(str(Path(path).resolve()))
 
 
+_REPLACE_ATTEMPTS = 6
+_REPLACE_DELAY = 0.05
+
+
+def _clear_readonly(path: Path) -> None:
+    """Снять «только чтение», иначе Windows не заменяет существующий файл."""
+    try:
+        mode = path.stat().st_mode
+    except OSError:
+        return
+    if mode & stat.S_IWRITE:
+        return
+    try:
+        os.chmod(path, mode | stat.S_IWRITE)
+    except OSError:
+        pass
+
+
+def _replace_file(temporary: Path, path: Path) -> None:
+    """Заменить цель. Короткая блокировка на Windows даёт WinError 5."""
+    delay = _REPLACE_DELAY
+    last: PermissionError | None = None
+    for attempt in range(_REPLACE_ATTEMPTS):
+        _clear_readonly(path)
+        try:
+            temporary.replace(path)
+            return
+        except PermissionError as exc:
+            last = exc
+            if attempt + 1 == _REPLACE_ATTEMPTS:
+                break
+            time.sleep(delay)
+            delay = min(delay * 2, 0.25)
+    assert last is not None
+    raise last
+
+
 def _write_json(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary = path.with_name(f"{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
     temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    temporary.replace(path)
+    try:
+        _replace_file(temporary, path)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
 
 
 def _read_json(path: Path) -> dict:

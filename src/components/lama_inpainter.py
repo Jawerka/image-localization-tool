@@ -31,6 +31,12 @@ def _ceil_mod(value: int, modulo: int = 8) -> int:
     return (value // modulo + 1) * modulo
 
 
+# Окно длиннее этого идёт кусками. Короткий штрих остаётся одним проходом.
+_LAMA_LIMIT = 1024
+_TILE = 768
+_TILE_OVERLAP = 192
+
+
 def _window_bounds(
     component: np.ndarray,
     shape: tuple[int, int],
@@ -47,8 +53,32 @@ def _window_bounds(
     return y0, x0, y1, x1
 
 
+def _tile_starts(length: int, tile: int, step: int) -> list[int]:
+    """Начала кропов, последний дотягивается до края."""
+    if length <= tile:
+        return [0]
+    starts = list(range(0, length - tile + 1, step))
+    last = length - tile
+    if starts[-1] != last:
+        starts.append(last)
+    return starts
+
+
+def _feather(height: int, width: int, fade: int) -> np.ndarray:
+    """Вес кропа: к краю меньше, чтобы перекрытие не давало шва."""
+    fade = max(1, min(fade, height // 2, width // 2))
+    ramp = np.linspace(0.05, 1.0, fade, dtype=np.float32)
+    wy = np.ones(height, dtype=np.float32)
+    wx = np.ones(width, dtype=np.float32)
+    wy[:fade] = ramp
+    wy[-fade:] = ramp[::-1]
+    wx[:fade] = ramp
+    wx[-fade:] = ramp[::-1]
+    return wy[:, None] * wx[None, :]
+
+
 class LamaInpainter:
-    """Заливка однородного баллона или LaMa на кропе до 1024 px."""
+    """Заливка однородного баллона или LaMa. Большое окно режется без уменьшения."""
 
     def __init__(
         self,
@@ -163,39 +193,20 @@ class LamaInpainter:
         self._model = model
         return model
 
-    def _lama_crop(
-        self,
-        image: np.ndarray,
-        component: np.ndarray,
-        lama_mask: np.ndarray,
-    ) -> np.ndarray:
+    def _lama_forward(self, crop: np.ndarray, crop_mask: np.ndarray) -> np.ndarray:
+        """Один вызов модели без уменьшения кадра."""
         import torch
 
-        bounds = _window_bounds(component, image.shape[:2], pad=128)
-        if bounds is None:
-            return image
-        y0, x0, y1, x1 = bounds
-        crop = image[y0:y1, x0:x1]
-        crop_mask = lama_mask[y0:y1, x0:x1]
-        scale = 1024 / max(crop.shape[0], crop.shape[1], 1)
-        if scale < 1:
-            new_size = (max(8, int(crop.shape[1] * scale)), max(8, int(crop.shape[0] * scale)))
-            crop_in = cv2.resize(crop, new_size, interpolation=cv2.INTER_AREA)
-            mask_in = cv2.resize(crop_mask, new_size, interpolation=cv2.INTER_NEAREST)
-        else:
-            crop_in = crop
-            mask_in = crop_mask
-
-        out_h = _ceil_mod(crop_in.shape[0])
-        out_w = _ceil_mod(crop_in.shape[1])
+        out_h = _ceil_mod(crop.shape[0])
+        out_w = _ceil_mod(crop.shape[1])
         padded_img = np.pad(
-            crop_in,
-            ((0, out_h - crop_in.shape[0]), (0, out_w - crop_in.shape[1]), (0, 0)),
+            crop,
+            ((0, out_h - crop.shape[0]), (0, out_w - crop.shape[1]), (0, 0)),
             mode="symmetric",
         )
         padded_mask = np.pad(
-            mask_in,
-            ((0, out_h - mask_in.shape[0]), (0, out_w - mask_in.shape[1])),
+            crop_mask,
+            ((0, out_h - crop_mask.shape[0]), (0, out_w - crop_mask.shape[1])),
             mode="constant",
         )
         image_t = torch.from_numpy(padded_img.transpose(2, 0, 1).astype(np.float32) / 255.0)
@@ -210,11 +221,50 @@ class LamaInpainter:
             predicted = predicted[0]
         predicted = predicted[0].detach().float().cpu().permute(1, 2, 0).numpy()
         predicted = np.clip(predicted * 255.0, 0, 255).astype(np.uint8)
-        predicted = predicted[:crop_in.shape[0], :crop_in.shape[1]]
-        if scale < 1:
-            predicted = cv2.resize(
-                predicted, (crop.shape[1], crop.shape[0]), interpolation=cv2.INTER_LINEAR
-            )
+        return predicted[: crop.shape[0], : crop.shape[1]]
+
+    def _lama_tiles(
+        self,
+        crop: np.ndarray,
+        crop_mask: np.ndarray,
+        component_crop: np.ndarray,
+    ) -> np.ndarray:
+        """Кропы не длиннее ``_TILE``. Перекрытие смешивается, в дыру пишется только компонента."""
+        color = np.zeros_like(crop, dtype=np.float32)
+        weight_sum = np.zeros(crop.shape[:2], dtype=np.float32)
+        step = _TILE - _TILE_OVERLAP
+        for y0 in _tile_starts(crop.shape[0], _TILE, step):
+            for x0 in _tile_starts(crop.shape[1], _TILE, step):
+                y1 = min(crop.shape[0], y0 + _TILE)
+                x1 = min(crop.shape[1], x0 + _TILE)
+                if not np.any(component_crop[y0:y1, x0:x1]):
+                    continue
+                predicted = self._lama_forward(crop[y0:y1, x0:x1], crop_mask[y0:y1, x0:x1])
+                weight = _feather(y1 - y0, x1 - x0, _TILE_OVERLAP // 2)
+                hole = component_crop[y0:y1, x0:x1] > 0
+                color[y0:y1, x0:x1][hole] += predicted[hole] * weight[hole, None]
+                weight_sum[y0:y1, x0:x1][hole] += weight[hole]
+        painted = crop.copy()
+        hole = (component_crop > 0) & (weight_sum > 0)
+        painted[hole] = np.clip(np.round(color[hole] / weight_sum[hole, None]), 0, 255).astype(np.uint8)
+        return painted
+
+    def _lama_crop(
+        self,
+        image: np.ndarray,
+        component: np.ndarray,
+        lama_mask: np.ndarray,
+    ) -> np.ndarray:
+        bounds = _window_bounds(component, image.shape[:2], pad=128)
+        if bounds is None:
+            return image
+        y0, x0, y1, x1 = bounds
+        crop = image[y0:y1, x0:x1]
+        crop_mask = lama_mask[y0:y1, x0:x1]
+        if max(crop.shape[0], crop.shape[1]) <= _LAMA_LIMIT:
+            predicted = self._lama_forward(crop, crop_mask)
+        else:
+            predicted = self._lama_tiles(crop, crop_mask, component[y0:y1, x0:x1])
         return self._paste_component(image, component, predicted, y0, x0)
 
     def _opencv_window(
