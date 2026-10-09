@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import re
 import socket
 import sys
 import threading
@@ -232,3 +233,72 @@ def test_style_network_and_batch_panels(page):
     expect(fold).to_be_visible()
     fold.locator("summary").click()
     expect(fold).to_contain_text("Страницы проекта")
+
+
+def _open_and_translate(tab) -> None:
+    tab.locator("[data-role='empty'] [data-role='open-files']").click()
+    _wait_page_listed(tab)
+    tab.locator("[data-role='translate-all']").click()
+    _wait_ready(tab)
+    tab.wait_for_function(
+        """() => {
+          const img = document.querySelector("[data-role='img-base']");
+          return Boolean(img && img.naturalWidth > 0 && img.complete);
+        }"""
+    )
+
+
+@pytest.mark.ui
+def test_warp_details_survive_inspector_rebuild(page):
+    """Закрытое «Искривление» не открывается снова после rebuild карточки."""
+    _open_and_translate(page)
+    regions = page.locator("[data-role='region-list']")
+    expect(regions).to_contain_text("Привет")
+    regions.get_by_text("Hello", exact=True).click()
+    warp = page.locator("details.region-card__warp")
+    expect(warp).to_be_visible()
+    expect(warp).to_have_js_property("open", True)
+    warp.locator("summary").click()
+    expect(warp).to_have_js_property("open", False)
+
+    translation = page.locator("[data-field='translation']")
+    expect(translation).to_be_visible()
+    with page.expect_response(
+        lambda response: "/document" in response.url and response.request.method == "PUT" and response.ok
+    ):
+        translation.fill("Карточка-стабильность")
+    expect(translation).to_have_value("Карточка-стабильность")
+    expect(page.locator("details.region-card__warp")).to_have_js_property("open", False)
+
+
+@pytest.mark.ui
+def test_mask_draft_then_done_commits(page):
+    """Кисть сразу рисует локальную маску; «Готово» снимает deferApply и сохраняет документ."""
+    _open_and_translate(page)
+    page.locator("[data-role='layer-mask']").click()
+    page.locator("[data-role='tool-brush']").click()
+    expect(page.locator("[data-role='tool-brush']")).to_have_attribute("aria-checked", "true")
+
+    frame = page.locator("[data-role='frame']")
+    expect(frame).to_be_visible()
+    box = frame.bounding_box()
+    assert box and box["width"] > 0 and box["height"] > 0
+    x = box["x"] + box["width"] * 0.35
+    y = box["y"] + box["height"] * 0.35
+    page.mouse.move(x, y)
+    page.mouse.down()
+    page.mouse.move(x + max(8.0, box["width"] * 0.2), y + max(8.0, box["height"] * 0.2))
+    page.mouse.up()
+
+    apply_edits = page.locator("[data-role='apply-edits']")
+    expect(apply_edits).to_be_visible()
+    expect(apply_edits).to_be_enabled()
+    local = page.locator("[data-role='mask-local']")
+    expect(local).not_to_be_hidden()
+    expect(frame).to_have_class(re.compile(r"frame--mask-draft"))
+
+    with page.expect_response(
+        lambda response: "/document" in response.url and response.request.method == "PUT" and response.ok
+    ):
+        apply_edits.click()
+    expect(apply_edits).to_be_hidden()

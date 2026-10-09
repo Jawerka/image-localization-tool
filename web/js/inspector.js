@@ -127,6 +127,7 @@ function renderRegions(state, page) {
   const start = focus?.selectionStart;
   const end = focus?.selectionEnd;
   const scroll = list.scrollTop;
+  const detailsOpen = captureDetailsOpen(list);
   rebuilding = true;
   try {
     if (!page) {
@@ -142,7 +143,7 @@ function renderRegions(state, page) {
       list.innerHTML = '<p class="inspector__empty">Нет регионов. Добавьте рамку или запустите перевод.</p>';
       return;
     }
-    list.innerHTML = regions.map((region, index) => card(region, index, state)).join("");
+    list.innerHTML = regions.map((region, index) => card(region, index, state, detailsOpen)).join("");
     list.querySelectorAll("[data-region-id]").forEach((cardNode) => {
       cardNode.querySelector(".region-card__head")?.addEventListener("click", () => {
         selectRegion(cardNode.dataset.regionId);
@@ -186,7 +187,29 @@ function renderRegions(state, page) {
   }
 }
 
-function card(region, index, state) {
+/** Состояние ``<details>`` выбранной карточки до wipe ``innerHTML``. */
+function captureDetailsOpen(root) {
+  const cardNode = root.querySelector(".region-card--selected") || root.querySelector("[aria-current='true']");
+  if (!cardNode) return null;
+  const regionId = cardNode.dataset.regionId || "";
+  if (!regionId) return null;
+  const warp = cardNode.querySelector("details.region-card__warp");
+  const styles = cardNode.querySelector("details.region-card__styles");
+  return {
+    regionId,
+    warp: warp ? Boolean(warp.open) : null,
+    styles: styles ? Boolean(styles.open) : null,
+  };
+}
+
+function detailsOpenAttr(snapshot, regionId, key, fallbackOpen) {
+  if (snapshot && sameId(snapshot.regionId, regionId) && typeof snapshot[key] === "boolean") {
+    return snapshot[key] ? " open" : "";
+  }
+  return fallbackOpen ? " open" : "";
+}
+
+function card(region, index, state, detailsOpen = null) {
   const selected = sameId(region.id, state.selectedRegionId);
   const classes = ["region-card"];
   if (selected) classes.push("region-card--selected");
@@ -239,7 +262,7 @@ function card(region, index, state) {
       </label>
     </div>
     ${inkToggle(region)}
-    ${cardStyleMarkup(region, state)}
+    ${cardStyleMarkup(region, state, detailsOpen)}
   </article>`;
 }
 
@@ -565,7 +588,7 @@ const CARD_WARPS = [
   ["mesh", "Сетка"],
 ];
 
-function cardStyleMarkup(region, state) {
+function cardStyleMarkup(region, state, detailsOpen = null) {
   const fonts = Array.isArray(state.fonts) ? state.fonts : [];
   const fontId = region.style?.font_id || "";
   const fontOptions = [`<option value="">По умолчанию</option>`]
@@ -589,8 +612,10 @@ function cardStyleMarkup(region, state) {
     return `<button type="button" class="btn btn-ghost" data-card-warp="${id}" aria-pressed="${pressed}">${escapeText(label)}</button>`;
   }).join("");
   const library = Array.isArray(state.styleLibrary) ? state.styleLibrary : [];
+  const warpOpen = detailsOpenAttr(detailsOpen, region.id, "warp", true);
+  const stylesOpen = detailsOpenAttr(detailsOpen, region.id, "styles", true);
   const styleChips = library.length
-    ? `<details class="region-card__styles" open>
+    ? `<details class="region-card__styles"${stylesOpen}>
         <summary>Стили проекта</summary>
         <div class="style-chips" role="group" aria-label="Стили проекта">${library.map((item, index) => {
           const name = (item && item.name) || `Стиль ${index + 1}`;
@@ -614,7 +639,7 @@ function cardStyleMarkup(region, state) {
         <input id="stroke-${escapeAttr(region.id)}" type="color" data-field="stroke_rgb" value="${escapeAttr(stroke)}">
       </label>
     </div>
-    <details class="region-card__warp" open>
+    <details class="region-card__warp"${warpOpen}>
       <summary>Искривление</summary>
       <div class="warp-presets" role="group" aria-label="Вид искривления">${presets}</div>
       <label class="field" for="bend-${escapeAttr(region.id)}">Изгиб
