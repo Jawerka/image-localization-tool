@@ -178,6 +178,8 @@ python scripts\build-extension.py
 .\scripts\deploy-windows.ps1 -Build -SkipInno
 .\scripts\deploy-lan.ps1                  # src/web -> CT113, restart ilt.service
 .\scripts\deploy-lan.ps1 -DryRun
+.\scripts\deploy-extension.ps1            # dist/chromium -> apps/extension/...
+.\scripts\check-inno.ps1                  # ISCC present? optional -Install via winget
 ```
 
 **Headless на домашнем ПК / в LAN:** соберите или запустите из исходников `python -m src.app --headless --remote`, откройте порт 8765 в брандмауэре для частной сети, сопрягите расширение или клиент по `/v1`. Не выставляйте слушатель в интернет без дополнительной защиты — протокол без шифрования, рассчитан на локальную сеть.
