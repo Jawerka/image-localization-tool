@@ -208,6 +208,10 @@ tests/
 | Heroika и OFL-шрифты | OFL 1.1 | лежат в `src/resources/fonts/` |
 | Argos Translate | git-зависимость в `requirements.txt` | оффлайн-фолбэк перевода |
 
+## Спецификации
+
+Следующая фича идёт через Spec Kit: `/speckit-specify`, затем `/speckit-plan`, `/speckit-tasks`, `/speckit-implement` и `/speckit-converge`. Каталог фич — `specs/`. Принципы проекта — `.specify/memory/constitution.md`.
+
 ## Лицензия
 
 MIT — см. [LICENSE](LICENSE).

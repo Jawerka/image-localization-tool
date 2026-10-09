@@ -29,7 +29,9 @@ env/
 # IDE / local agent notes
 .idea/
 .vscode/
-.cursor/
+.cursor/*
+!.cursor/skills/
+!.cursor/skills/**
 .ruff_cache/
 AGENTS.md
 docs/PROBLEMS.md
