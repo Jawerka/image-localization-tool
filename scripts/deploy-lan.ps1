@@ -87,19 +87,24 @@ try {
         throw "scp failed with exit code $LASTEXITCODE"
     }
 
-    $remoteCmd = @"
-set -e
-cd '$RemoteRoot'
-tar -xf /tmp/ilt-deploy.tar
-rm -f /tmp/ilt-deploy.tar
-systemctl restart '$Service'
-sleep 1
-systemctl is-active '$Service'
-"@
+    # LF-only: Windows CRLF breaks remote bash ("set: - : invalid option").
+    $remoteCmd = @(
+        'set -e'
+        "cd '$RemoteRoot'"
+        'tar -xf /tmp/ilt-deploy.tar'
+        'rm -f /tmp/ilt-deploy.tar'
+        "systemctl restart '$Service'"
+        'sleep 1'
+        "systemctl is-active '$Service'"
+    ) -join "`n"
     Write-Host "==> Extract and restart $Service"
-    & ssh -o BatchMode=yes -o ConnectTimeout=15 $remote $remoteCmd
+    $remoteOut = & ssh -o BatchMode=yes -o ConnectTimeout=15 $remote $remoteCmd 2>&1
+    Write-Host $remoteOut
     if ($LASTEXITCODE -ne 0) {
         throw "remote extract/restart failed with exit code $LASTEXITCODE"
+    }
+    if (("$remoteOut") -notmatch '(?m)^active\s*$') {
+        throw "remote service not active after deploy: $remoteOut"
     }
 
     Write-Host ""
