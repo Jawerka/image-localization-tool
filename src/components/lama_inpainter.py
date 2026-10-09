@@ -36,6 +36,15 @@ _LAMA_LIMIT = 1024
 _TILE = 768
 _TILE_OVERLAP = 192
 
+# Кольцо однородности без изменений порогов; дилатация маски LaMa уже уже (было 5).
+_RING_KERNEL = 7
+_HALO_KERNEL = 7
+_LAMA_MASK_DILATE = 3
+_RING_INK_DISTANCE = 40.0
+_RING_INLIER_DISTANCE = 30.0
+_RING_INLIER_RATIO = 0.85
+_RING_MIN_PIXELS = 12
+
 
 def _window_bounds(
     component: np.ndarray,
@@ -126,7 +135,9 @@ class LamaInpainter:
         lama_mask = np.zeros_like(binary)
         for component in pending:
             lama_mask = np.maximum(lama_mask, component)
-        dilate = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        dilate = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE, (_LAMA_MASK_DILATE, _LAMA_MASK_DILATE),
+        )
         lama_mask = cv2.dilate(lama_mask, dilate, iterations=1)
 
         for component in pending:
@@ -150,21 +161,21 @@ class LamaInpainter:
         full_mask: np.ndarray,
     ) -> bool:
         """Залить компоненту, если фон кольца однотонный (чернила соседа не в счёт)."""
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (_RING_KERNEL, _RING_KERNEL))
         ring = (cv2.dilate(component, kernel) > 0) & (full_mask == 0)
         pixels = image[ring].astype(np.float32)
-        if pixels.shape[0] < 12:
+        if pixels.shape[0] < _RING_MIN_PIXELS:
             return False
         median = np.median(pixels, axis=0)
         distances = np.linalg.norm(pixels - median, axis=1)
         # Высококонтрастные «чернила» соседа не входят в оценку фона.
-        background = distances < 40
+        background = distances < _RING_INK_DISTANCE
         bg_pixels = pixels[background]
-        if bg_pixels.shape[0] < 12:
+        if bg_pixels.shape[0] < _RING_MIN_PIXELS:
             return False
         median = np.median(bg_pixels, axis=0)
-        inliers = np.linalg.norm(bg_pixels - median, axis=1) < 30
-        if float(inliers.mean()) < 0.85 or not np.any(inliers):
+        inliers = np.linalg.norm(bg_pixels - median, axis=1) < _RING_INLIER_DISTANCE
+        if float(inliers.mean()) < _RING_INLIER_RATIO or not np.any(inliers):
             return False
         if float(bg_pixels[inliers].std(axis=0).mean()) > self.uniform_std:
             return False
@@ -180,8 +191,8 @@ class LamaInpainter:
         full_mask: np.ndarray,
         color: np.ndarray,
     ) -> None:
-        """Полоса 3 px: близкие к заливке пиксели перекрасить, контур не трогать."""
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+        """Узкая полоса у края: близкие к заливке пиксели перекрасить, контур не трогать."""
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (_HALO_KERNEL, _HALO_KERNEL))
         band = (cv2.dilate(component, kernel) > 0) & (component == 0) & (full_mask == 0)
         if not np.any(band):
             return

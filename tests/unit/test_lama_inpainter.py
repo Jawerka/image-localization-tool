@@ -3,7 +3,46 @@
 import numpy as np
 from PIL import Image
 
-from src.components.lama_inpainter import LamaInpainter, _TILE, _ceil_mod, _window_bounds
+from src.components.lama_inpainter import (
+    LamaInpainter,
+    _LAMA_MASK_DILATE,
+    _RING_INK_DISTANCE,
+    _RING_INLIER_RATIO,
+    _TILE,
+    _ceil_mod,
+    _window_bounds,
+)
+
+
+def test_ring_and_mask_dilation_are_tight():
+    assert _LAMA_MASK_DILATE <= 3
+    assert _RING_INK_DISTANCE == 40.0
+    assert _RING_INLIER_RATIO == 0.85
+
+
+def test_lama_mask_dilation_does_not_reach_far_neighbor():
+    """Узкая дилатация маски LaMa не должна захватывать глиф в 5 px от края дырки."""
+    image = np.full((100, 160, 3), 180, dtype=np.uint8)
+    image[40:60, 20:70] = 0
+    image[40:60, 75:90] = 0  # сосед через зазор ~5 px
+    mask = np.zeros((100, 160), dtype=np.uint8)
+    mask[40:60, 20:70] = 255
+    seen: list[np.ndarray] = []
+
+    def fake_lama(rgb, component, lama_mask):
+        seen.append(lama_mask.copy())
+        out = rgb.copy()
+        out[component > 0] = 200
+        return out
+
+    inpainter = LamaInpainter(device="cpu")
+    inpainter._lama_crop = fake_lama
+    # allow_flat_fill False — сразу в LaMa на шумном фоне
+    inpainter.inpaint(Image.fromarray(image), mask, allow_flat_fill=False)
+    assert seen
+    dilated = seen[0]
+    # Соседняя буква (колонка 80) не должна попасть в расширенную маску окна.
+    assert int(dilated[50, 80]) == 0
 
 
 def test_neighbor_ink_in_ring_keeps_flat_fill_and_neighbor():
