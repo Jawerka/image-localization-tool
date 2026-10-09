@@ -29,20 +29,12 @@ $ExeName = 'ImageLocalizationTool.exe'
 
 if ($Build) {
     $buildScript = Join-Path $PSScriptRoot 'build-windows.ps1'
-    $buildArgs = @()
-    if ($SkipInno -or -not $IncludeModels) {
-        # Prefer SkipInno for local mirror deploys; models handled below.
-    }
-    if ($SkipInno) {
-        $buildArgs += '-SkipInno'
-    } else {
-        # Default build for deploy path skips installer (ISCC often missing).
-        $buildArgs += '-SkipInno'
-    }
+    # Hashtable splat so -SkipInno binds as a switch, not as OutputDir.
+    $buildArgs = @{ SkipInno = $true }
     if (-not $IncludeModels) {
-        $buildArgs += '-SkipModels'
+        $buildArgs['SkipModels'] = $true
     }
-    Write-Host "==> Build ($($buildArgs -join ' '))"
+    Write-Host "==> Build ($( ($buildArgs.Keys | ForEach-Object { "-$_" }) -join ' '))"
     & $buildScript @buildArgs
     if ($LASTEXITCODE -ne 0) {
         throw "build-windows.ps1 failed with exit code $LASTEXITCODE"
