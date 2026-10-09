@@ -191,3 +191,18 @@ def test_invalid_or_tiny_inputs_stay_unchanged():
 
     empty = np.zeros((0, 4, 4), dtype=np.uint8)
     assert warp_image(empty, "wave", bend=1.0).shape == empty.shape
+
+
+def test_arc_raises_midline_not_sideways():
+    """Положительный bend поднимает середину строки (сдвиг по Y), не уводит вбок по X."""
+    height, width = 40, 80
+    image = np.zeros((height, width, 4), dtype=np.uint8)
+    image[20, :, :] = (255, 255, 255, 255)
+    warped = warp_image(image, "arc", bend=0.5)
+    mid_y = int(np.argmax(warped[:, width // 2, 0]))
+    edge_y = int(np.argmax(warped[:, 2, 0]))
+    assert mid_y < edge_y
+    # Столбцы с чернилами не должны массово съехать в сторону.
+    ink_cols = np.where(warped[:, :, 0] > 0)[1]
+    assert ink_cols.min() <= 2
+    assert ink_cols.max() >= width - 3

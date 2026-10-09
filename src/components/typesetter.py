@@ -275,13 +275,44 @@ def interior_mask(image_rgb: np.ndarray, region: TextRegion) -> np.ndarray:
     return mask
 
 
+def _is_short_reply(text: str) -> bool:
+    """Односложные реплики вроде «А», «Да», «Угу» — не раздувать кегль."""
+    stripped = (text or "").strip()
+    if not stripped:
+        return False
+    tokens = stripped.split()
+    letters = sum(1 for char in stripped if char.isalnum())
+    return letters <= 4 or (len(tokens) <= 2 and len(stripped) <= 8)
+
+
+def _short_reply_cap(
+    high: int,
+    region: TextRegion,
+    regions: list[TextRegion],
+    min_font: int,
+    interior_h: int,
+) -> int:
+    """Ограничить потолок кегля медианой соседей или долей высоты баллона."""
+    neighbor = [
+        int(other.style.font_size or 0)
+        for other in regions
+        if other.id != region.id
+        and other.bubble_bbox is not None
+        and int(other.style.font_size or 0) >= min_font
+    ]
+    if neighbor:
+        return min(high, max(min_font, int(round(float(np.median(neighbor)) * 1.15))))
+    return min(high, max(min_font, int(round(interior_h * 0.45))))
+
+
 def layout_inset_px(region: TextRegion, margin_ratio: float) -> int:
-    """На сколько сжать внутренность баллона перед раскладкой. 0 — без запаса."""
+    """На сколько сжать внутренность баллона перед раскладкой. 0 — без запаса.
+
+    При включённом запасе держим 2–3 px у края облачка, а не долю короткой стороны.
+    """
     if margin_ratio <= 0 or region.bubble_bbox is None or region.block_type == "sfx":
         return 0
-    _x, _y, width, height = region.bubble_bbox
-    side = max(1, min(int(width), int(height)))
-    return max(3, int(round(side * float(margin_ratio))))
+    return 3
 
 
 def inset_layout_mask(area: np.ndarray, inset: int) -> np.ndarray:
@@ -534,11 +565,12 @@ def _pillow_rotate_matrix(
     width: int,
     height: int,
     degrees: float,
+    center: tuple[float, float] | None = None,
 ) -> tuple[int, int, list[float]]:
     """Обратная матрица Pillow ``rotate(..., expand=True)`` и размер кадра."""
     w = float(width)
     h = float(height)
-    center = (w / 2.0, h / 2.0)
+    pivot = (w / 2.0, h / 2.0) if center is None else (float(center[0]), float(center[1]))
     angle = -math.radians(float(degrees) % 360.0)
     matrix = [
         round(math.cos(angle), 15),
@@ -553,9 +585,9 @@ def _pillow_rotate_matrix(
         a, b, c, d, e, f = matrix
         return a * x + b * y + c, d * x + e * y + f
 
-    matrix[2], matrix[5] = transform(-center[0], -center[1])
-    matrix[2] += center[0]
-    matrix[5] += center[1]
+    matrix[2], matrix[5] = transform(-pivot[0], -pivot[1])
+    matrix[2] += pivot[0]
+    matrix[5] += pivot[1]
     xs: list[float] = []
     ys: list[float] = []
     for x, y in ((0.0, 0.0), (w, 0.0), (w, h), (0.0, h)):
@@ -564,7 +596,11 @@ def _pillow_rotate_matrix(
         ys.append(ty)
     new_w = math.ceil(max(xs)) - math.floor(min(xs))
     new_h = math.ceil(max(ys)) - math.floor(min(ys))
-    matrix[2], matrix[5] = transform(-(new_w - w) / 2.0, -(new_h - h) / 2.0)
+    # Смещение кадра при expand: углы после поворота вокруг pivot.
+    min_x = math.floor(min(xs))
+    min_y = math.floor(min(ys))
+    matrix[2] -= min_x
+    matrix[5] -= min_y
     return int(new_w), int(new_h), matrix
 
 
@@ -582,12 +618,13 @@ def _rotate_layer(
     image: Image.Image,
     degrees: float,
     point: tuple[float, float],
+    pivot: tuple[float, float] | None = None,
 ) -> tuple[Image.Image, tuple[float, float]]:
-    """Поворот против часовой с расширением кадра. Точка пересчитывается той же матрицей."""
+    """Поворот против часовой вокруг ``pivot`` (по умолчанию центр кадра)."""
     if abs(float(degrees)) % 360.0 < 1e-6:
         return image, point
     width, height = image.size
-    center = (width / 2.0, height / 2.0)
+    center = (width / 2.0, height / 2.0) if pivot is None else (float(pivot[0]), float(pivot[1]))
     rotated = image.rotate(
         degrees,
         expand=True,
@@ -595,7 +632,7 @@ def _rotate_layer(
         resample=Image.Resampling.BICUBIC,
         fillcolor=(0, 0, 0, 0),
     )
-    _new_w, _new_h, matrix = _pillow_rotate_matrix(width, height, degrees)
+    _new_w, _new_h, matrix = _pillow_rotate_matrix(width, height, degrees, center=center)
     return rotated, _source_to_dest(matrix, point[0], point[1])
 
 
@@ -618,6 +655,41 @@ def _paste_rgba(base: Image.Image, layer: Image.Image, xy: tuple[float, float]) 
     base.alpha_composite(cropped, dest=(dst_x, dst_y))
 
 
+def _field_center(region: TextRegion | None, fallback: tuple[float, float]) -> tuple[float, float]:
+    """Центр текстового поля (рамки) на странице — общая ось ручки и вёрстки."""
+    if region is None:
+        return fallback
+    box = region.bubble_bbox or region.bbox
+    if not box or len(box) < 4:
+        return fallback
+    x, y, width, height = (float(box[0]), float(box[1]), float(box[2]), float(box[3]))
+    return x + width / 2.0, y + height / 2.0
+
+
+def _bbox_local_to_layer(
+    points: list | None,
+    region: TextRegion | None,
+    origin_x: float,
+    origin_y: float,
+    scale: float,
+) -> list | None:
+    """Точки warp из координат рамки → пиксели слоя (после scale)."""
+    if not points or region is None:
+        return _scale_points(points, scale) if points else None
+    box = region.bbox
+    if not box or len(box) < 2:
+        return _scale_points(points, scale)
+    bx, by = float(box[0]), float(box[1])
+    mapped: list[list[float]] = []
+    for item in points:
+        if not isinstance(item, (list, tuple)) or len(item) < 2:
+            return _scale_points(points, scale)
+        page_x = bx + float(item[0])
+        page_y = by + float(item[1])
+        mapped.append([(page_x - origin_x) * scale, (page_y - origin_y) * scale])
+    return mapped
+
+
 def _composite_styled_layer(
     overlay: Image.Image,
     placed: list[tuple[str, int, int]],
@@ -628,11 +700,12 @@ def _composite_styled_layer(
     stroke_width: int,
     style: TextStyle,
     measure: ImageDraw.ImageDraw,
+    region: TextRegion | None = None,
 ) -> None:
     """Нарисовать блок на слое 2×, скосить, повернуть, поварпить и вклеить в страницу.
 
-    ``quad`` и ``mesh`` задаются в пикселях 1× того слоя, который видит варп
-    (уже после скоса и поворота, до уменьшения). Это не координаты страницы.
+    ``quad`` и ``mesh`` в стиле — в координатах рамки региона; перед варпом
+    переводятся в пиксели слоя. Поворот — вокруг центра текстового поля.
     """
     scale = _LAYER_SCALE
     size = max(1, int(getattr(font, "size", 12) or 12))
@@ -675,34 +748,48 @@ def _composite_styled_layer(
             spacing * scale,
         )
 
-    # Через скос и поворот ведём центр блока и ставим его в центр исходного текста.
-    cx = min_x + box_w / 2.0
-    cy = min_y + box_h / 2.0
-    point = ((pad + box_w / 2.0) * scale, (pad + box_h / 2.0) * scale)
+    origin_x = float(min_x - pad)
+    origin_y = float(min_y - pad)
+    glyph_cx = min_x + box_w / 2.0
+    glyph_cy = min_y + box_h / 2.0
+    world_cx, world_cy = _field_center(region, (glyph_cx, glyph_cy))
+    pivot = ((world_cx - origin_x) * scale, (world_cy - origin_y) * scale)
+    point = pivot
     if style.skew_x:
         layer, point = _skew_layer(layer, float(style.skew_x), point)
+        pivot = point
     if style.rotation:
-        layer, point = _rotate_layer(layer, float(style.rotation), point)
+        layer, point = _rotate_layer(layer, float(style.rotation), point, pivot=pivot)
     kind, bend, quad, mesh = _warp_spec(style)
     if kind != "none":
+        layer_quad = _bbox_local_to_layer(quad, region, origin_x, origin_y, scale)
+        layer_mesh = _bbox_local_to_layer(mesh, region, origin_x, origin_y, scale)
+        if kind == "mesh" and not layer_mesh:
+            # Пустая сетка — регулярная решётка по слою, чтобы варп не был no-op.
+            lw, lh = layer.size
+            layer_mesh = [
+                [col * (lw - 1) / 3.0, row * (lh - 1) / 3.0]
+                for row in range(4)
+                for col in range(4)
+            ]
         warped = warp_image(
             np.asarray(layer),
             kind,
             bend=bend,
-            quad=_scale_points(quad, scale),
-            mesh=_scale_points(mesh, scale),
+            quad=layer_quad,
+            mesh=layer_mesh,
         )
         layer = Image.fromarray(warped)
         if kind == "arc" and bend:
-            # Дуга сдвигает середину кадра по X. Центр текста едет вместе с ней.
-            point = (point[0] + float(bend) * float(layer.size[1]), point[1])
+            # Середина дуги смещается по Y; ведём опорную точку вместе с ней.
+            point = (point[0], point[1] - float(bend) * float(layer.size[0]))
     if scale > 1:
         layer = layer.resize(
             (max(1, layer.size[0] // scale), max(1, layer.size[1] // scale)),
             Image.Resampling.LANCZOS,
         )
         point = (point[0] / scale, point[1] / scale)
-    _paste_rgba(overlay, layer, (cx - point[0], cy - point[1]))
+    _paste_rgba(overlay, layer, (world_cx - point[0], world_cy - point[1]))
 
 
 def _channel_luminance(value: float) -> float:
@@ -949,6 +1036,8 @@ class Typesetter:
                 heights = [index for index, span in enumerate(spans) if span]
                 interior_h = (heights[-1] - heights[0] + 1) if heights else self.max_font_size
                 high = min(self.max_font_size, max(self.min_font_size, interior_h))
+                if _is_short_reply(text) and region.bubble_bbox is not None:
+                    high = _short_reply_cap(high, region, regions, self.min_font_size, interior_h)
                 placed, chosen_font, fits_any = _fit_size(
                     text, draw, spans, hyphenator, align, font_path,
                     self.min_font_size, high, letter_spacing, line_spacing, stroke_pad,
@@ -977,7 +1066,7 @@ class Typesetter:
             if _style_needs_layer(region.style):
                 _composite_styled_layer(
                     overlay, placed, chosen_font, font_path, fill, stroke, stroke_width,
-                    region.style, draw,
+                    region.style, draw, region=region,
                 )
             else:
                 for line, x, y in placed:

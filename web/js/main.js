@@ -43,6 +43,7 @@ import {
   applyBootstrap,
   clampBox,
   deviceLabel,
+  commitDeferredEdits,
   editDocument,
   findRegion,
   getState,
@@ -154,6 +155,7 @@ function bindChrome() {
   });
   document.querySelector("[data-role='translate-page']").addEventListener("click", translatePage);
   document.querySelector("[data-role='translate-all']").addEventListener("click", translateAll);
+  document.querySelector("[data-role='apply-edits']")?.addEventListener("click", () => commitDeferredEdits());
   document.querySelector("[data-role='stop']").addEventListener("click", () => stopJobs());
   document.querySelectorAll("[data-role='llm-retry']").forEach((button) => button.addEventListener("click", retryLlm));
   document.querySelector("[data-role='lang-target']").addEventListener("change", saveLanguages);
@@ -230,6 +232,12 @@ function render(state) {
   const hasPage = Boolean(state.activePageId);
   document.querySelector("[data-role='translate-page']").disabled = !hasPage;
   document.querySelector("[data-role='translate-all']").disabled = !hasPages;
+  const applyEdits = document.querySelector("[data-role='apply-edits']");
+  if (applyEdits) {
+    const pending = Boolean(state.deferredApply);
+    applyEdits.hidden = !pending;
+    applyEdits.disabled = !pending;
+  }
   document.querySelectorAll("[data-role='export']").forEach((button) => {
     button.disabled = !hasPages;
   });

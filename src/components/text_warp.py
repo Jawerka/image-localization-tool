@@ -23,7 +23,7 @@ def warp_image(
 
     ``kind``:
     - ``none`` и неизвестные значения — копия без изменений;
-    - ``arc`` — вертикальная дуга: горизонтальный бочкообразный сдвиг,
+    - ``arc`` — дуга строки по вертикали (середина вверх/вниз),
       ``bend`` — доля высоты (обычно −1..1);
     - ``ring`` — кольцевой изгиб вокруг центра;
     - ``wave`` — синусоидальный сдвиг по горизонтали и вертикали;
@@ -122,16 +122,21 @@ def _remap(image: np.ndarray, map_x: np.ndarray, map_y: np.ndarray) -> np.ndarra
 
 
 def _map_arc(height: int, width: int, bend: float) -> tuple[np.ndarray, np.ndarray]:
-    """Горизонтальный сдвиг от вертикальной дуги. ``bend == 0`` — тождество."""
+    """Вертикальный изгиб строки: середина поднимается/опускается. ``bend == 0`` — тождество.
+
+    Положительный ``bend`` («дугой вверх») поднимает середину; отрицательный —
+    опускает. Сдвиг по Y, ноль у левого и правого края.
+    """
     map_x, map_y = _identity_maps(height, width)
-    if bend == 0.0 or height < 2:
+    if bend == 0.0 or width < 2:
         return map_x, map_y
-    ys = np.arange(height, dtype=np.float32)[:, None]
-    center_y = np.float32((height - 1) * 0.5)
-    ny = (ys - center_y) / center_y
-    # Максимум в середине кадра, ноль на верхней и нижней кромке.
-    shift = np.float32(bend) * np.float32(height) * (1.0 - ny * ny)
-    map_x = map_x - shift
+    xs = np.arange(width, dtype=np.float32)[None, :]
+    center_x = np.float32((width - 1) * 0.5)
+    nx = (xs - center_x) / max(center_x, np.float32(1.0))
+    # Максимум в середине ширины, ноль на боковых кромках.
+    shift = np.float32(bend) * np.float32(height) * (1.0 - nx * nx)
+    # Обратный remap: map_y = y + shift при bend>0 берёт пиксель снизу → середина едет вверх.
+    map_y = map_y + shift
     return map_x, map_y
 
 

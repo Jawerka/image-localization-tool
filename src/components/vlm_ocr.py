@@ -14,6 +14,12 @@ from src.utils.logger import logger
 
 BLOCK_TYPES = ("dialogue", "narration", "title", "sfx", "sign", "noise")
 
+
+def _clamp_balloon_type(region: TextRegion) -> None:
+    """Речь в баллоне не должна оставаться sfx — иначе default skip её выбросит."""
+    if region.bubble_bbox is not None and region.block_type == "sfx":
+        region.block_type = "dialogue"
+
 # Имена цветов уходят в промпт, поэтому они простые английские.
 PALETTE: tuple[tuple[str, tuple[int, int, int]], ...] = (
     ("red", (220, 30, 30)),
@@ -189,10 +195,12 @@ def _prompt(
         "Read each box in the original language. Do not translate and do not invent text "
         "outside the boxes."
         f"{hint}\n\n"
-        "type is one of: dialogue (speech or thought balloon), narration (captions and "
-        "paragraphs), title (headings), sfx (sound effects, including stylized words like "
-        "GROWL, SWOOO, SILENCE), sign (text printed on objects: book spines, labels, "
-        "screens), noise (a box with no real text).\n"
+        "type is one of: dialogue (speech or thought balloon — always dialogue when the "
+        "text is inside a speech or thought balloon, even if ALL CAPS), narration "
+        "(captions and paragraphs), title (headings), sfx (sound effects and stylized "
+        "onomatopoeia like GROWL or SWOOO that are not ordinary balloon speech), sign "
+        "(text printed on objects: book spines, labels, screens), noise (a box with no "
+        "real text).\n"
         "Keep the original wording. Join wrapped lines with spaces.\n"
         "Return every id.\n\n"
         f"Boxes:\n{lines}"
@@ -290,6 +298,7 @@ class VlmOcr:
             block_type = str(block.get("type") or "").strip().lower()
             if block_type in BLOCK_TYPES:
                 region.block_type = block_type
+            _clamp_balloon_type(region)
         return returned
 
     def _reread_suspicious(
@@ -347,6 +356,9 @@ class VlmOcr:
                 prompt=(
                     "Read the text in this crop. Return the original text and its type "
                     "(dialogue, narration, title, sfx, sign, noise). "
+                    "If the crop is a speech or thought balloon, type is dialogue even "
+                    "when the text is ALL CAPS. Use sfx only for sound effects or "
+                    "stylized onomatopoeia, not ordinary balloon speech. "
                     "If there is no text, use an empty string and type noise."
                 ),
                 schema=CROP_SCHEMA,
@@ -363,6 +375,7 @@ class VlmOcr:
             region.block_type = block_type
         elif not region.text:
             region.block_type = "noise"
+        _clamp_balloon_type(region)
         return region.text
 
     def _reread_empty(self, image: Image.Image, regions: list[TextRegion]) -> None:

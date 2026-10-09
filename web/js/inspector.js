@@ -18,7 +18,6 @@ import {
   subscribe,
   whenSaved,
 } from "./state.js";
-import { mount as mountStyle, render as renderStyle } from "./style-panel.js";
 import { setStylePreview, viewCenter } from "./viewer.js";
 import { blankRegion, clampBox, nextRegionId } from "./state.js";
 
@@ -37,7 +36,6 @@ let list;
 let facts;
 let bar;
 let tabsRoot;
-let styleRoot;
 let fontDraft = null;
 let rebuilding = false;
 let previewTimer = 0;
@@ -56,12 +54,6 @@ export function init() {
   });
   tabsRoot.querySelector("[role='tablist']").addEventListener("keydown", onTabKey);
   document.querySelector("[data-role='add-region']").addEventListener("click", addRegion);
-  styleRoot = document.querySelector("[data-role='inspector-style']");
-  mountStyle(styleRoot, {
-    editDocument,
-    getState,
-    api: { previewRegion: retryPreview },
-  });
   fontList().then((data) => patch({ fonts: (data && data.fonts) || [] })).catch(() => patch({ fonts: [] }));
   subscribe(render);
   render(getState());
@@ -79,7 +71,7 @@ function showTab(name) {
 }
 
 function onTabKey(event) {
-  const tabs = [...tabsRoot.querySelectorAll("[data-tab]")];
+  const tabs = [...tabsRoot.querySelectorAll("[data-tab]")].filter((tab) => !tab.hidden);
   const index = tabs.indexOf(document.activeElement);
   if (index < 0) return;
   let next = -1;
@@ -100,7 +92,6 @@ function render(state) {
   renderPage(state, page);
   watchStyles(state);
   watchPreview(state);
-  renderStyle(state);
 }
 
 function renderRegions(state, page) {
@@ -145,6 +136,12 @@ function renderRegions(state, page) {
     });
     list.querySelectorAll("[data-ink]").forEach((button) => {
       button.addEventListener("click", () => onInk(button));
+    });
+    list.querySelectorAll("[data-card-warp]").forEach((button) => {
+      button.addEventListener("click", () => onCardWarp(button));
+    });
+    list.querySelectorAll("[data-font-nav]").forEach((button) => {
+      button.addEventListener("click", () => onFontNav(button));
     });
     if (regionId && field) {
       const next = list.querySelector(`[data-region-id="${cssEscape(regionId)}"] [data-field="${field}"]`);
@@ -212,6 +209,7 @@ function card(region, index, state) {
       </label>
     </div>
     ${inkToggle(region)}
+    ${cardStyleMarkup(region, state)}
   </article>`;
 }
 
@@ -303,6 +301,22 @@ function onField(input) {
       region.block_type = input.value;
     }
     if (field === "uppercase") region.style.uppercase = input.checked;
+    if (field === "font_id") region.style.font_id = input.value || "";
+    if (field === "fill_rgb") {
+      region.style.fill_rgb = hexToRgb(input.value);
+      region.style.fill_locked = true;
+    }
+    if (field === "stroke_rgb") {
+      region.style.stroke_rgb = hexToRgb(input.value);
+      region.style.stroke_mode = "custom";
+    }
+    if (field === "warp_bend") {
+      const bend = Number(input.value);
+      region.style.warp = { ...(region.style.warp || { kind: "none", quad: null, mesh: null }) };
+      region.style.warp.bend = Number.isFinite(bend) ? bend : 0;
+      const output = input.parentElement?.querySelector("output");
+      if (output) output.textContent = Number(region.style.warp.bend).toFixed(2);
+    }
   }, { debounce: slow ? 500 : 0, coalesce: slow ? `${field}:${id}` : "" });
 }
 
@@ -498,6 +512,146 @@ function inkToggle(region) {
   return `<div class="ink-toggle" role="group" aria-label="Цвет текста">${button("black", "Чёрный")}${button("white", "Белый")}</div>`;
 }
 
+function rgbToHex(rgb) {
+  const channels = Array.isArray(rgb) ? rgb : [0, 0, 0];
+  const to = (value) => Math.max(0, Math.min(255, Math.round(Number(value) || 0))).toString(16).padStart(2, "0");
+  return `#${to(channels[0])}${to(channels[1])}${to(channels[2])}`;
+}
+
+function hexToRgb(value) {
+  const text = String(value || "").replace("#", "");
+  if (text.length !== 6) return [0, 0, 0];
+  return [0, 2, 4].map((offset) => Number.parseInt(text.slice(offset, offset + 2), 16) || 0);
+}
+
+const CARD_WARPS = [
+  ["none", "Нет"],
+  ["arc-up", "Дугой вверх"],
+  ["arc-down", "Дугой вниз"],
+  ["ring", "Кольцо"],
+  ["wave", "Волна"],
+  ["flag", "Флаг"],
+  ["perspective", "Перспектива"],
+  ["mesh", "Сетка"],
+];
+
+function cardStyleMarkup(region, state) {
+  const fonts = Array.isArray(state.fonts) ? state.fonts : [];
+  const fontId = region.style?.font_id || "";
+  const fontOptions = [`<option value="">По умолчанию</option>`]
+    .concat(fonts.map((font) => {
+      const id = font && font.id != null ? String(font.id) : "";
+      const label = (font && (font.family || font.id)) || id;
+      const selected = id === String(fontId) ? " selected" : "";
+      return `<option value="${escapeAttr(id)}"${selected}>${escapeText(label)}</option>`;
+    }))
+    .join("");
+  const fill = rgbToHex(region.style?.fill_rgb);
+  const stroke = region.style?.stroke_rgb ? rgbToHex(region.style.stroke_rgb) : "#000000";
+  const warp = region.style?.warp || {};
+  const bend = Number(warp.bend);
+  const bendValue = Number.isFinite(bend) ? bend : 0;
+  const choice = warpChoice(warp);
+  const presets = CARD_WARPS.map(([id, label]) => {
+    const pressed = choice === id ? "true" : "false";
+    return `<button type="button" class="btn btn-ghost" data-card-warp="${id}" aria-pressed="${pressed}">${escapeText(label)}</button>`;
+  }).join("");
+  return `<div class="region-card__style">
+    <label class="field" for="font-id-${escapeAttr(region.id)}">Шрифт
+      <div class="num-field" data-role="font-family-field">
+        <button type="button" class="btn btn-ghost num-field__btn" data-font-nav="-1" aria-label="Предыдущий шрифт">←</button>
+        <select id="font-id-${escapeAttr(region.id)}" class="select" data-field="font_id">${fontOptions}</select>
+        <button type="button" class="btn btn-ghost num-field__btn" data-font-nav="1" aria-label="Следующий шрифт">→</button>
+      </div>
+    </label>
+    <div class="region-card__row style-colors">
+      <label class="field" for="fill-${escapeAttr(region.id)}">Заливка
+        <input id="fill-${escapeAttr(region.id)}" type="color" data-field="fill_rgb" value="${escapeAttr(fill)}">
+      </label>
+      <label class="field" for="stroke-${escapeAttr(region.id)}">Обводка
+        <input id="stroke-${escapeAttr(region.id)}" type="color" data-field="stroke_rgb" value="${escapeAttr(stroke)}">
+      </label>
+    </div>
+    <details class="region-card__warp" open>
+      <summary>Искривление</summary>
+      <div class="warp-presets" role="group" aria-label="Вид искривления">${presets}</div>
+      <label class="field" for="bend-${escapeAttr(region.id)}">Изгиб
+        <span class="style-range">
+          <input id="bend-${escapeAttr(region.id)}" type="range" min="-1" max="1" step="0.05" data-field="warp_bend" value="${escapeAttr(String(bendValue))}">
+          <output for="bend-${escapeAttr(region.id)}">${bendValue.toFixed(2)}</output>
+        </span>
+      </label>
+    </details>
+  </div>`;
+}
+
+function warpChoice(warp) {
+  const kind = warp && warp.kind ? warp.kind : "none";
+  const bend = Number(warp && warp.bend);
+  const value = Number.isFinite(bend) ? bend : 0;
+  if (kind === "arc") return value >= 0 ? "arc-up" : "arc-down";
+  if (kind === "wave") {
+    if (Math.abs(value) < 0.25 && value !== 0) return "flag";
+    return "wave";
+  }
+  if (kind === "ring" || kind === "perspective" || kind === "mesh" || kind === "none") return kind;
+  return "none";
+}
+
+function defaultQuadPoints(w, h) {
+  return [[0, 0], [w, 0], [w, h], [0, h]];
+}
+
+function defaultMeshPoints(w, h) {
+  const points = [];
+  for (let row = 0; row < 4; row += 1) {
+    for (let col = 0; col < 4; col += 1) {
+      points.push([(col * w) / 3, (row * h) / 3]);
+    }
+  }
+  return points;
+}
+
+function applyCardWarp(region, preset) {
+  const style = region.style || (region.style = {});
+  const warp = { ...(style.warp || { kind: "none", bend: 0, quad: null, mesh: null }) };
+  const box = region.bbox || [0, 0, 100, 100];
+  const bw = Math.max(1, Number(box[2]) || 100);
+  const bh = Math.max(1, Number(box[3]) || 100);
+  const bend = Number(warp.bend);
+  const current = Number.isFinite(bend) ? bend : 0;
+  if (preset === "none") {
+    warp.kind = "none";
+    warp.bend = 0;
+    warp.quad = null;
+    warp.mesh = null;
+  } else if (preset === "arc-up") {
+    warp.kind = "arc";
+    warp.bend = 0.35;
+  } else if (preset === "arc-down") {
+    warp.kind = "arc";
+    warp.bend = -0.35;
+  } else if (preset === "ring") {
+    warp.kind = "ring";
+    warp.bend = current === 0 ? 0.35 : current;
+  } else if (preset === "wave") {
+    warp.kind = "wave";
+    warp.bend = 0.35;
+  } else if (preset === "flag") {
+    warp.kind = "wave";
+    warp.bend = 0.15;
+  } else if (preset === "perspective") {
+    warp.kind = "perspective";
+    warp.quad = Array.isArray(warp.quad) && warp.quad.length === 4 ? warp.quad : defaultQuadPoints(bw, bh);
+    warp.mesh = null;
+  } else if (preset === "mesh") {
+    warp.kind = "mesh";
+    warp.mesh = Array.isArray(warp.mesh) && warp.mesh.length === 16 ? warp.mesh : defaultMeshPoints(bw, bh);
+    warp.quad = null;
+  }
+  style.warp = warp;
+}
+
 function onInk(button) {
   const cardNode = button.closest("[data-region-id]");
   const id = cardNode?.dataset.regionId;
@@ -511,6 +665,34 @@ function onInk(button) {
     region.style.fill_rgb = ink === "white" ? [255, 255, 255] : [0, 0, 0];
     region.style.fill_locked = true;
   });
+}
+
+function onCardWarp(button) {
+  const cardNode = button.closest("[data-region-id]");
+  const id = cardNode?.dataset.regionId;
+  const preset = button.dataset.cardWarp;
+  if (!id || !preset) return;
+  editDocument((document) => {
+    const region = findRegion(document, id);
+    if (!region) return;
+    region.edited = true;
+    region.style = { ...(region.style || {}) };
+    applyCardWarp(region, preset);
+  });
+}
+
+function onFontNav(button) {
+  const cardNode = button.closest("[data-region-id]");
+  const select = cardNode?.querySelector("[data-field='font_id']");
+  const id = cardNode?.dataset.regionId;
+  const step = Number(button.dataset.fontNav) || 0;
+  if (!select || !id || !step) return;
+  const options = [...select.options];
+  if (!options.length) return;
+  const index = Math.max(0, options.findIndex((item) => item.selected));
+  const next = (index + step + options.length) % options.length;
+  select.selectedIndex = next;
+  onField(select);
 }
 
 async function onAction(button) {
@@ -670,16 +852,6 @@ function watchPreview(state) {
   const regionId = region.id;
   patch({ stylePreview: { status: "loading", message: "Обновляем предпросмотр" } });
   previewTimer = window.setTimeout(() => runPreview(pageId, regionId, key), 400);
-}
-
-function retryPreview(regionId) {
-  const state = getState();
-  if (!state.activePageId) return;
-  const region = findRegion(state.document, regionId);
-  const key = region ? `${state.activePageId}|${region.id}|${JSON.stringify(region.style || {})}|retry` : "";
-  previewKey = key;
-  patch({ stylePreview: { status: "loading", message: "Обновляем предпросмотр" } });
-  runPreview(state.activePageId, regionId, key);
 }
 
 async function runPreview(pageId, regionId, key) {

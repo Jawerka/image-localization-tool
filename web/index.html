@@ -155,6 +155,7 @@
             <input id="brush-size" data-role="brush-size" data-view-control type="range" min="1" max="64" value="12" title="Размер кисти" disabled>
             <span data-role="brush-size-value">12</span>
           </label>
+          <button type="button" class="btn btn-accent" data-role="apply-edits" data-view-control title="Применить накопленные правки кисти" disabled hidden>Готово</button>
           <div class="zoom" data-role="zoom">
             <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#zoom"></use></svg>
             <button type="button" class="btn btn-ghost btn-icon" data-role="zoom-out" data-view-control aria-label="Уменьшить" disabled>−</button>
@@ -201,6 +202,7 @@
                 <img data-role="img-curtain" alt="">
               </div>
               <img class="frame__mask" data-role="img-mask" alt="Слой маски">
+              <canvas class="frame__mask frame__mask-local" data-role="mask-local" hidden aria-hidden="true"></canvas>
               <span class="curtain__label curtain__label--left" data-role="curtain-label" hidden>Оригинал</span>
               <span class="curtain__label curtain__label--right" data-role="curtain-label" hidden>Результат</span>
               <div class="curtain__bar" data-role="curtain-bar" title="Шторка сравнения" hidden>
@@ -231,7 +233,6 @@
         <div class="tabs" role="tablist" aria-label="Инспектор">
           <button type="button" class="btn" role="tab" id="tab-text" data-tab="text" aria-selected="true" aria-controls="panel-text">Текст</button>
           <button type="button" class="btn" role="tab" id="tab-page" data-tab="page" aria-selected="false" aria-controls="panel-page" tabindex="-1">Страница</button>
-          <button type="button" class="btn" role="tab" id="tab-style" data-tab="style" aria-selected="false" aria-controls="panel-style" tabindex="-1">Стиль</button>
         </div>
         <div class="inspector__panel" id="panel-text" role="tabpanel" data-role="inspector-text" data-tabpanel="text" aria-labelledby="tab-text">
           <div class="inspector__bar" data-role="inspector-bar" hidden>
@@ -248,9 +249,6 @@
           <div class="inspector__scroll" data-role="page-facts">
             <p class="inspector__empty">Нет открытой страницы.</p>
           </div>
-        </div>
-        <div class="inspector__panel" id="panel-style" role="tabpanel" data-tabpanel="style" aria-labelledby="tab-style" hidden>
-          <div class="inspector__scroll" data-role="inspector-style"></div>
         </div>
       </aside>
     </div>

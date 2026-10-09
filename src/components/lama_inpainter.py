@@ -143,17 +143,24 @@ class LamaInpainter:
         component: np.ndarray,
         full_mask: np.ndarray,
     ) -> bool:
-        """Залить компоненту, если кольцо без пикселей маски почти однотонное."""
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+        """Залить компоненту, если фон кольца однотонный (чернила соседа не в счёт)."""
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
         ring = (cv2.dilate(component, kernel) > 0) & (full_mask == 0)
         pixels = image[ring].astype(np.float32)
         if pixels.shape[0] < 12:
             return False
         median = np.median(pixels, axis=0)
-        inliers = np.linalg.norm(pixels - median, axis=1) < 30
+        distances = np.linalg.norm(pixels - median, axis=1)
+        # Высококонтрастные «чернила» соседа не входят в оценку фона.
+        background = distances < 40
+        bg_pixels = pixels[background]
+        if bg_pixels.shape[0] < 12:
+            return False
+        median = np.median(bg_pixels, axis=0)
+        inliers = np.linalg.norm(bg_pixels - median, axis=1) < 30
         if float(inliers.mean()) < 0.85 or not np.any(inliers):
             return False
-        if float(pixels[inliers].std(axis=0).mean()) > self.uniform_std:
+        if float(bg_pixels[inliers].std(axis=0).mean()) > self.uniform_std:
             return False
         color = np.clip(np.round(median), 0, 255).astype(np.uint8)
         image[component > 0] = color

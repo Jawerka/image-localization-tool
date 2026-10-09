@@ -137,13 +137,18 @@ class RapidOcr:
 
     @staticmethod
     def _guess_type(region: TextRegion) -> None:
+        """Эвристика типа без VLM: баллон — всегда dialogue, короткие вывески — sign."""
         text = region.text.strip()
         letters = [char for char in text if char.isalpha()]
         shout = bool(letters) and text.upper() == text and len(text) <= 24
         if region.bubble_bbox is not None:
-            region.block_type = "sfx" if shout and len(text) <= 12 else "dialogue"
+            region.block_type = "dialogue"
             return
         if shout:
             region.block_type = "sfx"
-        else:
-            region.block_type = "narration"
+            return
+        words = text.split()
+        short_label = bool(letters) and (
+            len(text) <= 12 or (len(words) <= 3 and len(text) <= 24)
+        )
+        region.block_type = "sign" if short_label else "narration"

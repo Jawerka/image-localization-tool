@@ -51,6 +51,8 @@ class Config:
     text_stroke_ratio: float = 0.08
     # Доля меньшей стороны баллона, которую не занимает текст.
     text_margin: float = 0.08
+    # Длинная сторона для разметки мелких страниц. 0 — без апскейла.
+    layout_long_side: int = 2000
 
     @classmethod
     def load(cls, path: str | Path | None = None) -> "Config":

@@ -87,6 +87,40 @@ def _load_image(path: str | Path) -> Image.Image:
     return image
 
 
+def _layout_scale(image: Image.Image, target_long: int) -> tuple[Image.Image, float]:
+    """Поднятие мелкой страницы до ``target_long`` по длинной стороне. Иначе scale=1."""
+    target = int(target_long or 0)
+    width, height = image.size
+    long_side = max(width, height)
+    if target <= 0 or long_side <= 0 or long_side >= target:
+        return image, 1.0
+    factor = float(target) / float(long_side)
+    size = (max(1, int(round(width * factor))), max(1, int(round(height * factor))))
+    return image.resize(size, Image.Resampling.LANCZOS), factor
+
+
+def _scale_box(box, factor: float):
+    if not box or factor == 1.0:
+        return box
+    return tuple(int(round(float(value) * factor)) for value in box)
+
+
+def _scale_regions(regions: list[TextRegion], factor: float) -> None:
+    """Масштаб рамок и кеглей регионов на месте."""
+    if factor == 1.0 or not regions:
+        return
+    for region in regions:
+        region.bbox = _scale_box(region.bbox, factor)
+        if region.bubble_bbox is not None:
+            region.bubble_bbox = _scale_box(region.bubble_bbox, factor)
+        size = int(getattr(region.style, "font_size", 0) or 0)
+        if size > 0:
+            region.style.font_size = max(1, int(round(size * factor)))
+        override = int(getattr(region.style, "font_size_override", 0) or 0)
+        if override > 0:
+            region.style.font_size_override = max(1, int(round(override * factor)))
+
+
 def _draw_detections(image: Image.Image, detections) -> Image.Image:
     canvas = image.copy()
     draw = ImageDraw.Draw(canvas)
@@ -144,15 +178,17 @@ class PagePipeline:
         started = time.perf_counter()
         image = _load_image(image_path)
         load_time = time.perf_counter() - started
+        work, layout_scale = _layout_scale(image, int(getattr(self.config, "layout_long_side", 2000) or 0))
 
         analyzed = self.analyze(
-            image,
+            work,
             str(image_path),
             source_lang,
             target_lang,
             progress_callback=progress_callback,
             cancel_check=cancel_check,
             debug_dir=debug,
+            _skip_layout_scale=True,
         )
         warnings = analyzed.warnings
         stages = ["load", *analyzed.stages_completed]
@@ -167,18 +203,20 @@ class PagePipeline:
         drawable = self._drawable(regions)
         report(60, f"К вёрстке: {len(drawable)}")
         if not drawable:
-            report(100, "Нечего переводить")
+            if layout_scale != 1.0:
+                _scale_regions(regions, 1.0 / layout_scale)
             result = self._result(image_path, image, regions, direction, warnings, stages, timings)
             self._dump(result, debug)
             return result
 
         _mask, cleaned = self.clean(
-            image,
+            work,
             regions,
             warnings=warnings,
             progress_callback=progress_callback,
             cancel_check=cancel_check,
             debug_dir=debug,
+            _skip_layout_scale=True,
         )
         stages.extend(["segment", "inpaint"])
         timings["segment"] = self._step_timings.get("segment", 0.0)
@@ -191,12 +229,16 @@ class PagePipeline:
             warnings,
             progress_callback=progress_callback,
             cancel_check=cancel_check,
+            _skip_layout_scale=True,
         )
         overflow_ids = set(overflow)
         for region in regions:
             region.overflow = region.id in overflow_ids
         stages.append("typeset")
         timings["typeset"] = self._step_timings.get("typeset", 0.0)
+        if layout_scale != 1.0:
+            rendered = rendered.resize(image.size, Image.Resampling.LANCZOS)
+            _scale_regions(regions, 1.0 / layout_scale)
         report(100, "Готово")
 
         result = self._result(image_path, rendered, regions, direction, warnings, stages, timings)
@@ -214,6 +256,7 @@ class PagePipeline:
         progress_callback: ProgressCallback | None = None,
         cancel_check: CancelCheck | None = None,
         debug_dir: str | Path | None = None,
+        _skip_layout_scale: bool = False,
     ) -> PageResult:
         """Детекция, OCR и перевод. Картинка результата — исходная страница."""
         report = _bind_report(progress_callback, cancel_check)
@@ -224,35 +267,44 @@ class PagePipeline:
         if debug:
             debug.mkdir(parents=True, exist_ok=True)
 
+        work = image
+        layout_scale = 1.0
+        if not _skip_layout_scale:
+            work, layout_scale = _layout_scale(
+                image, int(getattr(self.config, "layout_long_side", 2000) or 0)
+            )
+
         report(8, "Детекция баллонов и текста", "detect")
         started = time.perf_counter()
-        detections = filter_detections(self._detect(image), image.size)
+        detections = filter_detections(self._detect(work), work.size)
         direction_hint = self._geometric_order()
         regions = build_regions(detections, reading_order=direction_hint)
-        regions = refine_document_regions(np.array(image), regions, reading_order=direction_hint)
+        regions = refine_document_regions(np.array(work), regions, reading_order=direction_hint)
         timings["detect"] = time.perf_counter() - started
         stages.append("detect")
         if debug:
-            _draw_detections(image, detections).save(debug / "01_detect.jpg", quality=90)
+            _draw_detections(work, detections).save(debug / "01_detect.jpg", quality=90)
         report(20, f"Регионов: {len(regions)}", "detect")
 
         direction = "ltr"
         if regions:
             report(25, "Распознавание текста", "ocr")
             started = time.perf_counter()
-            direction, regions = self._recognize(image, regions, warnings)
+            direction, regions = self._recognize(work, regions, warnings)
             timings["ocr"] = time.perf_counter() - started
             stages.append("ocr")
             if debug:
-                self._save_marked(image, regions, debug)
+                self._save_marked(work, regions, debug)
 
             report(45, "Перевод", "translate")
             started = time.perf_counter()
             self.typesetter.lang = target_lang
-            regions = self._translate(image, regions, source_lang, target_lang, warnings)
+            regions = self._translate(work, regions, source_lang, target_lang, warnings)
             timings["translate"] = time.perf_counter() - started
             stages.append("translate")
 
+        if layout_scale != 1.0:
+            _scale_regions(regions, 1.0 / layout_scale)
         return self._result(source_path, image, regions, direction, warnings, stages, timings)
 
     def clean(
@@ -264,6 +316,7 @@ class PagePipeline:
         progress_callback: ProgressCallback | None = None,
         cancel_check: CancelCheck | None = None,
         debug_dir: str | Path | None = None,
+        _skip_layout_scale: bool = False,
     ) -> tuple[np.ndarray, Image.Image]:
         """Маска переводимых регионов, штрихи и очистка. Пустая маска не идёт в inpaint."""
         report = _bind_report(progress_callback, cancel_check)
@@ -273,16 +326,37 @@ class PagePipeline:
         if debug:
             debug.mkdir(parents=True, exist_ok=True)
 
+        work = image
+        layout_scale = 1.0
+        if not _skip_layout_scale:
+            work, layout_scale = _layout_scale(
+                image, int(getattr(self.config, "layout_long_side", 2000) or 0)
+            )
+            if layout_scale != 1.0:
+                _scale_regions(regions, layout_scale)
+                if strokes:
+                    strokes = [
+                        MaskStroke(
+                            mode=stroke.mode,
+                            radius=max(1, int(round(stroke.radius * layout_scale))),
+                            points=[
+                                (int(round(x * layout_scale)), int(round(y * layout_scale)))
+                                for x, y in stroke.points
+                            ],
+                        )
+                        for stroke in strokes
+                    ]
+
         report(65, "Маска букв", "segment")
         started = time.perf_counter()
         drawable = self._drawable(regions)
         sfx_regions = [region for region in drawable if region.block_type == "sfx"]
         other_regions = [region for region in drawable if region.block_type != "sfx"]
         inks: dict[int, np.ndarray] = {}
-        mask_other = segment_regions(image, other_regions)
-        mask_sfx = segment_regions(image, sfx_regions, capture_ink=inks)
+        mask_other = segment_regions(work, other_regions)
+        mask_sfx = segment_regions(work, sfx_regions, capture_ink=inks)
         mask = np.maximum(mask_other, mask_sfx)
-        self._merge_captured_sfx(image, sfx_regions, inks)
+        self._merge_captured_sfx(work, sfx_regions, inks)
         mask = apply_strokes(mask, strokes or [])
         self._step_timings["segment"] = time.perf_counter() - started
         if debug:
@@ -291,18 +365,24 @@ class PagePipeline:
         report(75, "Очистка текста", "inpaint")
         started = time.perf_counter()
         if not np.any(mask):
-            cleaned = image
+            cleaned = work
         else:
             sfx_part = np.where((mask > 0) & (mask_sfx > 0), np.uint8(255), np.uint8(0))
             other_part = np.where((mask > 0) & (mask_sfx == 0), np.uint8(255), np.uint8(0))
             if not np.any(sfx_part):
-                cleaned = self._inpaint(image, mask, warnings)
+                cleaned = self._inpaint(work, mask, warnings)
             else:
-                cleaned = image
+                cleaned = work
                 if np.any(other_part):
                     cleaned = self._inpaint(cleaned, other_part, warnings)
                 cleaned = self._inpaint(cleaned, sfx_part, warnings, allow_flat_fill=False)
         self._step_timings["inpaint"] = time.perf_counter() - started
+        if layout_scale != 1.0:
+            cleaned = cleaned.resize(image.size, Image.Resampling.LANCZOS)
+            mask = np.array(
+                Image.fromarray(mask).resize(image.size, Image.Resampling.NEAREST)
+            )
+            _scale_regions(regions, 1.0 / layout_scale)
         if debug:
             cleaned.save(debug / "04_clean.jpg", quality=90)
         return mask, cleaned
@@ -315,19 +395,31 @@ class PagePipeline:
         warnings: list[str] | None = None,
         progress_callback: ProgressCallback | None = None,
         cancel_check: CancelCheck | None = None,
+        _skip_layout_scale: bool = False,
     ) -> tuple[Image.Image, list[int]]:
         """Вёрстка с сокращением. Второй результат — id регионов, которые не влезли."""
         report = _bind_report(progress_callback, cancel_check)
         if warnings is None:
             warnings = []
+        work = cleaned
+        layout_scale = 1.0
+        if not _skip_layout_scale:
+            work, layout_scale = _layout_scale(
+                cleaned, int(getattr(self.config, "layout_long_side", 2000) or 0)
+            )
+            if layout_scale != 1.0:
+                _scale_regions(regions, layout_scale)
         report(85, "Вёрстка", "typeset")
         self.typesetter.lang = target_lang
         started = time.perf_counter()
-        rendered, overflow = self._typeset(cleaned, regions, target_lang, warnings)
+        rendered, overflow = self._typeset(work, regions, target_lang, warnings)
         self._step_timings["typeset"] = time.perf_counter() - started
         overflow_ids = set(overflow)
         for region in regions:
             region.overflow = region.id in overflow_ids
+        if layout_scale != 1.0:
+            rendered = rendered.resize(cleaned.size, Image.Resampling.LANCZOS)
+            _scale_regions(regions, 1.0 / layout_scale)
         return rendered, overflow
 
     def retypeset(

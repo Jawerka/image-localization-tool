@@ -7,6 +7,7 @@ from PIL import Image, ImageDraw
 from src.components import typesetter as typesetter_module
 from src.components.typesetter import Typesetter, interior_mask
 from src.models import TextRegion, TextStyle
+from src.page_pipeline import _layout_scale
 
 
 def test_document_line_changes_the_image():
@@ -153,7 +154,7 @@ def test_margin_keeps_glyphs_inside_the_inset():
     result, overflow = setter.render(image, [region])
     assert overflow == []
     inset = layout_inset_px(region, margin)
-    assert inset >= 3
+    assert inset == 3
     interior = interior_mask(np.array(image), region)
     allowed = inset_layout_mask(interior, inset)
     changed = np.any(np.array(result) != np.array(image), axis=2)
@@ -316,3 +317,47 @@ def test_steep_sfx_stays_inside_its_box():
     assert x <= float(xs.mean()) <= x + w
     assert y <= float(ys.mean()) <= y + h
     assert not np.any(ink[: y])
+
+
+def test_layout_scale_lifts_small_page_to_2000():
+    image = Image.new("RGB", (605, 850), "white")
+    work, scale = _layout_scale(image, 2000)
+    assert max(work.size) == 2000
+    assert abs(scale - 2000 / 850) < 1e-6
+    large = Image.new("RGB", (1400, 2100), "white")
+    same, one = _layout_scale(large, 2000)
+    assert same.size == large.size
+    assert one == 1.0
+
+
+def test_field_center_and_bbox_mesh_mapping():
+    from src.components.typesetter import _bbox_local_to_layer, _field_center
+
+    region = TextRegion(id=1, bbox=(100, 50, 80, 40), bubble_bbox=(100, 50, 80, 40))
+    assert _field_center(region, (0.0, 0.0)) == (140.0, 70.0)
+    mapped = _bbox_local_to_layer([[0, 0], [80, 40]], region, origin_x=90.0, origin_y=40.0, scale=2.0)
+    assert mapped == [[20.0, 20.0], [180.0, 100.0]]
+
+
+def test_short_reply_cap_follows_neighbors():
+    from src.components.typesetter import _short_reply_cap
+
+    short = TextRegion(
+        id=1,
+        bbox=(10, 10, 40, 40),
+        bubble_bbox=(10, 10, 40, 40),
+        translation="Да",
+        block_type="dialogue",
+        style=TextStyle(font_size=12),
+    )
+    neighbor = TextRegion(
+        id=2,
+        bbox=(60, 10, 80, 40),
+        bubble_bbox=(60, 10, 80, 40),
+        translation="Длинная соседняя реплика",
+        block_type="dialogue",
+        style=TextStyle(font_size=18),
+    )
+    capped = _short_reply_cap(48, short, [short, neighbor], min_font=10, interior_h=48)
+    assert capped <= int(round(18 * 1.15))
+    assert capped >= 10

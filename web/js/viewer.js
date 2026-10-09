@@ -7,6 +7,7 @@ import {
   editDocument,
   findRegion,
   getState,
+  isDirty,
   isReadyStatus,
   nextRegionId,
   patch,
@@ -41,6 +42,7 @@ let sizeLabel;
 let zoomLabel;
 let steps;
 let placeholder;
+let maskLocal;
 let natural = { w: 0, h: 0 };
 let drag = null;
 let previewImage = null;
@@ -48,6 +50,8 @@ let previewUrl = "";
 let spaceDown = false;
 let seenPageId = "";
 let scrollHome = false;
+/** Локальная маска на время deferApply / ожидания серверного обновления после «Готово». */
+let maskDraft = null;
 
 export function init() {
   stageHost = document.querySelector("[data-role='stage-host']");
@@ -69,6 +73,7 @@ export function init() {
   zoomLabel = document.querySelector("[data-role='zoom-value']");
   steps = document.querySelector("[data-role='steps']");
   placeholder = document.querySelector("[data-role='result-placeholder']");
+  maskLocal = document.querySelector("[data-role='mask-local']");
 
   const range = document.querySelector("[data-role='brush-size']");
   range.addEventListener("input", () => {
@@ -108,7 +113,7 @@ export function init() {
   stage.addEventListener("scroll", rememberCenter);
   baseImage.addEventListener("load", onImageLoad);
   baseImage.addEventListener("error", onBaseError);
-  maskImage.addEventListener("load", () => maskImage.classList.remove("is-missing"));
+  maskImage.addEventListener("load", onMaskImageLoad);
   maskImage.addEventListener("error", () => maskImage.classList.add("is-missing"));
   window.addEventListener("resize", layout);
   if (window.ResizeObserver) new ResizeObserver(() => layout()).observe(stage);
@@ -224,6 +229,7 @@ function sync(state) {
   let home = false;
   if (page.id !== seenPageId) {
     seenPageId = page.id;
+    clearMaskDraft();
     home = state.zoom !== "fit";
     scrollHome = home;
     if (home) pinScroll();
@@ -235,6 +241,7 @@ function sync(state) {
   setSrc(maskImage, page, "mask", version);
   baseImage.alt = `${state.view === "original" ? "Оригинал" : "Результат"} страницы ${page.name}`;
   frame.classList.toggle("frame--mask", state.showMask);
+  syncMaskDraft(state, page);
   const compare = state.view === "compare";
   curtain.hidden = !compare;
   bar.hidden = !compare;
@@ -289,6 +296,11 @@ function setRadio(selector, value) {
 
 function setSrc(image, page, kind, version) {
   if (image === baseImage && kind === "result" && !isReadyStatus(page.status)) {
+    // Пока идёт повторная вёрстка — оставляем прежний результат, без пустого кадра.
+    if (baseImage.getAttribute("src") && !baseImage.hidden) {
+      showResultGap(false);
+      return;
+    }
     showResultGap(true);
     return;
   }
@@ -298,6 +310,110 @@ function setSrc(image, page, kind, version) {
   image.dataset.url = url;
   if (image === maskImage) image.classList.remove("is-missing");
   image.src = url;
+}
+
+function onMaskImageLoad() {
+  maskImage.classList.remove("is-missing");
+  const state = getState();
+  if (state.deferredApply || maskDraft) syncMaskDraft(state, state.pages.find((item) => item.id === state.activePageId));
+}
+
+function clearMaskDraft() {
+  maskDraft = null;
+  if (maskLocal) {
+    maskLocal.hidden = true;
+    if (maskLocal.width && maskLocal.height) {
+      const ctx = maskLocal.getContext("2d");
+      ctx?.clearRect(0, 0, maskLocal.width, maskLocal.height);
+    }
+  }
+  frame?.classList.remove("frame--mask-draft");
+}
+
+function syncMaskDraft(state, page) {
+  if (!maskLocal || !frame) return;
+  const pageId = state.activePageId || "";
+  if (!pageId || !page) {
+    clearMaskDraft();
+    return;
+  }
+  if (!natural.w || !natural.h) return;
+  if (state.deferredApply) {
+    if (!maskDraft || maskDraft.pageId !== pageId) {
+      maskDraft = { pageId, waitingServer: false };
+    } else {
+      maskDraft.waitingServer = false;
+    }
+    paintLocalMask(state.document?.strokes || []);
+    return;
+  }
+  if (maskDraft && maskDraft.pageId === pageId) {
+    const busy = !isReadyStatus(page.status) || isDirty(pageId);
+    if (busy) {
+      maskDraft.waitingServer = true;
+      maskLocal.hidden = false;
+      frame.classList.add("frame--mask-draft");
+      return;
+    }
+  }
+  clearMaskDraft();
+}
+
+function paintLocalMask(strokes) {
+  if (!maskLocal || !natural.w || !natural.h) return;
+  if (maskLocal.width !== natural.w || maskLocal.height !== natural.h) {
+    maskLocal.width = natural.w;
+    maskLocal.height = natural.h;
+  }
+  const ctx = maskLocal.getContext("2d");
+  if (!ctx) return;
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, natural.w, natural.h);
+  if (
+    maskImage
+    && maskImage.complete
+    && maskImage.naturalWidth > 0
+    && !maskImage.classList.contains("is-missing")
+  ) {
+    try {
+      ctx.drawImage(maskImage, 0, 0, natural.w, natural.h);
+    } catch (_error) {
+      /* same-origin; ignore rare decode races */
+    }
+  }
+  for (const stroke of strokes) paintStrokeOnMask(ctx, stroke);
+  maskLocal.hidden = false;
+  frame.classList.add("frame--mask-draft");
+}
+
+/** Как ``apply_strokes`` в text_segmenter: линия thickness=2r, круги радиуса r. */
+function paintStrokeOnMask(ctx, stroke) {
+  const radius = Math.max(1, Math.round(Number(stroke.radius) || 1));
+  const points = Array.isArray(stroke.points) ? stroke.points : [];
+  if (!points.length) return;
+  const color = stroke.mode === "erase" ? "#000000" : "#ffffff";
+  ctx.fillStyle = color;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = Math.max(1, radius * 2);
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  if (points.length === 1) {
+    ctx.beginPath();
+    ctx.arc(Number(points[0][0]) || 0, Number(points[0][1]) || 0, radius, 0, Math.PI * 2);
+    ctx.fill();
+    return;
+  }
+  ctx.beginPath();
+  ctx.moveTo(Number(points[0][0]) || 0, Number(points[0][1]) || 0);
+  for (let index = 1; index < points.length; index += 1) {
+    ctx.lineTo(Number(points[index][0]) || 0, Number(points[index][1]) || 0);
+  }
+  ctx.stroke();
+  for (const point of points) {
+    ctx.beginPath();
+    ctx.arc(Number(point[0]) || 0, Number(point[1]) || 0, radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
 }
 
 function showResultGap(on) {
@@ -323,6 +439,10 @@ function onImageLoad() {
     scrollHome = false;
   }
   layout();
+  const state = getState();
+  if (state.deferredApply || maskDraft) {
+    syncMaskDraft(state, state.pages.find((item) => item.id === state.activePageId));
+  }
 }
 
 function fitScale() {
@@ -652,7 +772,7 @@ function onPointerUp(event) {
         radius,
         points: done.points.map((point) => [Math.round(point[0]), Math.round(point[1])]),
       });
-    });
+    }, { deferApply: true, coalesce: "stroke" });
     strokeLayer.innerHTML = "";
   }
   if (done.kind === "draft") {
@@ -890,7 +1010,7 @@ function drawStroke() {
   strokeLayer.setAttribute("viewBox", `0 0 ${natural.w} ${natural.h}`);
   const points = drag.points.map((point) => `${Math.round(point[0])},${Math.round(point[1])}`).join(" ");
   const width = Math.max(1, getState().brushSize || 12) * 2;
-  strokeLayer.innerHTML = `<polyline points="${points}" fill="none" stroke="#ffffff" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round" opacity="0.85"></polyline>`;
+  strokeLayer.innerHTML = `<polyline points="${points}" fill="none" stroke="#2563eb" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round" opacity="0.55"></polyline>`;
 }
 
 function moveCursor(event) {

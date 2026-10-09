@@ -105,6 +105,7 @@ function emptyState() {
     redoCount: 0,
     paths: null,
     pendingAction: null,
+    deferredApply: false,
   };
 }
 
@@ -372,6 +373,11 @@ export function selectPages(ids, activeId, focusId) {
   const active = activeId ? String(activeId) : (selected[0] || "");
   const focus = focusId ? String(focusId) : active;
   const changed = active !== state.activePageId;
+  if (changed && state.deferredApply && state.activePageId) {
+    const leaving = state.activePageId;
+    state = { ...state, deferredApply: false };
+    if (pendingBody.has(leaving)) flush(leaving);
+  }
   if (changed && timerPage && timerPage !== active) {
     const leaving = timerPage;
     window.clearTimeout(saveTimer);
@@ -387,6 +393,7 @@ export function selectPages(ids, activeId, focusId) {
     selectedRegionId: changed ? null : state.selectedRegionId,
     document: changed ? null : state.document,
     imageSize: changed ? { w: 0, h: 0 } : state.imageSize,
+    deferredApply: changed ? false : state.deferredApply,
   };
   syncHistoryFlags();
   emit();
@@ -485,11 +492,27 @@ export function editDocument(mutator, options = {}) {
     coalesceKey = key;
   }
   if (!key) coalesceKey = "";
-  state = { ...state, document: next };
+  if (options.deferApply) {
+    state = { ...state, document: next, deferredApply: true };
+    pendingBody.set(pageId, clone(next));
+    syncHistoryFlags();
+    emit();
+    return;
+  }
+  state = { ...state, document: next, deferredApply: false };
   pendingBody.set(pageId, clone(next));
   syncHistoryFlags();
   emit();
   scheduleSave(pageId, options.debounce || 0);
+}
+
+/** Сохранить накопленные правки (кисть/ластик) и запустить пересчёт. */
+export function commitDeferredEdits() {
+  if (!state.activePageId || !state.document) return;
+  if (!state.deferredApply && !pendingBody.has(state.activePageId)) return;
+  state = { ...state, deferredApply: false };
+  emit();
+  scheduleSave(state.activePageId, 0);
 }
 
 export function undo() {
@@ -500,7 +523,7 @@ export function undo() {
   if (history.future.length > HISTORY_LIMIT) history.future.shift();
   const previous = history.past.pop();
   coalesceKey = "";
-  state = { ...state, document: previous };
+  state = { ...state, document: previous, deferredApply: false };
   syncHistoryFlags();
   emit();
   scheduleSave(state.activePageId, 0);
@@ -514,7 +537,7 @@ export function redo() {
   if (history.past.length > HISTORY_LIMIT) history.past.shift();
   const next = history.future.pop();
   coalesceKey = "";
-  state = { ...state, document: next };
+  state = { ...state, document: next, deferredApply: false };
   syncHistoryFlags();
   emit();
   scheduleSave(state.activePageId, 0);

@@ -6,6 +6,28 @@ from PIL import Image
 from src.components.lama_inpainter import LamaInpainter, _TILE, _ceil_mod, _window_bounds
 
 
+def test_neighbor_ink_in_ring_keeps_flat_fill_and_neighbor():
+    """Соседняя буква в кольце не должна срывать плоскую заливку и звать LaMa."""
+    image = np.full((100, 160, 3), 255, dtype=np.uint8)
+    image[40:60, 20:70] = 0
+    image[40:60, 78:95] = 0
+    mask = np.zeros((100, 160), dtype=np.uint8)
+    mask[40:60, 20:70] = 255
+
+    inpainter = LamaInpainter(device="cpu")
+    calls = {"n": 0}
+
+    def fail(*args, **kwargs):
+        calls["n"] += 1
+        raise RuntimeError("LaMa не должна вызываться")
+
+    inpainter._lama_crop = fail
+    result = np.array(inpainter.inpaint(Image.fromarray(image), mask))
+    assert calls["n"] == 0
+    assert int(result[50, 40].min()) > 250
+    assert int(result[50, 85].max()) == 0
+
+
 def test_close_lines_on_white_are_filled_without_lama():
     image = np.full((100, 180, 3), 255, dtype=np.uint8)
     image[30:48, 30:140] = 0

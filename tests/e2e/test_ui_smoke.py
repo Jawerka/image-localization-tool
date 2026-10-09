@@ -211,10 +211,12 @@ def test_keyboard_open_translate_and_hotkeys(page):
 
 @pytest.mark.ui
 def test_style_network_and_batch_panels(page):
-    """Вкладка стиля, раздел сети и панель прогона."""
-    page.locator("#tab-style").click()
-    expect(page.locator("#panel-style")).to_be_visible()
-    expect(page.locator("#panel-style")).to_contain_text("Регион не выбран")
+    """Вкладки инспектора, раздел сети и панель прогона."""
+    expect(page.locator("#tab-text")).to_be_visible()
+    expect(page.locator("#tab-page")).to_be_visible()
+    expect(page.locator("#tab-style")).to_have_count(0)
+    page.locator("#tab-page").click()
+    expect(page.locator("#panel-page")).to_be_visible()
 
     page.locator("button.btn-icon[data-role='settings']").click()
     page.locator("#nav-network").click()

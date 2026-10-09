@@ -70,6 +70,8 @@ def test_marked_page_is_scaled_and_prompt_uses_zero_to_thousand():
     assert "2 (blue): [520, 0, 720, 400]" in prompt
     assert "0-1000" in prompt
     assert "Do not renumber" in prompt
+    assert "even if ALL CAPS" in prompt
+    assert "not ordinary balloon speech" in prompt
 
 
 def test_neighbors_get_different_colors_and_far_boxes_reuse():
@@ -203,6 +205,15 @@ def test_single_region_is_read_from_crop():
     VlmOcr(client).recognize(image, [region])
     assert client.page_prompts == []
     assert region.text == "CREEK"
+    assert region.block_type == "dialogue"
+
+
+def test_free_crop_may_stay_sfx():
+    image = Image.new("RGB", (80, 80), "white")
+    region = _region(8, (10, 10, 40, 40), bubble=False)
+    client = _Client(pages=[], crops=[_crop("BOOM", "sfx")])
+    VlmOcr(client).recognize(image, [region])
+    assert region.text == "BOOM"
     assert region.block_type == "sfx"
 
 
