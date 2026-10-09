@@ -166,6 +166,11 @@ export function fontList() {
   return request("GET", "/api/fonts");
 }
 
+/** URL файла шрифта для ``@font-face``. */
+export function fontFileUrl(fontId) {
+  return `/api/fonts/${encodeURIComponent(String(fontId || ""))}/file`;
+}
+
 export function projectStyles() {
   return request("GET", "/api/project/styles");
 }

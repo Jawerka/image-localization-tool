@@ -97,6 +97,18 @@
   display: block;
 }
 
+.style-chips,
+.warp-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 6px 0;
+}
+
+.select--font option {
+  font-size: 14px;
+}
+
 .curtain {
   position: absolute;
   top: 0;

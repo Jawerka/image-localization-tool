@@ -486,7 +486,7 @@ def _layer_pad(width: int, height: int, stroke: int, style: TextStyle) -> int:
             pad += int(math.ceil(amount * height / max(0.05, 1.0 - 2.0 * amount))) + 4
         else:
             pad += height * 2
-    elif kind == "wave" and amount > 0:
+    elif kind in ("wave", "flag") and amount > 0:
         pad += int(math.ceil(amount * max(width, height) * 0.08)) + 4
     elif kind in ("ring", "perspective", "mesh"):
         pad += int(0.2 * max(width, height)) + 4

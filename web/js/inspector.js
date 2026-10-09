@@ -1,6 +1,6 @@
 /* Инспектор региона и страницы. Текст уходит на сервер после паузы. */
 
-import { fontList, getPage, pageAction, previewRegion, projectStyles, resetPage, sfxRestyle } from "./api.js";
+import { fontFileUrl, fontList, getPage, pageAction, previewRegion, projectStyles, resetPage, sfxRestyle } from "./api.js";
 import { confirm } from "./dialogs.js";
 import {
   applyDetail,
@@ -54,9 +54,35 @@ export function init() {
   });
   tabsRoot.querySelector("[role='tablist']").addEventListener("keydown", onTabKey);
   document.querySelector("[data-role='add-region']").addEventListener("click", addRegion);
-  fontList().then((data) => patch({ fonts: (data && data.fonts) || [] })).catch(() => patch({ fonts: [] }));
+  fontList().then((data) => {
+    const fonts = (data && data.fonts) || [];
+    injectFontFaces(fonts);
+    patch({ fonts });
+  }).catch(() => patch({ fonts: [] }));
   subscribe(render);
   render(getState());
+}
+
+/** Подключить ``@font-face`` для списка шрифтов (имена в select своим начертанием). */
+function injectFontFaces(fonts) {
+  const id = "ilt-font-faces";
+  let style = document.getElementById(id);
+  if (!style) {
+    style = document.createElement("style");
+    style.id = id;
+    document.head.appendChild(style);
+  }
+  const rules = [];
+  for (const font of fonts) {
+    const fontId = font && font.id != null ? String(font.id) : "";
+    if (!fontId) continue;
+    const family = `ilt-font-${fontId.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+    font._cssFamily = family;
+    rules.push(
+      `@font-face{font-family:"${family}";src:url("${fontFileUrl(fontId)}");font-display:swap;}`
+    );
+  }
+  style.textContent = rules.join("\n");
 }
 
 function showTab(name) {
@@ -140,9 +166,13 @@ function renderRegions(state, page) {
     list.querySelectorAll("[data-card-warp]").forEach((button) => {
       button.addEventListener("click", () => onCardWarp(button));
     });
+    list.querySelectorAll("[data-card-style]").forEach((button) => {
+      button.addEventListener("click", () => onCardStyle(button));
+    });
     list.querySelectorAll("[data-font-nav]").forEach((button) => {
       button.addEventListener("click", () => onFontNav(button));
     });
+    syncFontSelectFaces(list);
     if (regionId && field) {
       const next = list.querySelector(`[data-region-id="${cssEscape(regionId)}"] [data-field="${field}"]`);
       if (next) {
@@ -543,7 +573,9 @@ function cardStyleMarkup(region, state) {
       const id = font && font.id != null ? String(font.id) : "";
       const label = (font && (font.family || font.id)) || id;
       const selected = id === String(fontId) ? " selected" : "";
-      return `<option value="${escapeAttr(id)}"${selected}>${escapeText(label)}</option>`;
+      const family = font && font._cssFamily ? font._cssFamily : "";
+      const face = family ? ` style="font-family:'${escapeAttr(family)}'"` : "";
+      return `<option value="${escapeAttr(id)}"${selected}${face}>${escapeText(label)}</option>`;
     }))
     .join("");
   const fill = rgbToHex(region.style?.fill_rgb);
@@ -556,11 +588,21 @@ function cardStyleMarkup(region, state) {
     const pressed = choice === id ? "true" : "false";
     return `<button type="button" class="btn btn-ghost" data-card-warp="${id}" aria-pressed="${pressed}">${escapeText(label)}</button>`;
   }).join("");
+  const library = Array.isArray(state.styleLibrary) ? state.styleLibrary : [];
+  const styleChips = library.length
+    ? `<details class="region-card__styles" open>
+        <summary>Стили проекта</summary>
+        <div class="style-chips" role="group" aria-label="Стили проекта">${library.map((item, index) => {
+          const name = (item && item.name) || `Стиль ${index + 1}`;
+          return `<button type="button" class="btn btn-ghost" data-card-style="${index}">${escapeText(name)}</button>`;
+        }).join("")}</div>
+      </details>`
+    : "";
   return `<div class="region-card__style">
     <label class="field" for="font-id-${escapeAttr(region.id)}">Шрифт
       <div class="num-field" data-role="font-family-field">
         <button type="button" class="btn btn-ghost num-field__btn" data-font-nav="-1" aria-label="Предыдущий шрифт">←</button>
-        <select id="font-id-${escapeAttr(region.id)}" class="select" data-field="font_id">${fontOptions}</select>
+        <select id="font-id-${escapeAttr(region.id)}" class="select select--font" data-field="font_id">${fontOptions}</select>
         <button type="button" class="btn btn-ghost num-field__btn" data-font-nav="1" aria-label="Следующий шрифт">→</button>
       </div>
     </label>
@@ -582,6 +624,7 @@ function cardStyleMarkup(region, state) {
         </span>
       </label>
     </details>
+    ${styleChips}
   </div>`;
 }
 
@@ -590,10 +633,8 @@ function warpChoice(warp) {
   const bend = Number(warp && warp.bend);
   const value = Number.isFinite(bend) ? bend : 0;
   if (kind === "arc") return value >= 0 ? "arc-up" : "arc-down";
-  if (kind === "wave") {
-    if (Math.abs(value) < 0.25 && value !== 0) return "flag";
-    return "wave";
-  }
+  if (kind === "wave") return "wave";
+  if (kind === "flag") return "flag";
   if (kind === "ring" || kind === "perspective" || kind === "mesh" || kind === "none") return kind;
   return "none";
 }
@@ -638,8 +679,8 @@ function applyCardWarp(region, preset) {
     warp.kind = "wave";
     warp.bend = 0.35;
   } else if (preset === "flag") {
-    warp.kind = "wave";
-    warp.bend = 0.15;
+    warp.kind = "flag";
+    warp.bend = current === 0 ? 0.25 : current;
   } else if (preset === "perspective") {
     warp.kind = "perspective";
     warp.quad = Array.isArray(warp.quad) && warp.quad.length === 4 ? warp.quad : defaultQuadPoints(bw, bh);
@@ -678,6 +719,52 @@ function onCardWarp(button) {
     region.edited = true;
     region.style = { ...(region.style || {}) };
     applyCardWarp(region, preset);
+  });
+}
+
+function onCardStyle(button) {
+  const cardNode = button.closest("[data-region-id]");
+  const id = cardNode?.dataset.regionId;
+  const index = Number(button.dataset.cardStyle);
+  const library = getState().styleLibrary || [];
+  const preset = library[index];
+  if (!id || !preset || !preset.style || typeof preset.style !== "object") return;
+  editDocument((document) => {
+    const region = findRegion(document, id);
+    if (!region) return;
+    region.edited = true;
+    region.style = applyProjectStyle(region.style || {}, preset.style);
+  });
+}
+
+/** Наложить сохранённый стиль проекта на стиль региона. */
+function applyProjectStyle(current, incoming) {
+  const next = { ...(current || {}) };
+  for (const [key, value] of Object.entries(incoming || {})) {
+    if (value == null) continue;
+    if (key === "warp" && typeof value === "object") {
+      next.warp = { ...(next.warp || {}), ...value };
+      continue;
+    }
+    next[key] = value;
+  }
+  return next;
+}
+
+function syncFontSelectFaces(root) {
+  const fonts = getState().fonts || [];
+  const byId = new Map(fonts.map((font) => [String(font.id), font]));
+  root.querySelectorAll("select[data-field='font_id']").forEach((select) => {
+    const current = byId.get(String(select.value));
+    if (current && current._cssFamily) {
+      select.style.fontFamily = `'${current._cssFamily}'`;
+    } else {
+      select.style.fontFamily = "";
+    }
+    [...select.options].forEach((option) => {
+      const font = byId.get(String(option.value));
+      if (font && font._cssFamily) option.style.fontFamily = `'${font._cssFamily}'`;
+    });
   });
 }
 

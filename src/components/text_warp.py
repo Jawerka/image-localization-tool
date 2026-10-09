@@ -27,6 +27,7 @@ def warp_image(
       ``bend`` — доля высоты (обычно −1..1);
     - ``ring`` — кольцевой изгиб вокруг центра;
     - ``wave`` — синусоидальный сдвиг по горизонтали и вертикали;
+    - ``flag`` — одноосный «флаг»: вертикальный сдвиг по горизонтальной фазе;
     - ``perspective`` — ``quad`` из 4 точек назначения ``[x, y]`` в порядке
       TL, TR, BR, BL. В них переходят углы исходного прямоугольника
       ``(0, 0), (w-1, 0), (w-1, h-1), (0, h-1)``. Холст остаётся того же размера;
@@ -55,6 +56,9 @@ def warp_image(
     if key == "wave":
         map_x, map_y = build_remap("wave", height, width, bend)
         return _remap(image, map_x, map_y)
+    if key == "flag":
+        map_x, map_y = build_remap("flag", height, width, bend)
+        return _remap(image, map_x, map_y)
     if key == "perspective":
         return _warp_perspective(image, quad)
     if key == "mesh":
@@ -70,7 +74,7 @@ def build_remap(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Обратные карты ``map_x``, ``map_y`` формы ``(height, width)``, ``float32``.
 
-    Для ``arc``, ``ring`` и ``wave`` при ``bend == 0`` карты совпадают с
+    Для ``arc``, ``ring``, ``wave`` и ``flag`` при ``bend == 0`` карты совпадают с
     координатной сеткой. Остальные виды дают тождественные карты.
     """
     height = int(height)
@@ -87,6 +91,8 @@ def build_remap(
         pair = _map_ring(height, width, amount)
     elif key == "wave":
         pair = _map_wave(height, width, amount)
+    elif key == "flag":
+        pair = _map_flag(height, width, amount)
     else:
         pair = _identity_maps(height, width)
     return _finite_maps(*pair)
@@ -177,6 +183,18 @@ def _map_wave(height: int, width: int, bend: float) -> tuple[np.ndarray, np.ndar
     amp_x = np.float32(bend) * np.float32(width) * np.float32(0.08)
     amp_y = np.float32(bend) * np.float32(height) * np.float32(0.08)
     map_x = map_x - amp_x * np.sin(phase_y)
+    map_y = map_y - amp_y * np.sin(phase_x)
+    return map_x, map_y
+
+
+def _map_flag(height: int, width: int, bend: float) -> tuple[np.ndarray, np.ndarray]:
+    """Одноосный флаг: только Y сдвигается по фазе X. ``bend == 0`` — тождество."""
+    map_x, map_y = _identity_maps(height, width)
+    if bend == 0.0 or height < 2 or width < 2:
+        return map_x, map_y
+    xs = np.arange(width, dtype=np.float32)[None, :]
+    phase_x = xs * (np.float32(2.0 * np.pi) / np.float32(max(width - 1, 1)))
+    amp_y = np.float32(bend) * np.float32(height) * np.float32(0.12)
     map_y = map_y - amp_y * np.sin(phase_x)
     return map_x, map_y
 

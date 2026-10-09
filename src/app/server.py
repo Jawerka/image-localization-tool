@@ -49,6 +49,7 @@ _PAGE_IMAGE = re.compile(r"^/api/pages/([^/]+)/image/([^/]+)$")
 _PAGE_PREVIEW = re.compile(r"^/api/pages/([^/]+)/preview-region$")
 _PAGE_SFX = re.compile(r"^/api/pages/([^/]+)/regions/([^/]+)/sfx-style$")
 _FONT_PREVIEW = re.compile(r"^/api/fonts/([^/]+)/preview$")
+_FONT_FILE = re.compile(r"^/api/fonts/([^/]+)/file$")
 
 _CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8",
@@ -592,6 +593,10 @@ def _api(state: AppState, method: str, path: str, body: dict, query: dict | None
     if matched:
         _need_method(method, "GET")
         return _font_preview(unquote(matched.group(1)), query or {})
+    matched = _FONT_FILE.fullmatch(path)
+    if matched:
+        _need_method(method, "GET")
+        return _font_file(unquote(matched.group(1)))
     matched = _PAGE_PREVIEW.fullmatch(path)
     if matched:
         _need_method(method, "POST")
@@ -1383,6 +1388,32 @@ def _font_preview(font_id: str, query: dict) -> _Result:
         logger.exception("Образец шрифта")
         raise _HttpError(400, "Не удалось нарисовать образец") from exc
     return _Result(body=png, content_type="image/png")
+
+
+def _font_file(font_id: str) -> _Result:
+    """Отдать файл шрифта для ``@font-face`` в инспекторе."""
+    from pathlib import Path
+
+    from src.components.font_catalog import find_font
+
+    face = find_font(font_id, _font_faces_cached())
+    if face is None:
+        raise _HttpError(404, "Шрифт не найден")
+    path = Path(str(face.path))
+    if not path.is_file():
+        raise _HttpError(404, "Файл шрифта не найден")
+    suffix = path.suffix.lower()
+    types = {
+        ".ttf": "font/ttf",
+        ".otf": "font/otf",
+        ".woff": "font/woff",
+        ".woff2": "font/woff2",
+    }
+    try:
+        body = path.read_bytes()
+    except OSError as exc:
+        raise _HttpError(400, "Не удалось прочитать шрифт") from exc
+    return _Result(body=body, content_type=types.get(suffix, "application/octet-stream"))
 
 
 def _render_font_png(path: str, text: str) -> bytes:

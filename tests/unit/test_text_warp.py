@@ -206,3 +206,21 @@ def test_arc_raises_midline_not_sideways():
     ink_cols = np.where(warped[:, :, 0] > 0)[1]
     assert ink_cols.min() <= 2
     assert ink_cols.max() >= width - 3
+
+
+def test_flag_differs_from_wave():
+    """Флаг — одноосный; волна двигает и X, и Y."""
+    image = _gradient(48, 64, channels=4)
+    flag = warp_image(image, "flag", bend=0.5)
+    wave = warp_image(image, "wave", bend=0.5)
+    assert not np.array_equal(flag, wave)
+    map_fx, map_fy = build_remap("flag", 48, 64, bend=0.5)
+    map_wx, map_wy = build_remap("wave", 48, 64, bend=0.5)
+    xs = np.arange(64, dtype=np.float32)[None, :]
+    # Flag не двигает X; wave двигает.
+    assert float(np.max(np.abs(map_fx - xs))) < 1e-3
+    assert float(np.max(np.abs(map_wx - xs))) > 0.5
+    assert float(np.max(np.abs(map_fy - map_wy))) > 0.5
+    assert np.array_equal(warp_image(image, "flag", bend=0.0), image) or int(
+        np.abs(warp_image(image, "flag", bend=0.0).astype(np.int16) - image.astype(np.int16)).max()
+    ) <= 2
