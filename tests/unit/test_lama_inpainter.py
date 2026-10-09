@@ -5,11 +5,13 @@ from PIL import Image
 
 from src.components.lama_inpainter import (
     LamaInpainter,
+    _EDGE_FEATHER_PX,
     _LAMA_MASK_DILATE,
     _RING_INK_DISTANCE,
     _RING_INLIER_RATIO,
     _TILE,
     _ceil_mod,
+    _edge_alpha,
     _window_bounds,
 )
 
@@ -18,6 +20,50 @@ def test_ring_and_mask_dilation_are_tight():
     assert _LAMA_MASK_DILATE <= 3
     assert _RING_INK_DISTANCE == 40.0
     assert _RING_INLIER_RATIO == 0.85
+    assert _EDGE_FEATHER_PX >= 1
+
+
+def test_edge_alpha_zero_feather_is_hard_mask():
+    hole = np.zeros((20, 20), dtype=np.uint8)
+    hole[5:15, 5:15] = 255
+    alpha = _edge_alpha(hole, 0)
+    assert alpha.dtype == np.float32
+    assert float(alpha[10, 10]) == 1.0
+    assert float(alpha[0, 0]) == 0.0
+    assert float(alpha[5, 5]) == 1.0
+
+
+def test_edge_alpha_ramps_from_border_to_core():
+    hole = np.zeros((40, 40), dtype=np.uint8)
+    hole[8:32, 8:32] = 255
+    alpha = _edge_alpha(hole, 4)
+    assert float(alpha[8, 20]) < float(alpha[12, 20]) <= float(alpha[20, 20])
+    assert float(alpha[20, 20]) == 1.0
+
+
+def test_paste_component_soft_blends_edge_and_keeps_core():
+    image = np.zeros((30, 30, 3), dtype=np.uint8)
+    image[:] = (0, 0, 0)
+    component = np.zeros((30, 30), dtype=np.uint8)
+    component[5:25, 5:25] = 255
+    predicted = np.full((30, 30, 3), 255, dtype=np.uint8)
+    out = LamaInpainter._paste_component(image, component, predicted, 0, 0, feather_px=4)
+    # Ядро — почти полностью predicted.
+    assert int(out[15, 15, 0]) >= 250
+    # У края дырки — смесь с чёрным оригиналом.
+    edge = int(out[5, 15, 0])
+    assert 0 < edge < 255
+
+
+def test_paste_component_feather_zero_is_hard_replace():
+    image = np.zeros((20, 20, 3), dtype=np.uint8)
+    component = np.zeros((20, 20), dtype=np.uint8)
+    component[4:16, 4:16] = 255
+    predicted = np.full((20, 20, 3), 200, dtype=np.uint8)
+    out = LamaInpainter._paste_component(image, component, predicted, 0, 0, feather_px=0)
+    assert int(out[10, 10, 0]) == 200
+    assert int(out[4, 10, 0]) == 200
+    assert int(out[0, 0, 0]) == 0
 
 
 def test_lama_mask_dilation_does_not_reach_far_neighbor():

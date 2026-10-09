@@ -40,6 +40,7 @@ _TILE_OVERLAP = 192
 _RING_KERNEL = 7
 _HALO_KERNEL = 7
 _LAMA_MASK_DILATE = 3
+_EDGE_FEATHER_PX = 4
 _RING_INK_DISTANCE = 40.0
 _RING_INLIER_DISTANCE = 30.0
 _RING_INLIER_RATIO = 0.85
@@ -84,6 +85,21 @@ def _feather(height: int, width: int, fade: int) -> np.ndarray:
     wx[:fade] = ramp
     wx[-fade:] = ramp[::-1]
     return wy[:, None] * wx[None, :]
+
+
+def _edge_alpha(hole: np.ndarray, feather_px: float | int) -> np.ndarray:
+    """Вес вклейки внутри дырки: 1 в ядре, 0 у края (distance transform).
+
+    ``feather_px <= 0`` — жёсткая маска (везде 1 внутри hole).
+    """
+    mask = (np.asarray(hole) > 0).astype(np.uint8)
+    if not np.any(mask):
+        return np.zeros(mask.shape, dtype=np.float32)
+    feather = float(feather_px)
+    if feather <= 0.0:
+        return mask.astype(np.float32)
+    dist = cv2.distanceTransform(mask, cv2.DIST_L2, 3)
+    return np.clip(dist / feather, 0.0, 1.0).astype(np.float32)
 
 
 class LamaInpainter:
@@ -270,7 +286,17 @@ class LamaInpainter:
                 weight_sum[y0:y1, x0:x1][hole] += weight[hole]
         painted = crop.copy()
         hole = (component_crop > 0) & (weight_sum > 0)
-        painted[hole] = np.clip(np.round(color[hole] / weight_sum[hole, None]), 0, 255).astype(np.uint8)
+        if not np.any(hole):
+            return painted
+        combined = np.zeros_like(crop, dtype=np.float32)
+        combined[hole] = color[hole] / weight_sum[hole, None]
+        # Край дырки гасим здесь же: page-paste потом копирует уже смешанный кроп жёстко по hole.
+        alpha = _edge_alpha(component_crop, _EDGE_FEATHER_PX)
+        blend = (
+            painted.astype(np.float32) * (1.0 - alpha[..., None])
+            + combined * alpha[..., None]
+        )
+        painted[hole] = np.clip(np.round(blend[hole]), 0, 255).astype(np.uint8)
         return painted
 
     def _lama_crop(
@@ -287,9 +313,10 @@ class LamaInpainter:
         crop_mask = lama_mask[y0:y1, x0:x1]
         if max(crop.shape[0], crop.shape[1]) <= _LAMA_LIMIT:
             predicted = self._lama_forward(crop, crop_mask)
-        else:
-            predicted = self._lama_tiles(crop, crop_mask, component[y0:y1, x0:x1])
-        return self._paste_component(image, component, predicted, y0, x0)
+            return self._paste_component(image, component, predicted, y0, x0)
+        predicted = self._lama_tiles(crop, crop_mask, component[y0:y1, x0:x1])
+        # Тайлы уже смягчили край относительно crop — на страницу копируем без второго feather.
+        return self._paste_component(image, component, predicted, y0, x0, feather_px=0)
 
     def _opencv_window(
         self,
@@ -318,13 +345,30 @@ class LamaInpainter:
         predicted: np.ndarray,
         y0: int,
         x0: int,
+        feather_px: float | int | None = None,
     ) -> np.ndarray:
-        """Вклеить только пиксели текущей компоненты, не соседние дыры окна."""
+        """Вклеить компоненту с feather у края (α из distance transform).
+
+        ``feather_px is None`` — ``_EDGE_FEATHER_PX``; ``0`` — жёсткая замена.
+        Для кропа из ``_lama_tiles`` (уже смягчённого) передаём ``feather_px=0``.
+        """
         y1 = y0 + predicted.shape[0]
         x1 = x0 + predicted.shape[1]
         destination = image.copy()
         patch = destination[y0:y1, x0:x1]
-        hole = component[y0:y1, x0:x1] > 0
-        patch[hole] = predicted[hole]
+        hole_mask = component[y0:y1, x0:x1] > 0
+        if not np.any(hole_mask):
+            return destination
+        fade = _EDGE_FEATHER_PX if feather_px is None else feather_px
+        alpha = _edge_alpha(hole_mask, fade)
+        use = hole_mask & (alpha > 0)
+        if not np.any(use):
+            return destination
+        blended = (
+            patch.astype(np.float32) * (1.0 - alpha[..., None])
+            + predicted.astype(np.float32) * alpha[..., None]
+        )
+        patch = patch.copy()
+        patch[use] = np.clip(np.round(blended[use]), 0, 255).astype(np.uint8)
         destination[y0:y1, x0:x1] = patch
         return destination
