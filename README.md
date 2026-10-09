@@ -171,6 +171,15 @@ python scripts\build-extension.py
 
 Проверка каталога сборки: `python scripts\smoke_dist.py`.
 
+Деплой:
+
+```powershell
+.\scripts\deploy-windows.ps1              # mirror dist -> apps (без models)
+.\scripts\deploy-windows.ps1 -Build -SkipInno
+.\scripts\deploy-lan.ps1                  # src/web -> CT113, restart ilt.service
+.\scripts\deploy-lan.ps1 -DryRun
+```
+
 **Headless на домашнем ПК / в LAN:** соберите или запустите из исходников `python -m src.app --headless --remote`, откройте порт 8765 в брандмауэре для частной сети, сопрягите расширение или клиент по `/v1`. Не выставляйте слушатель в интернет без дополнительной защиты — протокол без шифрования, рассчитан на локальную сеть.
 
 ## Тесты
@@ -178,6 +187,7 @@ python scripts\build-extension.py
 ```powershell
 python -m pytest tests/ -v -m "not slow and not ui"
 python -m pytest tests/e2e/test_ui_smoke.py -v -m ui
+# CI: pytest tests/unit -m "not slow and not ui and not requires_llm and not requires_argos"
 ```
 
 Маркеры: `slow`, `ui`, `requires_argos`, `requires_llm`.
