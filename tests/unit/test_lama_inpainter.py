@@ -109,10 +109,29 @@ def test_lama_crop_mask_includes_the_whole_window():
     inpainter._model = FakeLama()
     inpainter.inpaint(Image.fromarray(image), mask)
     assert len(seen) == 2
+    assert inpainter.last_warnings == []
     for item in seen:
         crop_mask = item[0, 0]
         assert crop_mask[40:70, 40:90].mean() > 0.9
         assert crop_mask[40:70, 110:160].mean() > 0.9
+
+
+def test_lama_failure_records_opencv_fallback_warning():
+    """Шумный фон не даёт плоскую заливку; падение LaMa → OpenCV + warning."""
+    rng = np.random.default_rng(4)
+    image = rng.integers(0, 256, size=(120, 160, 3), dtype=np.uint8)
+    mask = np.zeros((120, 160), dtype=np.uint8)
+    mask[40:80, 40:120] = 255
+
+    inpainter = LamaInpainter(device="cpu")
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("lama boom")
+
+    inpainter._lama_crop = fail
+    result = inpainter.inpaint(Image.fromarray(image), mask)
+    assert result.size == (160, 120)
+    assert any("OpenCV" in note and "LaMa" in note for note in inpainter.last_warnings)
 
 
 def _stub_sizes():

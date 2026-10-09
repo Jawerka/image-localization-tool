@@ -740,11 +740,16 @@ class PagePipeline:
                 force_opencv=self.config.inpainter_backend == "opencv",
             )
         try:
-            return self.inpainter.inpaint(image, mask, allow_flat_fill=allow_flat_fill)
+            cleaned = self.inpainter.inpaint(image, mask, allow_flat_fill=allow_flat_fill)
         except Exception as exc:
             logger.warning(f"Inpaint failed: {exc}")
             warnings.append(f"Очистка не удалась: {exc}")
             return image
+        for note in getattr(self.inpainter, "last_warnings", None) or []:
+            text = str(note)
+            if text and text not in warnings:
+                warnings.append(text)
+        return cleaned
 
     def _typeset(
         self,

@@ -90,6 +90,8 @@ class LamaInpainter:
         self.model_path = Path(model_path) if model_path else resolve_model("anime-manga-big-lama.pt")
         self.device = resolve_device(device)
         self.force_opencv = force_opencv
+        # Предупреждения последнего ``inpaint`` (неожиданный фолбэк на OpenCV).
+        self.last_warnings: list[str] = []
         self.uniform_std = uniform_std
         self._model = None
 
@@ -104,6 +106,7 @@ class LamaInpainter:
         ``allow_flat_fill=False`` пропускает однотонную заливку. Дальше тот же
         путь: LaMa, либо OpenCV, если включён ``force_opencv``.
         """
+        self.last_warnings = []
         rgb = np.array(image.convert("RGB"))
         binary = (mask > 0).astype(np.uint8) * 255
         if binary.shape[:2] != rgb.shape[:2] or not np.any(binary):
@@ -134,6 +137,9 @@ class LamaInpainter:
                 result = self._lama_crop(result, component, lama_mask)
             except Exception as exc:
                 logger.warning(f"LaMa fallback to OpenCV: {exc}")
+                note = f"Очистка переключена на OpenCV (LaMa недоступна): {exc}"
+                if note not in self.last_warnings:
+                    self.last_warnings.append(note)
                 result = self._opencv_window(result, component, lama_mask)
         return Image.fromarray(result)
 

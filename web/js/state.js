@@ -460,8 +460,24 @@ export function applyDetail(pageId, data, keepLocal, force = false) {
   if (state.activePageId === id) {
     state = { ...state, document };
     syncHistoryFlags();
+    showPipelineWarnings(document);
   }
   emit();
+}
+
+/** Баннер по предупреждениям пайплайна (фолбэки OCR/перевод/очистка). */
+function showPipelineWarnings(document) {
+  const warnings = Array.isArray(document?.warnings)
+    ? [...new Set(document.warnings.map(String).filter(Boolean))]
+    : [];
+  if (!warnings.length) {
+    setBanner("pipeline", null);
+    return;
+  }
+  setBanner("pipeline", {
+    tone: "warning",
+    text: warnings.join(" · "),
+  });
 }
 
 export function isDirty(pageId) {
