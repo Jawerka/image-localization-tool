@@ -1,0 +1,8 @@
+{
+  "name": "image-localization-tool",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:js": "node --test tests/js/**/*.mjs"
+  }
+}

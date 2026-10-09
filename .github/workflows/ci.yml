@@ -32,3 +32,19 @@ jobs:
           -m "not slow and not ui and not requires_llm and not requires_argos"
           -q
           --tb=short
+
+  frontend:
+    name: Frontend unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run JS unit tests
+        run: npm run test:js

@@ -44,3 +44,5 @@ def test_ci_workflow_runs_filtered_unit_tests():
     assert "not requires_llm" in text
     assert "not requires_argos" in text
     assert "pull_request" in text
+    assert "npm run test:js" in text
+    assert "Frontend unit tests" in text

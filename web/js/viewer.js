@@ -1,6 +1,7 @@
 /* Просмотрщик: масштаб, шторка, рамки, кисть и ластик. */
 
 import { imageUrl } from "./api.js";
+import { maskDraftAction, paintStrokeOnMask } from "./mask_draft.js";
 import {
   blankRegion,
   clampBox,
@@ -338,7 +339,14 @@ function syncMaskDraft(state, page) {
     return;
   }
   if (!natural.w || !natural.h) return;
-  if (state.deferredApply) {
+  const busy = !isReadyStatus(page.status) || isDirty(pageId);
+  const action = maskDraftAction({
+    deferredApply: state.deferredApply,
+    pageId,
+    draftPageId: maskDraft?.pageId || "",
+    pageBusy: busy,
+  });
+  if (action === "paint") {
     if (!maskDraft || maskDraft.pageId !== pageId) {
       maskDraft = { pageId, waitingServer: false };
     } else {
@@ -347,14 +355,11 @@ function syncMaskDraft(state, page) {
     paintLocalMask(state.document?.strokes || []);
     return;
   }
-  if (maskDraft && maskDraft.pageId === pageId) {
-    const busy = !isReadyStatus(page.status) || isDirty(pageId);
-    if (busy) {
-      maskDraft.waitingServer = true;
-      maskLocal.hidden = false;
-      frame.classList.add("frame--mask-draft");
-      return;
-    }
+  if (action === "wait") {
+    maskDraft.waitingServer = true;
+    maskLocal.hidden = false;
+    frame.classList.add("frame--mask-draft");
+    return;
   }
   clearMaskDraft();
 }
@@ -384,36 +389,6 @@ function paintLocalMask(strokes) {
   for (const stroke of strokes) paintStrokeOnMask(ctx, stroke);
   maskLocal.hidden = false;
   frame.classList.add("frame--mask-draft");
-}
-
-/** Как ``apply_strokes`` в text_segmenter: линия thickness=2r, круги радиуса r. */
-function paintStrokeOnMask(ctx, stroke) {
-  const radius = Math.max(1, Math.round(Number(stroke.radius) || 1));
-  const points = Array.isArray(stroke.points) ? stroke.points : [];
-  if (!points.length) return;
-  const color = stroke.mode === "erase" ? "#000000" : "#ffffff";
-  ctx.fillStyle = color;
-  ctx.strokeStyle = color;
-  ctx.lineWidth = Math.max(1, radius * 2);
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-  if (points.length === 1) {
-    ctx.beginPath();
-    ctx.arc(Number(points[0][0]) || 0, Number(points[0][1]) || 0, radius, 0, Math.PI * 2);
-    ctx.fill();
-    return;
-  }
-  ctx.beginPath();
-  ctx.moveTo(Number(points[0][0]) || 0, Number(points[0][1]) || 0);
-  for (let index = 1; index < points.length; index += 1) {
-    ctx.lineTo(Number(points[index][0]) || 0, Number(points[index][1]) || 0);
-  }
-  ctx.stroke();
-  for (const point of points) {
-    ctx.beginPath();
-    ctx.arc(Number(point[0]) || 0, Number(point[1]) || 0, radius, 0, Math.PI * 2);
-    ctx.fill();
-  }
 }
 
 function showResultGap(on) {

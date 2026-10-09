@@ -339,6 +339,19 @@ def test_field_center_and_bbox_mesh_mapping():
     assert mapped == [[20.0, 20.0], [180.0, 100.0]]
 
 
+def test_rotate_layer_uses_explicit_pivot():
+    """Явный pivot даёт другую точку назначения, чем поворот вокруг центра кадра."""
+    from src.components.typesetter import _rotate_layer
+
+    layer = Image.new("RGBA", (20, 10), (0, 0, 0, 0))
+    point = (19.0, 5.0)
+    around_origin, moved_origin = _rotate_layer(layer, 45.0, point, pivot=(0.0, 0.0))
+    around_center, moved_center = _rotate_layer(layer, 45.0, point, pivot=None)
+    assert around_origin.size[0] >= 10
+    assert around_center.size[0] >= 10
+    assert moved_origin != moved_center
+
+
 def test_short_reply_cap_follows_neighbors():
     from src.components.typesetter import _short_reply_cap
 
