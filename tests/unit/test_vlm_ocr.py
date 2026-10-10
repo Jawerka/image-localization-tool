@@ -87,7 +87,7 @@ def test_neighbors_get_different_colors_and_far_boxes_reuse():
     assert colors[3][0] == colors[1][0]
 
 
-def test_bubble_and_free_text_go_to_separate_passes():
+def test_bubble_page_pass_and_free_text_crops():
     image = Image.new("RGB", (200, 200), "white")
     regions = [
         _region(1, (0, 0, 40, 40), bubble=True),
@@ -96,19 +96,35 @@ def test_bubble_and_free_text_go_to_separate_passes():
         _region(4, (80, 120, 40, 40)),
     ]
     client = _Client(
-        pages=[
-            _page([_block(1, "B1"), _block(2, "B2")]),
-            _page([_block(3, "F1"), _block(4, "F2")]),
-        ],
+        pages=[_page([_block(1, "B1"), _block(2, "B2")])],
         crops=[_crop("B1"), _crop("B2"), _crop("F1"), _crop("F2")],
     )
     ocr = VlmOcr(client)
     direction, recognized = ocr.recognize(image, regions)
     assert direction == "ltr"
+    assert len(client.page_prompts) == 1
     assert client.crop_calls == 4
     assert "3 (" not in client.page_prompts[0]
-    assert "1 (" not in client.page_prompts[1]
     assert [region.text for region in recognized] == ["B1", "B2", "F1", "F2"]
+    assert ocr.warnings == []
+
+
+def test_free_text_is_crop_only_no_page_pass():
+    image = Image.new("RGB", (200, 80), "white")
+    regions = [
+        _region(3, (0, 0, 40, 40)),
+        _region(4, (80, 0, 40, 40)),
+    ]
+    client = _Client(
+        pages=[],
+        crops=[_crop("F1", "sign"), _crop("F2", "narration")],
+    )
+    ocr = VlmOcr(client)
+    direction, recognized = ocr.recognize(image, regions)
+    assert direction == "ltr"
+    assert client.page_prompts == []
+    assert client.crop_calls == 2
+    assert [region.text for region in recognized] == ["F1", "F2"]
     assert ocr.warnings == []
 
 
@@ -128,7 +144,6 @@ def test_shifted_ids_reread_only_the_broken_pass():
                 _block(2, "ALPHA"),
                 _block(3, "BRAVO"),
             ]),
-            _page([_block(4, "FREE1"), _block(5, "FREE2")]),
         ],
         crops=[
             _crop("ALPHA"),
@@ -143,6 +158,7 @@ def test_shifted_ids_reread_only_the_broken_pass():
     ocr.recognize(image, regions)
     assert [region.text for region in regions] == ["ALPHA", "BRAVO", "CHARLIE", "FREE1", "FREE2"]
     assert client.crop_calls == 6
+    assert len(client.page_prompts) == 1
     assert ocr.warnings == ["VLM перепутал номера рамок (баллоны), текст дочитан по кропам"]
 
 

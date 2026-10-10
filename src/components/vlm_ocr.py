@@ -220,9 +220,9 @@ def _texts_match(page_text: str, crop_text: str) -> bool:
 
 
 class VlmOcr:
-    """Два запроса на страницу: баллоны, затем свободный текст.
+    """Баллоны — пронумерованная страница; свободный текст — кропы.
 
-    Пустые и сомнительные боксы дочитываются по кропу.
+    У баллонов пустые и сомнительные боксы дочитываются по кропу.
     """
 
     def __init__(self, client: LlmClient, reread_confidence: float = 0.5, max_side: int = 1536):
@@ -246,10 +246,11 @@ class VlmOcr:
         direction = "ltr"
         if bubbles:
             direction = self._recognize_pass(image, bubbles, reading_order, "баллоны")
-        if free:
-            free_direction = self._recognize_pass(image, free, reading_order, "свободный текст")
-            if not bubbles:
-                direction = free_direction
+        # Свободный текст — только кропы: page-pass часто путает id.
+        for region in free:
+            self.read_crop(image, region)
+        if not bubbles and reading_order in ("ltr", "rtl"):
+            direction = reading_order
         if direction not in ("ltr", "rtl"):
             direction = "rtl" if reading_order == "rtl" else "ltr"
         assign_reading_order(regions, direction)

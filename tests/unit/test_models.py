@@ -49,6 +49,7 @@ class TestTextRegion:
         assert region.manual is False
         assert region.edited is False
         assert region.overflow is False
+        assert region.translation_locked is False
         assert region.style.font_size_override == 0
 
     def test_roundtrip_new_fields(self):
@@ -61,16 +62,19 @@ class TestTextRegion:
             manual=True,
             edited=True,
             overflow=True,
-            style=TextStyle(font_size_override=22, uppercase=True, fill_locked=True),
+            translation_locked=True,
+            style=TextStyle(font_size_override=22, uppercase=True, fill_locked=True, stroke_width=3.0),
         )
         restored = TextRegion.from_dict(region.to_dict())
         assert restored.skip is True
         assert restored.manual is True
         assert restored.edited is True
         assert restored.overflow is True
+        assert restored.translation_locked is True
         assert restored.style.font_size_override == 22
         assert restored.style.uppercase is True
         assert restored.style.fill_locked is True
+        assert restored.style.stroke_width == 3.0
 
     def test_should_translate_respects_skip(self):
         region = TextRegion(

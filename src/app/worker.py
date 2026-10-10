@@ -1098,13 +1098,17 @@ def _pipeline(ctx: _Runtime, settings: dict, *, reset_clients: bool):
     return pipe, config
 
 
-def _drawable(regions, translate_sfx: bool) -> list:
-    from src.models import should_translate
+def _drawable(regions, translate_sfx: bool = False) -> list:
+    """Регионы с текстом для вёрстки.
 
+    Ручной перевод рисуем даже при пустом OCR / «непереводном» типе.
+    ``translate_sfx`` оставлен для совместимости вызовов, на отбор не влияет.
+    """
+    del translate_sfx
     return [
         region
         for region in regions
-        if region.translation.strip() and should_translate(region, translate_sfx)
+        if region.translation.strip() and not region.skip
     ]
 
 

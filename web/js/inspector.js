@@ -22,6 +22,12 @@ import {
   clampBox,
   nextRegionId,
 } from "./state.js";
+import {
+  captureAllDetailsOpen,
+  detailsOpenFromMap,
+  inspectorContentKey,
+  shouldSkipInspectorRebuild,
+} from "./inspector_render.js";
 import { setStylePreview, viewCenter } from "./viewer.js";
 
 const TYPES = [
@@ -33,7 +39,7 @@ const TYPES = [
   ["caption", "надпись"],
 ];
 
-const SLOW = new Set(["translation", "speaker", "uppercase"]);
+const SLOW = new Set(["text", "translation", "speaker", "uppercase", "stroke_width"]);
 
 let list;
 let facts;
@@ -46,6 +52,7 @@ let previewKey = "";
 let previewToken = 0;
 let stylesProject = "";
 let sfxNote = null;
+let lastRegionsKey = "";
 
 export function init() {
   list = document.querySelector("[data-role='region-list']");
@@ -124,26 +131,37 @@ function render(state) {
 }
 
 function renderRegions(state, page) {
+  const nextKey = inspectorContentKey(state);
+  /* Skip только при полностью том же ключе (job/progress). Смена selectedRegionId — всегда rebuild. */
+  if (page && state.document && shouldSkipInspectorRebuild(lastRegionsKey, nextKey)) {
+    syncRegionSelectionClasses(state);
+    lastRegionsKey = nextKey;
+    return;
+  }
+
   const focus = document.activeElement;
   const field = focus?.dataset?.field || "";
   const regionId = focus?.closest?.("[data-region-id]")?.dataset.regionId || "";
   const start = focus?.selectionStart;
   const end = focus?.selectionEnd;
   const scroll = list.scrollTop;
-  const detailsOpen = captureDetailsOpen(list);
+  const detailsOpen = captureAllDetailsOpen(list);
   rebuilding = true;
   try {
     if (!page) {
       list.innerHTML = '<p class="inspector__empty">Откройте файлы или перетащите папку. Регионы появятся после распознавания.</p>';
+      lastRegionsKey = nextKey;
       return;
     }
     const regions = state.document?.regions || [];
     if (!state.document) {
       list.innerHTML = '<p class="inspector__empty">Страница открывается.</p>';
+      lastRegionsKey = nextKey;
       return;
     }
     if (!regions.length) {
       list.innerHTML = '<p class="inspector__empty">Нет регионов. Добавьте рамку или запустите перевод.</p>';
+      lastRegionsKey = nextKey;
       return;
     }
     list.innerHTML = regions.map((region, index) => card(region, index, state, detailsOpen)).join("");
@@ -190,32 +208,23 @@ function renderRegions(state, page) {
         if (typeof start === "number" && next.setSelectionRange) next.setSelectionRange(start, end);
       }
     }
+    lastRegionsKey = nextKey;
   } finally {
     list.scrollTop = scroll;
     rebuilding = false;
   }
 }
 
-/** Состояние ``<details>`` выбранной карточки до wipe ``innerHTML``. */
-function captureDetailsOpen(root) {
-  const cardNode = root.querySelector(".region-card--selected") || root.querySelector("[aria-current='true']");
-  if (!cardNode) return null;
-  const regionId = cardNode.dataset.regionId || "";
-  if (!regionId) return null;
-  const warp = cardNode.querySelector("details.region-card__warp");
-  const styles = cardNode.querySelector("details.region-card__styles");
-  return {
-    regionId,
-    warp: warp ? Boolean(warp.open) : null,
-    styles: styles ? Boolean(styles.open) : null,
-  };
-}
-
-function detailsOpenAttr(snapshot, regionId, key, fallbackOpen) {
-  if (snapshot && sameId(snapshot.regionId, regionId) && typeof snapshot[key] === "boolean") {
-    return snapshot[key] ? " open" : "";
-  }
-  return fallbackOpen ? " open" : "";
+/** Только классы выделения / pending без wipe. */
+function syncRegionSelectionClasses(state) {
+  if (!list) return;
+  list.querySelectorAll("[data-region-id]").forEach((cardNode) => {
+    const id = cardNode.dataset.regionId;
+    const selected = sameId(id, state.selectedRegionId);
+    cardNode.classList.toggle("region-card--selected", selected);
+    if (selected) cardNode.setAttribute("aria-current", "true");
+    else cardNode.removeAttribute("aria-current");
+  });
 }
 
 function card(region, index, state, detailsOpen = null) {
@@ -240,7 +249,7 @@ function card(region, index, state, detailsOpen = null) {
     : "";
   return `<article class="${classes.join(" ")}" data-region-id="${escapeAttr(region.id)}" aria-current="true">${head}${pending}
     <label class="field" for="orig-${escapeAttr(region.id)}">Оригинал
-      <textarea id="orig-${escapeAttr(region.id)}" class="textarea" lang="${escapeAttr(state.settings.source_lang)}" rows="2" readonly>${escapeText(region.text)}</textarea>
+      <textarea id="orig-${escapeAttr(region.id)}" class="textarea" lang="${escapeAttr(state.settings.source_lang)}" rows="2" data-field="text">${escapeText(region.text)}</textarea>
     </label>
     <label class="field" for="tr-${escapeAttr(region.id)}">Перевод
       <textarea id="tr-${escapeAttr(region.id)}" class="textarea" lang="${escapeAttr(state.settings.target_lang)}" rows="2" data-field="translation">${escapeText(region.translation)}</textarea>
@@ -357,8 +366,19 @@ function onField(input) {
     if (!region) return;
     region.edited = true;
     region.style = { ...(region.style || {}) };
-    if (field === "translation") region.translation = input.value;
+    if (field === "text") {
+      region.text = input.value;
+    }
+    if (field === "translation") {
+      region.translation = input.value;
+      region.translation_locked = Boolean(String(input.value || "").trim());
+    }
     if (field === "speaker") region.speaker = input.value;
+    if (field === "stroke_width") {
+      const width = Number(input.value);
+      region.style.stroke_width = Number.isFinite(width) && width > 0 ? width : 0;
+      if (region.style.stroke_width > 0) region.style.stroke_mode = "custom";
+    }
     if (field === "type") {
       region.type = input.value;
       region.block_type = input.value;
@@ -381,7 +401,8 @@ function onField(input) {
       if (output) output.textContent = Number(region.style.warp.bend).toFixed(2);
     }
   }, {
-    deferApply: true,
+    // Текст — сразу на сервер; стили/маска — через «Готово».
+    deferApply: field !== "text" && field !== "translation",
     debounce: slow ? 500 : 0,
     coalesce: slow ? `${field}:${id}` : "",
   });
@@ -637,6 +658,8 @@ function cardStyleMarkup(region, state, detailsOpen = null) {
     .join("");
   const fill = rgbToHex(region.style?.fill_rgb);
   const stroke = region.style?.stroke_rgb ? rgbToHex(region.style.stroke_rgb) : "#000000";
+  const strokeWidth = Number(region.style?.stroke_width);
+  const strokeWidthValue = Number.isFinite(strokeWidth) && strokeWidth > 0 ? String(Math.round(strokeWidth)) : "0";
   const warp = region.style?.warp || {};
   const bend = Number(warp.bend);
   const bendValue = Number.isFinite(bend) ? bend : 0;
@@ -646,8 +669,8 @@ function cardStyleMarkup(region, state, detailsOpen = null) {
     return `<button type="button" class="btn btn-ghost" data-card-warp="${id}" aria-pressed="${pressed}">${escapeText(label)}</button>`;
   }).join("");
   const library = Array.isArray(state.styleLibrary) ? state.styleLibrary : [];
-  const warpOpen = detailsOpenAttr(detailsOpen, region.id, "warp", true);
-  const stylesOpen = detailsOpenAttr(detailsOpen, region.id, "styles", true);
+  const warpOpen = detailsOpenFromMap(detailsOpen, region.id, "warp", true);
+  const stylesOpen = detailsOpenFromMap(detailsOpen, region.id, "styles", true);
   const styleChips = library.length
     ? `<details class="region-card__styles"${stylesOpen}>
         <summary>Стили проекта</summary>
@@ -671,6 +694,9 @@ function cardStyleMarkup(region, state, detailsOpen = null) {
       </label>
       <label class="field" for="stroke-${escapeAttr(region.id)}">Обводка
         <input id="stroke-${escapeAttr(region.id)}" type="color" data-field="stroke_rgb" value="${escapeAttr(stroke)}">
+      </label>
+      <label class="field" for="stroke-w-${escapeAttr(region.id)}" title="0 — авто по настройкам проекта">Толщина
+        <input id="stroke-w-${escapeAttr(region.id)}" type="number" min="0" max="32" step="1" data-field="stroke_width" value="${escapeAttr(strokeWidthValue)}">
       </label>
     </div>
     <details class="region-card__warp"${warpOpen}>

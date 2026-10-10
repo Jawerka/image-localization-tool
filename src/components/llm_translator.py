@@ -249,6 +249,8 @@ def _claim_sfx_dict(regions: list[TextRegion], target_lang: str) -> list[TextReg
         if region.block_type != "sfx" or not use_dict:
             pending.append(region)
             continue
+        if region.translation_locked:
+            continue
         hit = lookup(region.text)
         if not hit:
             pending.append(region)
@@ -368,6 +370,9 @@ class LlmTranslator:
                 continue
             region = by_id.get(region_id)
             if region is None:
+                continue
+            if region.translation_locked:
+                # Ручной перевод: machine не затирает text/speaker.
                 continue
             region.speaker = str(item.get("speaker") or "").strip()
             gender = str(item.get("speaker_gender") or "unknown").strip().lower()
@@ -493,6 +498,8 @@ class ArgosBlockTranslator:
         explicit = _explicit_source(source_lang)
         groups: dict[str, list[TextRegion]] = {}
         for region in regions:
+            if region.translation_locked:
+                continue
             if explicit:
                 source = explicit
             else:
@@ -518,6 +525,8 @@ class ArgosBlockTranslator:
                 self.warnings.append(f"Нет офлайн-пары {source}→{target_lang}")
                 continue
             for region, text in zip(items, translated):
+                if region.translation_locked:
+                    continue
                 region.translation = text
                 region.speaker_gender = region.speaker_gender or "unknown"
 

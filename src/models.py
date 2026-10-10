@@ -192,6 +192,7 @@ class TextRegion:
     manual: bool = False
     edited: bool = False
     overflow: bool = False
+    translation_locked: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -210,6 +211,7 @@ class TextRegion:
             "manual": self.manual,
             "edited": self.edited,
             "overflow": self.overflow,
+            "translation_locked": self.translation_locked,
             "style": self.style.to_dict(),
         }
 
@@ -233,6 +235,7 @@ class TextRegion:
             manual=bool(data.get("manual", False)),
             edited=bool(data.get("edited", False)),
             overflow=bool(data.get("overflow", False)),
+            translation_locked=bool(data.get("translation_locked", False)),
         )
 
 

@@ -215,6 +215,7 @@ function normalizeRegion(raw) {
     manual: Boolean(raw.manual),
     edited: Boolean(raw.edited),
     overflow: Boolean(raw.overflow),
+    translation_locked: Boolean(raw.translation_locked),
     style,
   };
 }
@@ -226,7 +227,11 @@ export function normalizeDocument(raw) {
     regions: Array.isArray(data.regions) ? data.regions.map(normalizeRegion) : [],
     strokes: Array.isArray(data.strokes)
       ? data.strokes.map((stroke) => ({
-        mode: stroke.mode === "erase" ? "erase" : (stroke.mode === "fill" ? "fill" : "paint"),
+        mode: stroke.mode === "erase"
+          ? "erase"
+          : (stroke.mode === "erase_fill"
+            ? "erase_fill"
+            : (stroke.mode === "fill" ? "fill" : "paint")),
         radius: Math.max(1, Number(stroke.radius) || 1),
         points: Array.isArray(stroke.points)
           ? stroke.points.map((point) => [Number(point[0]) || 0, Number(point[1]) || 0])
@@ -889,6 +894,7 @@ export function blankRegion(id, bbox) {
     manual: true,
     edited: true,
     overflow: false,
+    translation_locked: false,
     style: {
       fill_rgb: [0, 0, 0],
       stroke_rgb: null,

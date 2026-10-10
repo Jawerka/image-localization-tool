@@ -183,3 +183,33 @@ def test_english_target_skips_russian_sfx_glossary():
     assert "BANG = БАМ" not in prompt
     assert "Polivanov" not in prompt
     assert "short en onomatopoeia" in prompt
+
+
+def test_locked_translation_not_overwritten_by_llm():
+    client = _ScriptedClient([
+        {"items": [{
+            "id": 1,
+            "speaker": "Ann",
+            "speaker_gender": "female",
+            "translation": "Машинный",
+        }, {
+            "id": 2,
+            "speaker": "",
+            "speaker_gender": "unknown",
+            "translation": "Новый",
+        }]},
+    ])
+    regions = [
+        TextRegion(
+            id=1,
+            bbox=(0, 0, 10, 10),
+            text="Hello",
+            block_type="dialogue",
+            translation="Ручной",
+            translation_locked=True,
+        ),
+        TextRegion(id=2, bbox=(0, 20, 10, 10), text="End", block_type="narration"),
+    ]
+    LlmTranslator(client).translate(Image.new("RGB", (8, 8)), regions, "en", "ru")
+    assert regions[0].translation == "Ручной"
+    assert regions[1].translation == "Новый"

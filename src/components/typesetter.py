@@ -920,7 +920,11 @@ class Typesetter:
             return None, 0
         if mode == "custom":
             color = region.style.stroke_rgb if region.style.stroke_rgb is not None else (0, 0, 0)
-            width = max(1, int(round(float(region.style.stroke_width or 0.0))))
+            explicit = float(region.style.stroke_width or 0.0)
+            if explicit > 0:
+                return color, max(1, int(round(explicit)))
+            # Толщина 0 — авто ширина, цвет остаётся custom.
+            _, width = self._glyph_stroke(image_rgb, area, region, size)
             return color, width
         return self._glyph_stroke(image_rgb, area, region, size)
 
