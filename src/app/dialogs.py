@@ -25,6 +25,14 @@ class DialogBridge:
         """Папка экспорта. None — отмена."""
         return None
 
+    def open_project_package(self) -> Path | None:
+        """Портативный ``.ilt.zip``. None — отмена."""
+        return None
+
+    def save_project_package(self, default_name: str = "project.ilt.zip") -> Path | None:
+        """Куда сохранить портативный проект. None — отмена."""
+        return None
+
     def reveal(self, path: Path) -> None:
         """Показать путь в проводнике."""
         return None

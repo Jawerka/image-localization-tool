@@ -13,6 +13,7 @@ import pytest
 from src.app.desktop import (
     TITLE,
     InstanceEndpoint,
+    WebViewBridge,
     closing_allowed,
     decide_role,
     focus_window,
@@ -170,6 +171,26 @@ def test_missing_webview2_shows_message(monkeypatch):
     text, title = calls[0][1], calls[0][2]
     assert "WebView2" in text
     assert title == TITLE
+
+
+def test_webview_bridge_quit_destroys_window():
+    destroyed: list[bool] = []
+
+    class StubApp:
+        def __init__(self):
+            self.window = SimpleNamespace(destroy=lambda: destroyed.append(True))
+            self._skip_busy_close_confirm = False
+
+    app = StubApp()
+    bridge = WebViewBridge(app)  # type: ignore[arg-type]
+    bridge.quit(True)
+    assert destroyed == [True]
+    assert app._skip_busy_close_confirm is True
+
+    app2 = StubApp()
+    bridge2 = WebViewBridge(app2)  # type: ignore[arg-type]
+    bridge2.destroy()
+    assert app2._skip_busy_close_confirm is False
 
 
 def test_window_kwargs_from_settings():

@@ -777,6 +777,8 @@ class PagePipeline:
             rendered, overflow = self.typesetter.render(image, regions, force=force)
             if not overflow or force:
                 break
+            # apply_document / typeset часто идут без заранее созданного translator
+            self._prepare_translator(warnings)
             for region in regions:
                 if region.id not in overflow:
                     continue

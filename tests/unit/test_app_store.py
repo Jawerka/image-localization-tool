@@ -22,6 +22,26 @@ def test_natural_key_page2_before_page10():
     assert sorted(names, key=natural_key) == ["page1.png", "page2.png", "page10.png"]
 
 
+def test_reorder_pages_permutation(tmp_path):
+    store = ProjectStore(tmp_path)
+    project = store.create_project("Глава", "en", "ru")
+    folder = tmp_path / "pages"
+    _png(folder / "a.png")
+    _png(folder / "b.png")
+    _png(folder / "c.png")
+    added = store.add_sources(project["id"], [folder])
+    ids = [item["id"] for item in added]
+    flipped = [ids[2], ids[0], ids[1]]
+    store.reorder_pages(project["id"], flipped)
+    assert [item["id"] for item in store.open_project(project["id"])["pages"]] == flipped
+    try:
+        store.reorder_pages(project["id"], [ids[0]])
+        raised = False
+    except ValueError:
+        raised = True
+    assert raised
+
+
 def test_add_sources_thumb_duplicate_and_remove(tmp_path):
     store = ProjectStore(tmp_path)
     project = store.create_project("Глава", "en", "ru")

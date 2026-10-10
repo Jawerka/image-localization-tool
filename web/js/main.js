@@ -3,17 +3,21 @@
 import {
   bootstrap,
   cancelJobs,
+  closeProject,
   connectEvents,
   dialogFiles,
   dialogFolder,
   dialogLog,
+  dialogOpenPackage,
   dialogReveal,
+  dialogSavePackage,
   dropPaths,
   imageUrl,
   importSources,
   jobs,
   llmCheck,
   openRecent,
+  packageSave,
   pauseJobs,
   pickFolder,
   putSettings,
@@ -60,6 +64,7 @@ import {
   healDismissedBanners,
   isBannerDismissed,
   nudgeSelectedRegion,
+  setPackage,
   setProject,
   settingsForSave,
   subscribe,
@@ -102,6 +107,8 @@ function start() {
     space: setSpace,
     openFiles,
     openFolder,
+    saveProject,
+    exit: () => exitApp(),
     export: () => openExport(),
     settings: () => openSettings(),
     translatePage,
@@ -148,6 +155,10 @@ function start() {
 function bindChrome() {
   document.querySelectorAll("[data-role='open-files']").forEach((button) => button.addEventListener("click", openFiles));
   document.querySelectorAll("[data-role='open-folder']").forEach((button) => button.addEventListener("click", openFolder));
+  document.querySelectorAll("[data-role='load-project']").forEach((button) => button.addEventListener("click", loadProject));
+  document.querySelectorAll("[data-role='save-project']").forEach((button) => button.addEventListener("click", saveProject));
+  document.querySelectorAll("[data-role='save-project-as']").forEach((button) => button.addEventListener("click", saveProjectAs));
+  document.querySelectorAll("[data-role='close-project']").forEach((button) => button.addEventListener("click", closeActiveProject));
   document.querySelectorAll("[data-role='export']").forEach((button) => button.addEventListener("click", () => {
     closeMenus();
     openExport();
@@ -156,18 +167,18 @@ function bindChrome() {
     closeMenus();
     openSettings();
   }));
-  document.querySelector("[data-role='exit']").addEventListener("click", () => {
+  document.querySelectorAll("[data-role='exit']").forEach((button) => button.addEventListener("click", () => {
     closeMenus();
     exitApp();
-  });
-  document.querySelector("[data-role='hotkeys-menu']").addEventListener("click", () => {
+  }));
+  document.querySelectorAll("[data-role='hotkeys-menu']").forEach((button) => button.addEventListener("click", () => {
     closeMenus();
     openHotkeys();
-  });
-  document.querySelector("[data-role='translate-page']").addEventListener("click", translatePage);
-  document.querySelector("[data-role='translate-all']").addEventListener("click", translateAll);
+  }));
+  document.querySelector("[data-role='translate-page']")?.addEventListener("click", translatePage);
+  document.querySelector("[data-role='translate-all']")?.addEventListener("click", translateAll);
   document.querySelector("[data-role='apply-edits']")?.addEventListener("click", () => commitDeferredEdits());
-  document.querySelector("[data-role='stop']").addEventListener("click", () => stopJobs());
+  document.querySelector("[data-role='stop']")?.addEventListener("click", () => stopJobs());
   document.querySelectorAll("[data-role='llm-retry']").forEach((button) => button.addEventListener("click", retryLlm));
   document.querySelector("[data-role='lang-target']").addEventListener("change", saveLanguages);
   document.querySelectorAll("input[name='sfx-mode']").forEach((input) => {
@@ -179,9 +190,9 @@ function bindChrome() {
     closeMenus();
     openGlossary();
   });
-  document.querySelector("[data-role='banners']").addEventListener("click", onBannerClick);
-  document.querySelector("[data-role='recent-list']").addEventListener("click", onRecent);
-  document.querySelector("[data-role='error-log']").addEventListener("click", () => {
+  document.querySelector("[data-role='banners']")?.addEventListener("click", onBannerClick);
+  document.querySelector("[data-role='recent-list']")?.addEventListener("click", onRecent);
+  document.querySelector("[data-role='error-log']")?.addEventListener("click", () => {
     dialogLog().catch((error) => {
       document.querySelector("[data-role='error-text']").textContent = error.message || "Не удалось открыть лог";
     });
@@ -251,6 +262,16 @@ function render(state) {
   }
   document.querySelectorAll("[data-role='export']").forEach((button) => {
     button.disabled = !hasPages;
+  });
+  const hasProject = Boolean(state.project);
+  document.querySelectorAll("[data-role='save-project']").forEach((button) => {
+    button.disabled = !hasPages;
+  });
+  document.querySelectorAll("[data-role='save-project-as']").forEach((button) => {
+    button.disabled = !hasPages;
+  });
+  document.querySelectorAll("[data-role='close-project']").forEach((button) => {
+    button.disabled = !hasProject;
   });
   const batchLive = state.batch && (state.batch.status === "running" || state.batch.status === "paused");
   document.querySelector("[data-role='stop']").hidden = !state.busy && !batchLive;
@@ -409,14 +430,31 @@ async function onRecent(event) {
   if (!button) return;
   try {
     const data = await openRecent(button.dataset.recent);
-    if (data && (data.project || data.pages)) setProject(data.project, data.pages);
+    if (data && (data.project || data.pages)) {
+      setProject(data.project, data.pages, data.package);
+    }
   } catch (error) {
     showError(error);
   }
 }
 
+async function confirmDiscardDirtyPackage(title, detail) {
+  const state = getState();
+  if (!state.project || !state.package?.dirty) return true;
+  return confirm({
+    title: title || "Несохранённые изменения",
+    text: detail || "Есть несохранённые изменения относительно последнего сохранения пакета. Продолжить без сохранения?",
+    ok: "Продолжить",
+    cancel: "Отмена",
+  });
+}
+
 async function openFiles() {
   closeMenus();
+  if (!(await confirmDiscardDirtyPackage(
+    "Открыть файлы?",
+    "Есть несохранённые изменения. Открытие может заменить текущий проект (например, .ilt.zip). Продолжить без сохранения?",
+  ))) return;
   try {
     const data = await dialogFiles();
     takeProject(data);
@@ -427,6 +465,10 @@ async function openFiles() {
 
 async function openFolder() {
   closeMenus();
+  if (!(await confirmDiscardDirtyPackage(
+    "Открыть папку?",
+    "Есть несохранённые изменения. Открытие может заменить текущий проект. Продолжить без сохранения?",
+  ))) return;
   try {
     const data = await dialogFolder();
     takeProject(data);
@@ -437,9 +479,82 @@ async function openFolder() {
 
 function takeProject(data) {
   if (!data || data.cancelled || data.canceled) return;
-  if (data.project || data.pages) setProject(data.project, data.pages || data.project?.pages);
+  if (data.project || data.pages) {
+    setProject(data.project, data.pages || data.project?.pages, data.package);
+  } else if (data.package) {
+    setPackage(data.package);
+  }
   const warnings = Array.isArray(data.warnings) ? data.warnings.filter(Boolean) : [];
   if (warnings.length) setBanner("import", { text: warnings.join(" ") });
+}
+
+async function loadProject() {
+  closeMenus();
+  if (!(await confirmDiscardDirtyPackage(
+    "Загрузить проект?",
+    "Есть несохранённые изменения. Загрузка заменит текущий проект. Продолжить без сохранения?",
+  ))) return;
+  try {
+    const data = await dialogOpenPackage();
+    takeProject(data);
+  } catch (error) {
+    showError(error);
+  }
+}
+
+async function saveProject() {
+  closeMenus();
+  const current = getState();
+  if (!current.pages.length) return;
+  try {
+    if (current.package && current.package.path) {
+      const data = await packageSave(current.package.path);
+      takeProject(data);
+      return;
+    }
+    await saveProjectAs();
+  } catch (error) {
+    showError(error);
+  }
+}
+
+async function saveProjectAs() {
+  closeMenus();
+  if (!getState().pages.length) return;
+  try {
+    const name = (getState().project && getState().project.name) || "project";
+    const data = await dialogSavePackage(`${name}.ilt.zip`);
+    takeProject(data);
+  } catch (error) {
+    showError(error);
+  }
+}
+
+async function closeActiveProject() {
+  closeMenus();
+  if (!getState().project) return;
+  try {
+    let data;
+    try {
+      data = await closeProject(false);
+    } catch (error) {
+      if (error && (error.status === 409 || /несохранён|dirty/i.test(String(error.message || "")))) {
+        const ok = await confirm({
+          title: "Закрыть проект?",
+          text: "Есть несохранённые изменения относительно последнего сохранения пакета. Закрыть без сохранения?",
+          ok: "Закрыть",
+          cancel: "Отмена",
+        });
+        if (!ok) return;
+        data = await closeProject(true);
+      } else {
+        throw error;
+      }
+    }
+    setProject(null, [], data && data.package ? data.package : { path: null, dirty: false });
+  } catch (error) {
+    showError(error);
+  }
 }
 
 async function saveLanguages() {
@@ -503,6 +618,7 @@ async function retryLlm() {
 }
 
 async function exitApp() {
+  let skipBusyConfirm = false;
   if (getState().busy) {
     const index = getState().job.index || pageNumber(getState(), getState().activePageId);
     const total = getState().job.total || getState().pages.length;
@@ -513,16 +629,27 @@ async function exitApp() {
       cancel: "Отмена",
     });
     if (!ok) return;
+    skipBusyConfirm = true;
     try {
       await cancelJobs();
     } catch (error) {
       showError(error);
     }
   }
+  if (!(await confirmDiscardDirtyPackage(
+    "Закрыть программу?",
+    "Есть несохранённые изменения относительно последнего сохранения пакета. Закрыть без сохранения?",
+  ))) return;
   const bridge = window.pywebview && window.pywebview.api;
-  if (bridge && typeof bridge.quit === "function") bridge.quit();
-  else if (bridge && typeof bridge.destroy === "function") bridge.destroy();
-  else window.close();
+  if (bridge && typeof bridge.quit === "function") {
+    bridge.quit(skipBusyConfirm);
+    return;
+  }
+  if (bridge && typeof bridge.destroy === "function") {
+    bridge.destroy(skipBusyConfirm);
+    return;
+  }
+  window.close();
 }
 
 async function onPageCommand(action, ids, pageId) {

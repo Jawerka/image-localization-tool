@@ -1,7 +1,7 @@
-/* Список страниц: выбор, итог, контекстное меню. */
+/* Список страниц: выбор, итог, контекстное меню, перетаскивание порядка. */
 
-import { imageUrl } from "./api.js";
-import { getState, moveFocus, readyCount, selectPages, setAnchor, statusText, subscribe } from "./state.js";
+import { imageUrl, reorderPages } from "./api.js";
+import { getState, moveFocus, normalizePage, patch, readyCount, selectPages, setAnchor, setPackage, statusText, subscribe } from "./state.js";
 
 const ICONS = {
   idle: ["file", "page__status--idle", ""],
@@ -21,6 +21,10 @@ let contextId = "";
 let focusFromKeys = false;
 let onCommand = () => {};
 let drawnKey = "";
+let dragId = "";
+let dragMoved = false;
+let dropIndex = -1;
+let reorderBusy = false;
 
 function icon(id, extra) {
   const cls = extra ? `icon ${extra}` : "icon";
@@ -36,6 +40,11 @@ export function init(command) {
   list.addEventListener("click", onClick);
   list.addEventListener("keydown", onListKey);
   list.addEventListener("contextmenu", onContext);
+  list.addEventListener("dragstart", onDragStart);
+  list.addEventListener("dragover", onDragOver);
+  list.addEventListener("dragleave", onDragLeave);
+  list.addEventListener("drop", onDrop);
+  list.addEventListener("dragend", onDragEnd);
   menu.addEventListener("click", onMenuClick);
   menu.addEventListener("keydown", onMenuKey);
   document.addEventListener("pointerdown", (event) => {
@@ -107,7 +116,8 @@ function optionHtml(page, index, current, focusId) {
   const num = String(index + 1).padStart(2, "0");
   const label = statusText(page);
   const busy = status === "running" ? ' aria-busy="true"' : "";
-  return `<div class="page" role="option" data-page-id="${escapeAttr(page.id)}" data-status="${escapeAttr(status)}" aria-selected="${selected ? "true" : "false"}" tabindex="${tab}"${busy}>
+  return `<div class="page" role="option" draggable="true" data-page-id="${escapeAttr(page.id)}" data-status="${escapeAttr(status)}" aria-selected="${selected ? "true" : "false"}" tabindex="${tab}"${busy}>
+    <span class="page__grip" aria-hidden="true" title="Перетащить">⋮⋮</span>
     <img class="page__thumb" src="${imageUrl(page.id, "thumb", page.version)}" alt="">
     <span class="page__body">
       <span class="page__title"><span class="page__num">${num}</span> <span class="page__name">${escapeText(page.name)}</span></span>
@@ -139,9 +149,123 @@ function updateOption(node, page, current, focusId) {
 }
 
 function onClick(event) {
+  if (dragMoved) {
+    dragMoved = false;
+    return;
+  }
   const option = event.target.closest("[data-page-id]");
   if (!option) return;
   choose(option.dataset.pageId, event, false);
+}
+
+function onDragStart(event) {
+  const option = event.target.closest("[data-page-id]");
+  if (!option || reorderBusy) {
+    event.preventDefault();
+    return;
+  }
+  dragId = option.dataset.pageId;
+  dragMoved = false;
+  option.classList.add("page--dragging");
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", dragId);
+  }
+  closeMenu();
+}
+
+function onDragOver(event) {
+  if (!dragId) return;
+  event.preventDefault();
+  dragMoved = true;
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+  const option = event.target.closest("[data-page-id]");
+  const pages = getState().pages;
+  if (!option) {
+    dropIndex = pages.length;
+  } else {
+    const rect = option.getBoundingClientRect();
+    const after = event.clientY > rect.top + rect.height / 2;
+    const index = pages.findIndex((page) => page.id === option.dataset.pageId);
+    dropIndex = after ? index + 1 : index;
+  }
+  paintDropMarker();
+}
+
+function onDragLeave(event) {
+  if (!list.contains(event.relatedTarget)) clearDropMarker();
+}
+
+function onDrop(event) {
+  if (!dragId) return;
+  event.preventDefault();
+  const fromId = dragId;
+  const pages = getState().pages.slice();
+  const from = pages.findIndex((page) => page.id === fromId);
+  if (from < 0) {
+    onDragEnd();
+    return;
+  }
+  let to = dropIndex;
+  if (to < 0) to = pages.length;
+  if (to > from) to -= 1;
+  if (to === from) {
+    onDragEnd();
+    return;
+  }
+  const [moved] = pages.splice(from, 1);
+  pages.splice(to, 0, moved);
+  const ids = pages.map((page) => page.id);
+  patch({ pages });
+  drawnKey = "";
+  render(getState());
+  reorderBusy = true;
+  reorderPages(ids)
+    .then((data) => {
+      if (data && data.pages) {
+        patch({ pages: data.pages.map((page, index) => normalizePage(page, index)) });
+      }
+      if (data && data.package) setPackage(data.package);
+      drawnKey = "";
+      render(getState());
+    })
+    .catch((error) => {
+      window.dispatchEvent(new CustomEvent("ilt-banner", {
+        detail: { id: "reorder", text: error.message || "Не удалось изменить порядок" },
+      }));
+    })
+    .finally(() => {
+      reorderBusy = false;
+      onDragEnd();
+    });
+}
+
+function onDragEnd() {
+  dragId = "";
+  dropIndex = -1;
+  clearDropMarker();
+  list.querySelectorAll(".page--dragging").forEach((node) => node.classList.remove("page--dragging"));
+}
+
+function paintDropMarker() {
+  clearDropMarker();
+  const nodes = [...list.querySelectorAll("[data-page-id]")];
+  if (!nodes.length) return;
+  if (dropIndex <= 0) {
+    nodes[0].classList.add("page--drop-before");
+    return;
+  }
+  if (dropIndex >= nodes.length) {
+    nodes[nodes.length - 1].classList.add("page--drop-after");
+    return;
+  }
+  nodes[dropIndex].classList.add("page--drop-before");
+}
+
+function clearDropMarker() {
+  list.querySelectorAll(".page--drop-before, .page--drop-after").forEach((node) => {
+    node.classList.remove("page--drop-before", "page--drop-after");
+  });
 }
 
 function onListKey(event) {

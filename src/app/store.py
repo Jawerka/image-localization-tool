@@ -367,6 +367,108 @@ class ProjectStore:
         _write_json(self.project_file(project_id), project)
         return added
 
+    def reorder_pages(self, project_id: str, page_ids: list[str]) -> dict:
+        """Переставить страницы. ``page_ids`` — перестановка существующих id."""
+        project = self.open_project(project_id)
+        pages = [
+            _ensure_chapter(item)
+            for item in project.get("pages") or []
+            if isinstance(item, dict)
+        ]
+        by_id = {str(item.get("id") or ""): item for item in pages}
+        wanted = [_check_id(page_id) for page_id in page_ids]
+        if len(wanted) != len(by_id) or set(wanted) != set(by_id):
+            raise ValueError("page_ids должны быть перестановкой существующих страниц")
+        project["pages"] = [by_id[page_id] for page_id in wanted]
+        _write_json(self.project_file(project_id), project)
+        return project
+
+    def append_portable_page(
+        self,
+        project_id: str,
+        source: Path,
+        *,
+        page_id: str | None = None,
+        name: str | None = None,
+        chapter: str = "",
+        status: str = "idle",
+        document: dict | None = None,
+    ) -> dict:
+        """Добавить страницу из распакованного пакета (копия исходника уже на диске)."""
+        path = Path(source)
+        if not path.is_file():
+            raise ValueError(f"Нет файла страницы: {path}")
+        project = self.open_project(project_id)
+        pages = [
+            _ensure_chapter(item)
+            for item in project.get("pages") or []
+            if isinstance(item, dict)
+        ]
+        taken = {str(item.get("id") or "") for item in pages}
+        if page_id:
+            chosen = _check_id(page_id)
+            if chosen in taken:
+                chosen = _new_id(taken)
+        else:
+            chosen = _new_id(taken)
+        taken.add(chosen)
+        record = _ensure_chapter(
+            {
+                "id": chosen,
+                "source_path": str(path.resolve()),
+                "name": str(name or path.name),
+            },
+            chapter,
+        )
+        page_dir = self.page_dir(project_id, chosen)
+        blank = _blank_page(version=1)
+        if document is not None:
+            doc = PageDocument.from_dict(document)
+            if int(doc.version) < 1:
+                doc.version = 1
+            blank["document"] = doc.to_dict()
+            blank["warnings"] = list(doc.warnings)
+        if status in _STATUSES:
+            blank["status"] = status
+        else:
+            blank["status"] = "idle"
+        _write_json(page_dir / "page.json", blank)
+        self._write_thumb(path, page_dir / "thumb.jpg")
+        pages.append(record)
+        project["pages"] = pages
+        _write_json(self.project_file(project_id), project)
+        return record
+
+    def restore_portable_artifacts(
+        self,
+        project_id: str,
+        page_id: str,
+        artifacts: dict[str, Path],
+    ) -> list[str]:
+        """Скопировать mask/clean/result/thumb из распакованного пакета в каталог страницы."""
+        mapping = {
+            "mask": _IMAGE_NAMES["mask"],
+            "clean": _IMAGE_NAMES["clean"],
+            "result": _IMAGE_NAMES["result"],
+            "thumb": _IMAGE_NAMES["thumb"],
+        }
+        warnings: list[str] = []
+        page_dir = self.page_dir(project_id, page_id)
+        page_dir.mkdir(parents=True, exist_ok=True)
+        for kind, filename in mapping.items():
+            source = artifacts.get(kind)
+            if source is None:
+                continue
+            path = Path(source)
+            if not path.is_file():
+                continue
+            target = page_dir / filename
+            try:
+                shutil.copy2(path, target)
+            except OSError as exc:
+                warnings.append(f"{page_id}/{kind}: {exc}")
+        return warnings
+
     def remove_pages(self, project_id: str, page_ids: list[str]) -> None:
         """Удалить записи и каталоги страниц. Файл оригинала не трогать."""
         project = self.open_project(project_id)

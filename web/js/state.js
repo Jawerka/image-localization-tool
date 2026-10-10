@@ -106,6 +106,7 @@ function emptyState() {
     undoCount: 0,
     redoCount: 0,
     paths: null,
+    package: { path: null, dirty: false },
     pendingAction: null,
     deferredApply: false,
   };
@@ -248,6 +249,14 @@ export function normalizePage(raw, index) {
   };
 }
 
+function normalizePackage(info) {
+  const raw = info && typeof info === "object" ? info : {};
+  return {
+    path: raw.path ? String(raw.path) : null,
+    dirty: Boolean(raw.dirty),
+  };
+}
+
 function normalizePages(list) {
   return (Array.isArray(list) ? list : []).map((item, index) => normalizePage(item, index)).filter((item) => item.id);
 }
@@ -338,6 +347,7 @@ export function applyBootstrap(data) {
     selectedPageIds: project && active ? [active] : [],
     anchorPageId: project ? active : "",
     paths: incoming.paths || null,
+    package: normalizePackage(incoming.package),
     hasApiKey: Boolean(incoming.has_api_key || incoming.settings?.has_api_key || incoming.llm?.has_api_key),
   };
   syncHistoryFlags();
@@ -345,10 +355,14 @@ export function applyBootstrap(data) {
   if (state.activePageId) reloadDetail(state.activePageId);
 }
 
-export function setProject(project, pages) {
+export function setPackage(info) {
+  patch({ package: normalizePackage(info) });
+}
+
+export function setProject(project, pages, packageInfo) {
   const list = normalizePages(pages || project?.pages || []);
   const active = list[0] ? list[0].id : "";
-  state = {
+  const next = {
     ...state,
     project: project || null,
     pages: list,
@@ -360,6 +374,8 @@ export function setProject(project, pages) {
     selectedRegionId: null,
     imageSize: { w: 0, h: 0 },
   };
+  if (packageInfo !== undefined) next.package = normalizePackage(packageInfo);
+  state = next;
   syncHistoryFlags();
   emit();
   if (active) reloadDetail(active);

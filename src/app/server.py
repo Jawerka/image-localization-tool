@@ -30,6 +30,12 @@ from src.app.events import LLM_STATUS, WorkerEvent
 from src.app.ingest import NoImagesError, archive_images, is_archive
 from src.app.jobs import JobQueue
 from src.app.settings import AppSettings, get_api_key
+from src.app.portable_project import (
+    PortableProjectError,
+    pack_project,
+    resolve_archive_open_kind,
+    unpack_project,
+)
 from src.app.store import ProjectStore, VersionConflict
 from src.app.worker import demote_restored_running, queue_has_unfinished
 from src.utils.paths import install_root
@@ -168,6 +174,8 @@ class AppState:
         self.subscribers: list[queue.Queue] = []
         self.export_dir: Path | None = None
         self.reveal_path: Path | None = None
+        self.package_path: str | None = None
+        self.package_dirty = False
         self.llm_status = {"ok": None, "models": []}
         self.port = 0
         self._lock = threading.Lock()
@@ -620,6 +628,27 @@ def _api(state: AppState, method: str, path: str, body: dict, query: dict | None
     if path == "/api/project/open-recent":
         _need_method(method, "POST")
         return _Result(_open_recent(state, body))
+    if path == "/api/project/reorder":
+        _need_method(method, "POST")
+        return _Result(_reorder_pages(state, body))
+    if path == "/api/project/package/status":
+        _need_method(method, "GET")
+        return _Result(_package_status(state))
+    if path == "/api/project/package/save":
+        _need_method(method, "POST")
+        return _Result(_package_save(state, body))
+    if path == "/api/project/package/load":
+        _need_method(method, "POST")
+        return _Result(_package_load(state, body))
+    if path == "/api/project/close":
+        _need_method(method, "POST")
+        return _Result(_close_project(state, body))
+    if path == "/api/dialog/project-package/open":
+        _need_method(method, "POST")
+        return _Result(_dialog_open_package(state))
+    if path == "/api/dialog/project-package/save":
+        _need_method(method, "POST")
+        return _Result(_dialog_save_package(state, body))
     raise _HttpError(404, "Не найдено")
 
 
@@ -662,6 +691,7 @@ def _bootstrap(state: AppState) -> dict:
             "settings": str(state.settings_path),
             "data": str(state.store.root),
         },
+        "package": _package_status(state),
     }
 
 
@@ -680,7 +710,7 @@ def _project_and_pages(state: AppState) -> tuple[dict | None, list[dict]]:
 
 def _collection(state: AppState) -> dict:
     project, pages = _project_and_pages(state)
-    return {"project": project, "pages": pages}
+    return {"project": project, "pages": pages, "package": _package_status(state)}
 
 
 def _page_row(state: AppState, record: dict) -> dict:
@@ -751,6 +781,7 @@ def _put_document(state: AppState, page_id: str, body: dict) -> dict:
                 "base_version": int(saved.version),
             },
         )
+    _mark_package_dirty(state)
     return {"document": saved.to_dict(), "plan": plan}
 
 
@@ -1065,12 +1096,43 @@ def _add_paths(state: AppState, paths: list[Path], *, strict: bool) -> dict:
         prepared = list(paths)
     else:
         prepared = [path for path in paths if path.exists()]
-    archives = [path for path in prepared if path.is_file() and is_archive(path)]
-    rest = [path for path in prepared if path not in archives]
-    usable, warnings = _usable_archives(archives)
+    portable: list[Path] = []
+    chapter_archives: list[Path] = []
+    for path in prepared:
+        if not (path.is_file() and is_archive(path)):
+            continue
+        if resolve_archive_open_kind(path) == "portable":
+            portable.append(path)
+        else:
+            chapter_archives.append(path)
+    rest = [
+        path
+        for path in prepared
+        if path not in portable and path not in chapter_archives
+    ]
+    warnings: list[str] = []
+    if portable:
+        payload = _apply_portable_load(state, portable[0])
+        if len(portable) > 1:
+            warnings.append(
+                f"Загружен только первый пакет: {portable[0].name}"
+            )
+        extra = chapter_archives + rest
+        if extra:
+            with state._lock:
+                ingest_warnings = _append_sources_to_project(state, extra)
+                warnings.extend(ingest_warnings)
+                _mark_package_dirty(state)
+                payload = _collection(state)
+            payload["package"] = _package_status(state)
+        if warnings:
+            existing = payload.get("warnings") or []
+            payload["warnings"] = [*existing, *warnings]
+        return payload
+
+    usable, warnings = _usable_archives(chapter_archives)
     if not usable and not rest and warnings:
         raise NoImagesError(" ".join(warnings))
-    usable_keys = {_path_key(path) for path in usable}
     with state._lock:
         if usable or rest:
             if state.project_id is None:
@@ -1080,22 +1142,36 @@ def _add_paths(state: AppState, paths: list[Path], *, strict: bool) -> dict:
                     state.settings.target_lang,
                 )
                 state.project_id = str(created["id"])
-            for path in prepared:
-                if _path_key(path) in usable_keys:
-                    state.store.import_path(
-                        state.project_id,
-                        path,
-                        chapter_mode="subdir",
-                    )
-                elif path.is_file() and is_archive(path):
-                    continue
-                else:
-                    state.store.add_sources(state.project_id, [path])
+            ingest_warnings = _append_sources_to_project(state, usable + rest)
+            warnings.extend(ingest_warnings)
             _remember_project(state, state.project_id)
+            _mark_package_dirty(state)
         payload = _collection(state)
     if warnings:
         payload["warnings"] = warnings
     return payload
+
+
+def _append_sources_to_project(state: AppState, paths: list[Path]) -> list[str]:
+    """Добавить файлы/архивы в текущий project_id. Проект должен уже существовать."""
+    if not paths or state.project_id is None:
+        return []
+    usable, warnings = _usable_archives(
+        [path for path in paths if path.is_file() and is_archive(path)]
+    )
+    usable_keys = {_path_key(path) for path in usable}
+    for path in paths:
+        if _path_key(path) in usable_keys:
+            state.store.import_path(
+                state.project_id,
+                path,
+                chapter_mode="subdir",
+            )
+        elif path.is_file() and is_archive(path):
+            continue
+        else:
+            state.store.add_sources(state.project_id, [path])
+    return warnings
 
 
 def _usable_archives(archives: list[Path]) -> tuple[list[Path], list[str]]:
@@ -1147,7 +1223,131 @@ def _remove_pages(state: AppState, body: dict) -> dict:
     if not isinstance(raw, list):
         raise ValueError("Нужен список page_ids")
     state.store.remove_pages(state.project_id, [str(item) for item in raw])
+    _mark_package_dirty(state)
     return _collection(state)
+
+
+def _reorder_pages(state: AppState, body: dict) -> dict:
+    if not state.project_id:
+        raise ValueError("Нет открытого проекта")
+    raw = body.get("page_ids")
+    if not isinstance(raw, list) or not raw:
+        raise ValueError("Нужен список page_ids")
+    state.store.reorder_pages(state.project_id, [str(item) for item in raw])
+    _mark_package_dirty(state)
+    payload = _collection(state)
+    payload["package"] = _package_status(state)
+    return payload
+
+
+def _package_status(state: AppState) -> dict:
+    return {
+        "path": state.package_path,
+        "dirty": bool(state.package_dirty),
+    }
+
+
+def _mark_package_dirty(state: AppState) -> None:
+    state.package_dirty = True
+
+
+def _clear_package_link(state: AppState) -> None:
+    state.package_path = None
+    state.package_dirty = False
+
+
+def _package_save(state: AppState, body: dict | None = None) -> dict:
+    body = body or {}
+    if not state.project_id:
+        raise ValueError("Нет открытого проекта")
+    project, pages = _project_and_pages(state)
+    if not pages:
+        raise ValueError("Нет страниц для сохранения")
+    path_text = str(body.get("path") or "").strip()
+    if not path_text:
+        path_text = str(state.package_path or "").strip()
+    if not path_text:
+        raise ValueError("Нужен путь для сохранения проекта")
+    dest = Path(path_text)
+    try:
+        packed = pack_project(state.store, state.project_id, dest)
+    except PortableProjectError as exc:
+        raise ValueError(str(exc)) from exc
+    with state._lock:
+        state.package_path = str(packed.path)
+        state.package_dirty = False
+    payload = _collection(state)
+    payload["package"] = _package_status(state)
+    payload["path"] = str(packed.path)
+    if packed.warnings:
+        payload["warnings"] = packed.warnings
+    return payload
+
+
+def _apply_portable_load(state: AppState, package: Path) -> dict:
+    try:
+        loaded = unpack_project(state.store, package)
+    except PortableProjectError as exc:
+        raise ValueError(str(exc)) from exc
+    with state._lock:
+        state.project_id = str(loaded.project.get("id") or "")
+        state.package_path = str(package.resolve())
+        state.package_dirty = False
+        _remember_project(state, state.project_id)
+        payload = _collection(state)
+    payload["package"] = _package_status(state)
+    payload["path"] = str(package)
+    if loaded.warnings:
+        payload["warnings"] = loaded.warnings
+    return payload
+
+
+def _package_load(state: AppState, body: dict | None = None) -> dict:
+    body = body or {}
+    path_text = str(body.get("path") or "").strip()
+    if not path_text:
+        raise ValueError("Нужен путь к пакету")
+    return _apply_portable_load(state, Path(path_text))
+
+
+def _close_project(state: AppState, body: dict | None = None) -> dict:
+    body = body or {}
+    force = bool(body.get("force"))
+    if not state.project_id:
+        return {"project": None, "pages": [], "package": _package_status(state)}
+    if state.package_dirty and not force:
+        raise _HttpError(409, "Есть несохранённые изменения", dirty=True)
+    with state._lock:
+        state.project_id = None
+        _clear_package_link(state)
+    return {"project": None, "pages": [], "package": _package_status(state)}
+
+
+def _dialog_open_package(state: AppState) -> dict:
+    chosen = state.dialogs.open_project_package()
+    if chosen is None or not Path(chosen).exists():
+        return {"cancelled": True, "package": _package_status(state)}
+    return _package_load(state, {"path": str(chosen)})
+
+
+def _dialog_save_package(state: AppState, body: dict | None = None) -> dict:
+    body = body or {}
+    if not state.project_id:
+        raise ValueError("Нет открытого проекта")
+    project, pages = _project_and_pages(state)
+    if not pages:
+        raise ValueError("Нет страниц для сохранения")
+    default_name = str(body.get("default_name") or "").strip()
+    if not default_name:
+        name = str((project or {}).get("name") or "project").strip() or "project"
+        default_name = f"{name}.ilt.zip"
+    chosen = state.dialogs.save_project_package(default_name)
+    if chosen is None:
+        payload = _collection(state)
+        payload["cancelled"] = True
+        payload["package"] = _package_status(state)
+        return payload
+    return _package_save(state, {"path": str(chosen)})
 
 
 def _open_recent(state: AppState, body: dict) -> dict:
@@ -1157,8 +1357,11 @@ def _open_recent(state: AppState, body: dict) -> dict:
     project = state.store.open_project(project_id)
     with state._lock:
         state.project_id = str(project.get("id") or project_id)
+        _clear_package_link(state)
+        state.package_dirty = True
         _remember_project(state, state.project_id)
         payload = _collection(state)
+    payload["package"] = _package_status(state)
     return payload
 
 
@@ -1270,6 +1473,8 @@ def _import_sources(state: AppState, body: dict) -> dict:
     if not path.exists():
         raise ValueError("Путь не найден")
     if path.is_file() and is_archive(path):
+        if resolve_archive_open_kind(path) == "portable":
+            return _apply_portable_load(state, path)
         archive_images(path)
     mode = str(body.get("chapter_mode") or "subdir")
     if mode not in ("subdir", "flat"):
@@ -1290,6 +1495,7 @@ def _import_sources(state: AppState, body: dict) -> dict:
             chapter_mode=mode,
         )
         _remember_project(state, state.project_id)
+        _mark_package_dirty(state)
         payload = _collection(state)
     payload["added"] = [str(item.get("id") or "") for item in added]
     return payload
@@ -1308,6 +1514,7 @@ def _put_glossary(state: AppState, body: dict) -> dict:
     if not isinstance(raw, list):
         raise ValueError("Нужен список глоссария")
     state.store.write_glossary(state.project_id, raw)
+    _mark_package_dirty(state)
     return {"glossary": state.store.glossary_view(state.project_id)}
 
 
@@ -1323,7 +1530,9 @@ def _put_styles(state: AppState, body: dict) -> dict:
     raw = body.get("styles")
     if not isinstance(raw, list):
         raise ValueError("Нужен список стилей")
-    return {"styles": state.store.write_styles(state.project_id, raw)}
+    styles = state.store.write_styles(state.project_id, raw)
+    _mark_package_dirty(state)
+    return {"styles": styles}
 
 
 _font_faces: list | None = None

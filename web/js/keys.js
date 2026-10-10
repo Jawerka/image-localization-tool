@@ -97,6 +97,16 @@ function onKey(event) {
       actions.openFolder?.();
       return;
     }
+    if (low === "s" && !event.shiftKey) {
+      event.preventDefault();
+      actions.saveProject?.();
+      return;
+    }
+    if (low === "q" && !event.shiftKey) {
+      event.preventDefault();
+      actions.exit?.();
+      return;
+    }
     if (low === "e" && !event.shiftKey) {
       event.preventDefault();
       actions.export?.();

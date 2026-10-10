@@ -39,6 +39,10 @@ _IMAGE_FILTER = (
     "Изображения (*.png;*.jpg;*.jpeg;*.bmp;*.tif;*.tiff)",
     "Архивы (*.zip;*.cbz;*.cbr;*.rar;*.cb7;*.7z;*.cbt;*.tar)",
 )
+_PACKAGE_FILTER = (
+    "Портативный проект (*.ilt.zip;*.zip)",
+    "Все файлы (*.*)",
+)
 _WEBVIEW2_TEXT = (
     "Не удалось открыть окно: не найден WebView2 Runtime.\n\n"
     "Установите Microsoft Edge WebView2 Runtime и запустите программу снова."
@@ -615,6 +619,41 @@ class WebViewDialogs(DialogBridge):
     def pick_directory(self) -> Path | None:
         return self._pick_folder()
 
+    def open_project_package(self) -> Path | None:
+        window = self.window
+        if window is None:
+            return None
+        import webview
+
+        chosen = window.create_file_dialog(
+            webview.OPEN_DIALOG,
+            allow_multiple=False,
+            file_types=_PACKAGE_FILTER,
+        )
+        paths = _dialog_paths(chosen)
+        return paths[0] if paths else None
+
+    def save_project_package(self, default_name: str = "project.ilt.zip") -> Path | None:
+        window = self.window
+        if window is None:
+            return None
+        import webview
+
+        name = str(default_name or "project.ilt.zip").strip() or "project.ilt.zip"
+        chosen = window.create_file_dialog(
+            webview.SAVE_DIALOG,
+            save_filename=name,
+            file_types=_PACKAGE_FILTER,
+        )
+        paths = _dialog_paths(chosen)
+        if not paths:
+            return None
+        path = paths[0]
+        lower = path.name.lower()
+        if not lower.endswith(".zip"):
+            path = path.with_name(path.name + ".ilt.zip")
+        return path
+
     def reveal(self, path: Path) -> None:
         reveal_path(Path(path))
 
@@ -699,6 +738,23 @@ def _remote_failure(event) -> str:
     return "Ошибка перевода"
 
 
+class WebViewBridge:
+    """Мост JS → закрытие окна (меню «Выход»)."""
+
+    def __init__(self, app: "DesktopApp") -> None:
+        self._app = app
+
+    def quit(self, skip_busy_confirm: bool = False) -> None:
+        if skip_busy_confirm:
+            self._app._skip_busy_close_confirm = True
+        window = self._app.window
+        if window is not None:
+            window.destroy()
+
+    def destroy(self, skip_busy_confirm: bool = False) -> None:
+        self.quit(skip_busy_confirm)
+
+
 class DesktopApp:
     """Сервер в фоновом потоке, окно — в главном."""
 
@@ -707,6 +763,7 @@ class DesktopApp:
         self.httpd = httpd
         self.endpoint = endpoint
         self.window = None
+        self._skip_busy_close_confirm = False
         self.remote_api = None
         self._remote_lock = threading.Lock()
         self._remote_slots: dict[str, dict] = {}
@@ -923,7 +980,11 @@ class DesktopApp:
         busy = bootstrap_busy(self.state)
         confirmed = True
         if busy:
-            confirmed = self._ask_close()
+            if self._skip_busy_close_confirm:
+                confirmed = True
+                self._skip_busy_close_confirm = False
+            else:
+                confirmed = self._ask_close()
         if not closing_allowed(busy, confirmed):
             return False
         self._save_geometry()
@@ -977,9 +1038,11 @@ class DesktopApp:
                 raise RuntimeError("WebView2 Runtime не найден")
             import webview
 
+            bridge = WebViewBridge(self)
             window = webview.create_window(
                 TITLE,
                 page_url(self.state.port, self.state.token),
+                js_api=bridge,
                 **window_kwargs(self.state.settings),
             )
             self.bind_window(window)

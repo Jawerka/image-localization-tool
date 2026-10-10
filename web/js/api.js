@@ -138,6 +138,38 @@ export function openRecent(id) {
   return request("POST", "/api/project/open-recent", { id });
 }
 
+export function reorderPages(pageIds) {
+  return request("POST", "/api/project/reorder", { page_ids: pageIds });
+}
+
+export function packageStatus() {
+  return request("GET", "/api/project/package/status");
+}
+
+export function packageSave(path) {
+  const body = {};
+  if (path) body.path = path;
+  return request("POST", "/api/project/package/save", body);
+}
+
+export function packageLoad(path) {
+  return request("POST", "/api/project/package/load", { path });
+}
+
+export function closeProject(force) {
+  return request("POST", "/api/project/close", { force: Boolean(force) });
+}
+
+export function dialogOpenPackage() {
+  return request("POST", "/api/dialog/project-package/open", {});
+}
+
+export function dialogSavePackage(defaultName) {
+  const body = {};
+  if (defaultName) body.default_name = defaultName;
+  return request("POST", "/api/dialog/project-package/save", body);
+}
+
 export function jobs() {
   return request("GET", "/api/jobs");
 }

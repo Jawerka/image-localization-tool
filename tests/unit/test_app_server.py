@@ -46,6 +46,8 @@ class ScriptedDialogs(DialogBridge):
         self.files: list[Path] = []
         self.folder: Path | None = None
         self.directory: Path | None = None
+        self.package_open: Path | None = None
+        self.package_save: Path | None = None
         self.revealed: list[Path] = []
         self.logs = 0
 
@@ -57,6 +59,12 @@ class ScriptedDialogs(DialogBridge):
 
     def pick_directory(self) -> Path | None:
         return self.directory
+
+    def open_project_package(self) -> Path | None:
+        return self.package_open
+
+    def save_project_package(self, default_name: str = "project.ilt.zip") -> Path | None:
+        return self.package_save
 
     def reveal(self, path: Path) -> None:
         self.revealed.append(Path(path))
@@ -221,6 +229,8 @@ def test_dialog_bridge_is_inert(tmp_path):
     assert bridge.open_files() == []
     assert bridge.open_folder() is None
     assert bridge.pick_directory() is None
+    assert bridge.open_project_package() is None
+    assert bridge.save_project_package() is None
     bridge.reveal(tmp_path)
     bridge.open_log()
 
@@ -248,6 +258,7 @@ def test_bootstrap_requires_cookie(api: Api):
         "recent",
         "has_api_key",
         "paths",
+        "package",
     }
     assert payload["version"] == __version__
     assert payload["settings_warning"] == "Файл настроек обновлён"
@@ -258,6 +269,7 @@ def test_bootstrap_requires_cookie(api: Api):
     assert payload["busy"] is False
     assert payload["recent"] == []
     assert payload["has_api_key"] is False
+    assert payload["package"] == {"path": None, "dirty": False}
     assert payload["paths"]["settings"] == str(api.settings_path)
     assert payload["paths"]["data"] == str(api.store.root)
     assert isinstance(payload["models_ready"], bool)
@@ -683,6 +695,51 @@ def test_drop_empty_archive_does_not_create_project(api: Api, tmp_path):
     assert api.state.project_id is None
 
 
+def test_drop_portable_package_loads_project(api: Api, tmp_path):
+    from src.app.portable_project import pack_project
+
+    a = tmp_path / "a.png"
+    b = tmp_path / "b.png"
+    Image.new("RGB", (20, 10), (1, 2, 3)).save(a)
+    Image.new("RGB", (20, 10), (4, 5, 6)).save(b)
+    api.dialogs.files = [a, b]
+    status, _, payload = api.json("POST", "/api/dialog/files", {})
+    assert status == 200
+    project_id = payload["project"]["id"]
+    dest = tmp_path / "packed.ilt.zip"
+    status, _, payload = api.json(
+        "POST",
+        "/api/project/package/save",
+        {"path": str(dest)},
+    )
+    assert status == 200
+    status, _, payload = api.json("POST", "/api/project/close", {})
+    assert status == 200
+
+    status, _, payload = api.json("POST", "/api/drop", {"paths": [str(dest)]})
+    assert status == 200, payload
+    assert len(payload["pages"]) == 2
+    assert payload["project"]["id"] != project_id
+    assert payload["package"]["path"] == str(dest.resolve())
+    assert payload["package"]["dirty"] is False
+
+
+def test_drop_broken_ilt_does_not_ingest_pages(api: Api, tmp_path):
+    import zipfile
+
+    broken = tmp_path / "broken.ilt.zip"
+    manifest = {"kind": "ilt-project", "schema_version": 2, "pages": []}
+    with zipfile.ZipFile(broken, "w") as bundle:
+        bundle.writestr("project.json", json.dumps(manifest).encode("utf-8"))
+        buffer = __import__("io").BytesIO()
+        Image.new("RGB", (4, 4), "white").save(buffer, format="PNG")
+        bundle.writestr("pages/0001_x.png", buffer.getvalue())
+    status, _, payload = api.json("POST", "/api/drop", {"paths": [str(broken)]})
+    assert status == 400
+    assert payload["error"]
+    assert api.state.project_id is None
+
+
 def test_drop_cbz_adds_pages(api: Api, tmp_path):
     import io
     import zipfile
@@ -754,6 +811,46 @@ def test_fonts_preview_region_and_remote_status(api: Api, monkeypatch):
         "recent": [],
         "clients": 0,
     }
+
+
+def test_package_save_load_reorder_close(api: Api, tmp_path):
+    a = tmp_path / "a.png"
+    b = tmp_path / "b.png"
+    Image.new("RGB", (20, 10), (1, 2, 3)).save(a)
+    Image.new("RGB", (20, 10), (4, 5, 6)).save(b)
+    api.dialogs.files = [a, b]
+    status, _, payload = api.json("POST", "/api/dialog/files", {})
+    assert status == 200
+    pages = payload["pages"]
+    assert len(pages) == 2
+    ids = [page["id"] for page in pages]
+
+    status, _, payload = api.json(
+        "POST",
+        "/api/project/reorder",
+        {"page_ids": [ids[1], ids[0]]},
+    )
+    assert status == 200
+    assert [page["id"] for page in payload["pages"]] == [ids[1], ids[0]]
+    assert payload["package"]["dirty"] is True
+
+    dest = tmp_path / "out.ilt.zip"
+    status, _, payload = api.json("POST", "/api/project/package/save", {"path": str(dest)})
+    assert status == 200
+    assert Path(payload["path"]).is_file()
+    assert payload["package"]["dirty"] is False
+
+    status, _, payload = api.json("POST", "/api/project/close", {})
+    assert status == 200
+    assert payload["project"] is None
+
+    status, _, payload = api.json("POST", "/api/project/package/load", {"path": str(dest)})
+    assert status == 200
+    assert [page["name"] for page in payload["pages"]] == ["b.png", "a.png"]
+    assert payload["package"]["dirty"] is False
+
+    status, _, payload = api.json("POST", "/api/project/close", {})
+    assert status == 200
 
 
 def test_merge_style_skips_rotation_and_warp():
