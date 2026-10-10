@@ -27,7 +27,9 @@ export function normalizeMaskStroke(stroke) {
   let mode = "paint";
   if (item.mode === "erase") mode = "erase";
   else if (item.mode === "fill") mode = "fill";
-  return { mode, radius, points, color: mode === "erase" ? "#000000" : "#ffffff" };
+  else if (item.mode === "erase_fill") mode = "erase_fill";
+  const color = mode === "erase" || mode === "erase_fill" ? "#000000" : "#ffffff";
+  return { mode, radius, points, color };
 }
 
 /**
@@ -44,7 +46,7 @@ export function paintStrokeOnMask(ctx, stroke) {
   ctx.lineWidth = Math.max(1, radius * 2);
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
-  if (mode === "fill") {
+  if (mode === "fill" || mode === "erase_fill") {
     if (points.length < 3) return;
     ctx.beginPath();
     ctx.moveTo(points[0][0], points[0][1]);

@@ -1,6 +1,14 @@
 /* Просмотрщик: масштаб, шторка, рамки, кисть и ластик. */
 
 import { imageUrl } from "./api.js";
+import {
+  brushModeFromButton,
+  editorSessionToWire,
+  fitWidthScale,
+  normalizeEditorSession,
+  polylineModeFromButton,
+  resolveActivePageId,
+} from "./editor_session.js";
 import { maskDraftAction, paintStrokeOnMask } from "./mask_draft.js";
 import {
   blankRegion,
@@ -19,13 +27,13 @@ import {
 } from "./state.js";
 import { isSpaceDown } from "./keys.js";
 
-const TOOLS = ["select", "region", "brush", "polyline", "eraser", "hand"];
+const TOOLS = ["select", "region", "brush", "polyline", "hand"];
 const VIEWS = ["original", "result", "compare"];
 const ZOOM_MIN_PERCENT = 10;
 const ZOOM_MAX_PERCENT = 200;
 const ZOOM_STEP_PERCENT = 5;
-const MASK_DRAW_TOOLS = new Set(["brush", "eraser", "polyline"]);
-const BRUSH_SIZE_TOOLS = new Set(["brush", "eraser"]);
+const MASK_DRAW_TOOLS = new Set(["brush", "polyline"]);
+const BRUSH_SIZE_TOOLS = new Set(["brush"]);
 /** Превью добавления в маску. */
 const MASK_PAINT_COLOR = "#16a34a";
 /** Превью удаления из маски (ластик). */
@@ -61,6 +69,8 @@ let scrollHome = false;
 let maskDraft = null;
 /** Черновик ломаной: вершины + точка под курсором для резинки. */
 let polyDraft = null;
+/** Отложенное восстановление scroll после layout. */
+let pendingScroll = null;
 
 export function init() {
   stageHost = document.querySelector("[data-role='stage-host']");
@@ -97,6 +107,7 @@ export function init() {
   document.querySelector("[data-role='zoom-in']").addEventListener("click", () => stepZoom(1));
   document.querySelector("[data-role='zoom-value']").addEventListener("click", () => setZoom("fit"));
   document.querySelector("[data-role='zoom-label']").addEventListener("click", () => setZoom("fit"));
+  document.querySelector("[data-role='zoom-fit-width']")?.addEventListener("click", () => setZoom("fit-width"));
   document.querySelector("[data-role='page-prev']").addEventListener("click", () => turnPage(-1));
   document.querySelector("[data-role='page-next']").addEventListener("click", () => turnPage(1));
   document.querySelector("[data-role='undo']").addEventListener("click", () => document.dispatchEvent(new CustomEvent("ilt-undo")));
@@ -156,10 +167,46 @@ export function viewCenter() {
 
 export function setZoom(mode) {
   patch({ zoom: mode });
-  if (mode === "fit") {
+  if (mode === "fit" || mode === "fit-width") {
     stage.scrollLeft = 0;
     stage.scrollTop = 0;
   }
+}
+
+/** Снимок UI-сессии для сохранения в пакет. */
+export function captureEditorSession() {
+  const state = getState();
+  return editorSessionToWire({
+    active_page_id: state.activePageId || "",
+    zoom: state.zoom,
+    scroll_left: stage ? stage.scrollLeft : 0,
+    scroll_top: stage ? stage.scrollTop : 0,
+  });
+}
+
+/** Восстановить страницу / zoom / scroll из пакета или ответа save. */
+export function applyEditorSession(raw, { selectPages } = {}) {
+  const session = normalizeEditorSession(raw);
+  if (!session) return;
+  const state = getState();
+  const pageId = resolveActivePageId(state.pages, session.activePageId);
+  if (pageId && pageId !== state.activePageId && typeof selectPages === "function") {
+    selectPages([pageId], pageId, pageId);
+  }
+  if (session.zoom !== undefined) patch({ zoom: session.zoom });
+  pendingScroll = { left: session.scrollLeft, top: session.scrollTop };
+  window.requestAnimationFrame(() => {
+    layout();
+    applyPendingScroll();
+  });
+}
+
+function applyPendingScroll() {
+  if (!pendingScroll || !stage) return;
+  const { left, top } = pendingScroll;
+  pendingScroll = null;
+  stage.scrollLeft = left;
+  stage.scrollTop = top;
 }
 
 export function setStylePreview(preview) {
@@ -207,10 +254,11 @@ export function commitPolylineDraft() {
     return false;
   }
   const points = polyDraft.points.map((point) => [Math.round(point[0]), Math.round(point[1])]);
+  const mode = polyDraft.mode === "erase_fill" ? "erase_fill" : "fill";
   polyDraft = null;
   if (strokeLayer) strokeLayer.innerHTML = "";
   editDocument((document) => {
-    document.strokes.push({ mode: "fill", radius: 1, points });
+    document.strokes.push({ mode, radius: 1, points });
   }, { deferApply: true });
   return true;
 }
@@ -240,6 +288,10 @@ function bindRadios(selector, key, order) {
 }
 
 function sync(state) {
+  if (state.tool === "eraser") {
+    patch({ tool: "brush" });
+    return;
+  }
   const page = state.pages.find((item) => item.id === state.activePageId);
   const enabled = Boolean(page);
   document.querySelectorAll("[data-view-control]").forEach((node) => {
@@ -276,7 +328,7 @@ function sync(state) {
     seenPageId = page.id;
     clearMaskDraft();
     cancelPolylineDraft();
-    home = state.zoom !== "fit";
+    home = state.zoom !== "fit" && state.zoom !== "fit-width";
     scrollHome = home;
     if (home) pinScroll();
   }
@@ -462,6 +514,7 @@ function onImageLoad() {
     scrollHome = false;
   }
   layout();
+  applyPendingScroll();
   const state = getState();
   if (state.deferredApply || maskDraft) {
     syncMaskDraft(state, state.pages.find((item) => item.id === state.activePageId));
@@ -478,6 +531,7 @@ function fitScale() {
 function currentScale() {
   const zoom = getState().zoom;
   if (zoom === "fit") return fitScale();
+  if (zoom === "fit-width") return fitWidthScale(stage.clientWidth, natural.w, 16);
   return Number(zoom) || 1;
 }
 
@@ -496,10 +550,15 @@ function layout() {
 }
 
 function updateZoomLabel(scale) {
-  const text = getState().zoom === "fit" ? "Вписать" : `${Math.round(scale * 100)} %`;
+  const zoom = getState().zoom;
+  let text = `${Math.round(scale * 100)} %`;
+  if (zoom === "fit") text = "Вписать";
+  else if (zoom === "fit-width") text = "По ширине";
   if (zoomLabel.textContent !== text) zoomLabel.textContent = text;
   const status = document.querySelector("[data-role='zoom-label']");
   if (status && status.textContent !== text) status.textContent = text;
+  const fitWidthBtn = document.querySelector("[data-role='zoom-fit-width']");
+  if (fitWidthBtn) fitWidthBtn.setAttribute("aria-pressed", zoom === "fit-width" ? "true" : "false");
 }
 
 function zoomSteps() {
@@ -652,17 +711,12 @@ function onPointerDown(event) {
   const state = getState();
   const point = imagePoint(event);
   if (!point) return;
-  if (event.button === 2) {
+  if (state.tool === "brush") {
+    if (event.button !== 0 && event.button !== 2) return;
     event.preventDefault();
-    drag = { kind: "stroke", mode: "erase", points: [point] };
-    drawStroke();
-    frame.setPointerCapture(event.pointerId);
-    return;
-  }
-  if (state.tool === "brush" || state.tool === "eraser") {
     drag = {
       kind: "stroke",
-      mode: state.tool === "eraser" ? "erase" : "paint",
+      mode: brushModeFromButton(event.button),
       points: [point],
     };
     drawStroke();
@@ -670,14 +724,21 @@ function onPointerDown(event) {
     return;
   }
   if (state.tool === "polyline") {
+    if (event.button !== 0 && event.button !== 2) return;
     event.preventDefault();
-    if (!polyDraft) polyDraft = { points: [], hover: null };
+    const mode = polylineModeFromButton(event.button);
+    if (!polyDraft) polyDraft = { points: [], hover: null, mode };
+    else if (!polyDraft.points.length) polyDraft.mode = mode;
     const last = polyDraft.points[polyDraft.points.length - 1];
     if (!last || Math.abs(last[0] - point[0]) >= 1 || Math.abs(last[1] - point[1]) >= 1) {
       polyDraft.points.push(point);
     }
     polyDraft.hover = null;
     drawPolylineDraft();
+    return;
+  }
+  if (event.button === 2) {
+    event.preventDefault();
     return;
   }
   if (state.tool === "region") {
@@ -1087,7 +1148,7 @@ function drawPolylineDraft() {
   }
   strokeLayer.setAttribute("viewBox", `0 0 ${natural.w} ${natural.h}`);
   const joined = points.map((point) => `${Math.round(point[0])},${Math.round(point[1])}`).join(" ");
-  const color = MASK_PAINT_COLOR;
+  const color = polyDraft.mode === "erase_fill" ? MASK_ERASE_COLOR : MASK_PAINT_COLOR;
   const dots = polyDraft.points.map((point) => (
     `<circle cx="${Math.round(point[0])}" cy="${Math.round(point[1])}" r="3" fill="${color}" opacity="0.85"></circle>`
   )).join("");

@@ -244,10 +244,11 @@ def apply_strokes(mask: np.ndarray, strokes: list[MaskStroke]) -> np.ndarray:
         points = [(int(point[0]), int(point[1])) for point in stroke.points]
         if not points:
             continue
-        if stroke.mode == "fill":
+        if stroke.mode in ("fill", "erase_fill"):
             if len(points) >= 3:
                 contour = np.asarray(points, dtype=np.int32).reshape((-1, 1, 2))
-                cv2.fillPoly(result, [contour], 255, lineType=cv2.LINE_8)
+                color = 0 if stroke.mode == "erase_fill" else 255
+                cv2.fillPoly(result, [contour], color, lineType=cv2.LINE_8)
             continue
         radius = int(stroke.radius)
         if radius <= 0:

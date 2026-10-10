@@ -28,6 +28,7 @@ import {
   session,
   translate,
 } from "./api.js";
+import { initApplyChip } from "./apply_chip.js";
 import { render as renderBatch } from "./batch-panel.js";
 import { closeTop, confirm, init as initDialogs, isAnyOpen, openExport, openGlossary, openHotkeys, openWorker } from "./dialogs.js";
 import { init as initInspector } from "./inspector.js";
@@ -76,6 +77,8 @@ import {
 } from "./state.js";
 import {
   cancelPolylineDraft,
+  applyEditorSession,
+  captureEditorSession,
   commitPolylineDraft,
   init as initViewer,
   nudgeBrush,
@@ -98,6 +101,7 @@ function icon(id) {
 function start() {
   initPages(onPageCommand, { beforeLeavePage: resolveDeferredOrAbort });
   initViewer();
+  initApplyChip({ onCommit: () => commitDeferredEdits() });
   initInspector();
   initSettings();
   initDialogs();
@@ -179,7 +183,6 @@ function bindChrome() {
   }));
   document.querySelector("[data-role='translate-page']")?.addEventListener("click", translatePage);
   document.querySelector("[data-role='translate-all']")?.addEventListener("click", translateAll);
-  document.querySelector("[data-role='apply-edits']")?.addEventListener("click", () => commitDeferredEdits());
   document.querySelector("[data-role='stop']")?.addEventListener("click", () => stopJobs());
   document.querySelectorAll("[data-role='llm-retry']").forEach((button) => button.addEventListener("click", retryLlm));
   document.querySelector("[data-role='lang-target']").addEventListener("change", saveLanguages);
@@ -508,7 +511,12 @@ async function openFolder() {
 function takeProject(data) {
   if (!data || data.cancelled || data.canceled) return;
   if (data.project || data.pages) {
-    setProject(data.project, data.pages || data.project?.pages, data.package);
+    const editor = data.editor;
+    const prefer = editor && (editor.active_page_id || editor.activePageId);
+    setProject(data.project, data.pages || data.project?.pages, data.package, {
+      activePageId: prefer || undefined,
+    });
+    if (editor) applyEditorSession(editor, { selectPages });
   } else if (data.package) {
     setPackage(data.package);
   }
@@ -536,8 +544,9 @@ async function saveProject() {
   const current = getState();
   if (!current.pages.length) return;
   try {
+    const editor = captureEditorSession();
     if (current.package && current.package.path) {
-      const data = await packageSave(current.package.path);
+      const data = await packageSave(current.package.path, editor);
       takeProject(data);
       return;
     }
@@ -552,7 +561,8 @@ async function saveProjectAs() {
   if (!getState().pages.length) return;
   try {
     const name = (getState().project && getState().project.name) || "project";
-    const data = await dialogSavePackage(`${name}.ilt.zip`);
+    const editor = captureEditorSession();
+    const data = await dialogSavePackage(`${name}.ilt.zip`, editor);
     takeProject(data);
   } catch (error) {
     showError(error);

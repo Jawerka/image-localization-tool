@@ -47,9 +47,44 @@ class PackResult:
 class UnpackResult:
     project: dict
     warnings: list[str] = field(default_factory=list)
+    editor: dict | None = None
 
 
-def pack_project(store: ProjectStore, project_id: str, dest: Path) -> PackResult:
+def normalize_editor(raw: object) -> dict | None:
+    """Сессия UI: active_page_id, zoom, scroll_left, scroll_top."""
+    if not isinstance(raw, dict):
+        return None
+    active = str(raw.get("active_page_id") or raw.get("activePageId") or "").strip()
+    zoom = raw.get("zoom")
+    if zoom not in ("fit", "fit-width"):
+        try:
+            zoom_num = float(zoom)
+            zoom = zoom_num if zoom_num > 0 else "fit"
+        except (TypeError, ValueError):
+            zoom = "fit"
+    try:
+        scroll_left = max(0.0, float(raw.get("scroll_left", raw.get("scrollLeft", 0)) or 0))
+    except (TypeError, ValueError):
+        scroll_left = 0.0
+    try:
+        scroll_top = max(0.0, float(raw.get("scroll_top", raw.get("scrollTop", 0)) or 0))
+    except (TypeError, ValueError):
+        scroll_top = 0.0
+    return {
+        "active_page_id": active,
+        "zoom": zoom,
+        "scroll_left": scroll_left,
+        "scroll_top": scroll_top,
+    }
+
+
+def pack_project(
+    store: ProjectStore,
+    project_id: str,
+    dest: Path,
+    *,
+    editor: dict | None = None,
+) -> PackResult:
     """Собрать ZIP по текущему порядку страниц. Ошибки полей не прерывают весь Save."""
     project = store.open_project(project_id)
     pages = [item for item in project.get("pages") or [] if isinstance(item, dict)]
@@ -163,6 +198,9 @@ def pack_project(store: ProjectStore, project_id: str, dest: Path) -> PackResult
             for item in manifest_pages
         ],
     }
+    editor_payload = normalize_editor(editor)
+    if editor_payload is not None:
+        manifest["editor"] = editor_payload
     glossary = project.get("glossary")
     if isinstance(glossary, list):
         manifest["glossary"] = glossary
@@ -326,7 +364,12 @@ def unpack_project(store: ProjectStore, package: Path) -> UnpackResult:
                 except (ValueError, OSError) as exc:
                     warnings.append(f"styles: {exc}")
 
-            return UnpackResult(project=store.open_project(created_id), warnings=warnings)
+            editor_payload = normalize_editor(manifest.get("editor"))
+            return UnpackResult(
+                project=store.open_project(created_id),
+                warnings=warnings,
+                editor=editor_payload,
+            )
         except Exception:
             if created_id is not None:
                 shutil.rmtree(store.project_dir(created_id), ignore_errors=True)

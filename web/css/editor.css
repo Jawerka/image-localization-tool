@@ -204,6 +204,29 @@
   display: none !important;
 }
 
+.frame__apply {
+  position: absolute;
+  left: 50%;
+  top: var(--space);
+  z-index: 9;
+  transform: translateX(calc(-50% + var(--apply-offset, 0px)));
+  width: max-content;
+  max-width: calc(100% - 2 * var(--space));
+  touch-action: none;
+  cursor: grab;
+  user-select: none;
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--text-primary) 18%, transparent);
+}
+
+.frame__apply.is-dragging {
+  cursor: grabbing;
+  transition: none;
+}
+
+.frame__apply:not(.is-dragging) {
+  transition: transform 160ms ease;
+}
+
 .frame__progress {
   position: absolute;
   left: 50%;

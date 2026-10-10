@@ -1269,8 +1269,9 @@ def _package_save(state: AppState, body: dict | None = None) -> dict:
     if not path_text:
         raise ValueError("Нужен путь для сохранения проекта")
     dest = Path(path_text)
+    editor = body.get("editor") if isinstance(body.get("editor"), dict) else None
     try:
-        packed = pack_project(state.store, state.project_id, dest)
+        packed = pack_project(state.store, state.project_id, dest, editor=editor)
     except PortableProjectError as exc:
         raise ValueError(str(exc)) from exc
     with state._lock:
@@ -1279,6 +1280,12 @@ def _package_save(state: AppState, body: dict | None = None) -> dict:
     payload = _collection(state)
     payload["package"] = _package_status(state)
     payload["path"] = str(packed.path)
+    if editor is not None:
+        from src.app.portable_project import normalize_editor
+
+        normalized = normalize_editor(editor)
+        if normalized is not None:
+            payload["editor"] = normalized
     if packed.warnings:
         payload["warnings"] = packed.warnings
     return payload
@@ -1297,6 +1304,8 @@ def _apply_portable_load(state: AppState, package: Path) -> dict:
         payload = _collection(state)
     payload["package"] = _package_status(state)
     payload["path"] = str(package)
+    if loaded.editor:
+        payload["editor"] = loaded.editor
     if loaded.warnings:
         payload["warnings"] = loaded.warnings
     return payload
@@ -1347,7 +1356,10 @@ def _dialog_save_package(state: AppState, body: dict | None = None) -> dict:
         payload["cancelled"] = True
         payload["package"] = _package_status(state)
         return payload
-    return _package_save(state, {"path": str(chosen)})
+    save_body: dict = {"path": str(chosen)}
+    if isinstance(body.get("editor"), dict):
+        save_body["editor"] = body["editor"]
+    return _package_save(state, save_body)
 
 
 def _open_recent(state: AppState, body: dict) -> dict:

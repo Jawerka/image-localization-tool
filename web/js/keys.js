@@ -215,7 +215,6 @@ function onKey(event) {
     KeyR: "region",
     KeyB: "brush",
     KeyP: "polyline",
-    KeyE: "eraser",
     KeyH: "hand",
   };
   const viewByCode = { Digit1: "original", Digit2: "result", Digit3: "compare" };

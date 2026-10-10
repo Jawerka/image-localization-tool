@@ -103,5 +103,12 @@ class TestMaskStroke:
         })
         assert filled.mode == "fill"
         assert MaskStroke.from_dict(filled.to_dict()) == filled
+        erase_fill = MaskStroke.from_dict({
+            "mode": "erase_fill",
+            "radius": 1,
+            "points": [[0, 0], [2, 0], [2, 2]],
+        })
+        assert erase_fill.mode == "erase_fill"
+        assert MaskStroke.from_dict(erase_fill.to_dict()) == erase_fill
         with pytest.raises(ValueError):
             MaskStroke.from_dict({"mode": "scribble", "radius": 1, "points": []})

@@ -174,3 +174,13 @@ def test_apply_strokes_fill_polygon():
         MaskStroke(mode="fill", radius=1, points=[(2, 2), (17, 2)]),
     ])
     assert int(too_few.sum()) == 0
+
+
+def test_apply_strokes_erase_fill_polygon():
+    mask = np.full((20, 20), 255, dtype=np.uint8)
+    erased = apply_strokes(mask, [
+        MaskStroke(mode="erase_fill", radius=1, points=[(2, 2), (17, 2), (17, 17), (2, 17)]),
+    ])
+    assert erased[10, 10] == 0
+    assert erased[0, 0] == 255
+    assert int(mask.sum()) == 20 * 20 * 255

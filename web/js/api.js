@@ -146,9 +146,10 @@ export function packageStatus() {
   return request("GET", "/api/project/package/status");
 }
 
-export function packageSave(path) {
+export function packageSave(path, editor) {
   const body = {};
   if (path) body.path = path;
+  if (editor && typeof editor === "object") body.editor = editor;
   return request("POST", "/api/project/package/save", body);
 }
 
@@ -164,9 +165,10 @@ export function dialogOpenPackage() {
   return request("POST", "/api/dialog/project-package/open", {});
 }
 
-export function dialogSavePackage(defaultName) {
+export function dialogSavePackage(defaultName, editor) {
   const body = {};
   if (defaultName) body.default_name = defaultName;
+  if (editor && typeof editor === "object") body.editor = editor;
   return request("POST", "/api/dialog/project-package/save", body);
 }
 

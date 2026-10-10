@@ -254,7 +254,7 @@ class MaskStroke:
     @classmethod
     def from_dict(cls, data: dict) -> "MaskStroke":
         mode = str(data.get("mode") or "")
-        if mode not in ("paint", "erase", "fill"):
+        if mode not in ("paint", "erase", "fill", "erase_fill"):
             raise ValueError(f"Некорректный режим штриха: {mode}")
         points = [(int(point[0]), int(point[1])) for point in data.get("points") or []]
         return cls(mode=mode, radius=int(data.get("radius") or 0), points=points)

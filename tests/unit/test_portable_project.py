@@ -196,3 +196,33 @@ def test_pack_empty_project_fails(tmp_path):
     except PortableProjectError:
         raised = True
     assert raised
+
+
+def test_pack_unpack_preserves_editor_session(tmp_path):
+    store = ProjectStore(tmp_path / "data")
+    project = store.create_project("Глава", "en", "ru")
+    a = tmp_path / "a.png"
+    b = tmp_path / "b.png"
+    _png(a)
+    _png(b)
+    pages = store.add_sources(project["id"], [a, b])
+    editor = {
+        "active_page_id": pages[1]["id"],
+        "zoom": "fit-width",
+        "scroll_left": 40,
+        "scroll_top": 80,
+    }
+    packed = pack_project(store, project["id"], tmp_path / "sess.ilt.zip", editor=editor)
+    with zipfile.ZipFile(packed.path) as archive:
+        manifest = json.loads(archive.read("project.json").decode("utf-8"))
+    assert manifest["editor"]["active_page_id"] == pages[1]["id"]
+    assert manifest["editor"]["zoom"] == "fit-width"
+    assert manifest["editor"]["scroll_left"] == 40
+    assert manifest["editor"]["scroll_top"] == 80
+
+    loaded = unpack_project(store, packed.path)
+    assert loaded.editor is not None
+    assert loaded.editor["active_page_id"] == pages[1]["id"]
+    assert loaded.editor["zoom"] == "fit-width"
+    assert loaded.editor["scroll_left"] == 40.0
+    assert loaded.editor["scroll_top"] == 80.0

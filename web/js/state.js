@@ -367,17 +367,23 @@ export function setPackage(info) {
   patch({ package: normalizePackage(info) });
 }
 
-export function setProject(project, pages, packageInfo) {
+export function setProject(project, pages, packageInfo, options = {}) {
   const list = normalizePages(pages || project?.pages || []);
-  const active = list[0] ? list[0].id : "";
+  const prefer = String(options.activePageId || state.activePageId || "");
+  const active = list.some((page) => page.id === prefer) ? prefer : (list[0] ? list[0].id : "");
+  const selected = (state.selectedPageIds || [])
+    .map(String)
+    .filter((id) => list.some((page) => page.id === id));
+  const focusPrefer = String(options.focusPageId || state.focusPageId || active);
+  const focus = list.some((page) => page.id === focusPrefer) ? focusPrefer : active;
   const next = {
     ...state,
     project: project || null,
     pages: list,
     activePageId: active,
-    focusPageId: active,
-    selectedPageIds: active ? [active] : [],
-    anchorPageId: active,
+    focusPageId: focus,
+    selectedPageIds: selected.length ? selected : (active ? [active] : []),
+    anchorPageId: list.some((page) => page.id === state.anchorPageId) ? state.anchorPageId : active,
     document: null,
     selectedRegionId: null,
     imageSize: { w: 0, h: 0 },
