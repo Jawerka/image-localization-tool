@@ -96,7 +96,7 @@ function emptyState() {
     view: "original",
     showBoxes: false,
     showMask: false,
-    tool: "select",
+    tool: "brush",
     brushSize: 12,
     zoom: "fit",
     curtain: 0.58,
@@ -392,9 +392,8 @@ export function selectPages(ids, activeId, focusId) {
   const focus = focusId ? String(focusId) : active;
   const changed = active !== state.activePageId;
   if (changed && state.deferredApply && state.activePageId) {
-    const leaving = state.activePageId;
-    state = { ...state, deferredApply: false };
-    if (pendingBody.has(leaving)) flush(leaving);
+    /* Уход без resolveDeferredOrAbort: не flush, черновик отбрасываем. */
+    pendingBody.delete(state.activePageId);
   }
   if (changed && timerPage && timerPage !== active) {
     const leaving = timerPage;
@@ -547,6 +546,33 @@ export function commitDeferredEdits() {
   state = { ...state, deferredApply: false };
   emit();
   scheduleSave(state.activePageId, 0);
+}
+
+/** Сбросить неподтверждённые штрихи и перезагрузить документ с сервера. */
+export function discardDeferredEdits() {
+  const pageId = state.activePageId;
+  if (!pageId) return Promise.resolve();
+  pendingBody.delete(pageId);
+  if (timerPage === pageId) {
+    window.clearTimeout(saveTimer);
+    saveTimer = 0;
+    timerPage = "";
+  }
+  coalesceKey = "";
+  state = { ...state, deferredApply: false };
+  clearHistory(pageId);
+  emit();
+  const token = ++loadToken;
+  return getPage(pageId).then((data) => {
+    if (token !== loadToken || state.activePageId !== pageId) return;
+    applyDetail(pageId, data, false, true);
+  }).catch((error) => {
+    if (token !== loadToken) return;
+    setBanner("save", {
+      tone: "warning",
+      text: error.message || "Не удалось открыть страницу",
+    });
+  });
 }
 
 export function undo() {

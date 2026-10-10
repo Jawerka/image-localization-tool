@@ -47,6 +47,7 @@ import {
   applyBootstrap,
   deviceLabel,
   commitDeferredEdits,
+  discardDeferredEdits,
   editDocument,
   findRegion,
   getState,
@@ -71,6 +72,7 @@ import {
   undo,
   updatePage,
   visualStatus,
+  whenSaved,
 } from "./state.js";
 import {
   cancelPolylineDraft,
@@ -94,7 +96,7 @@ function icon(id) {
 }
 
 function start() {
-  initPages(onPageCommand);
+  initPages(onPageCommand, { beforeLeavePage: resolveDeferredOrAbort });
   initViewer();
   initInspector();
   initSettings();
@@ -449,8 +451,33 @@ async function confirmDiscardDirtyPackage(title, detail) {
   });
 }
 
+/** Спросить про неподтверждённые правки маски. true — можно продолжать. */
+async function resolveDeferredOrAbort() {
+  const state = getState();
+  if (!state.deferredApply) return true;
+  const choice = await confirm({
+    title: "Неподтверждённые правки маски",
+    text: "Есть правки кисти или ластика, ещё не нажато «Готово». Подтвердить и пересчитать, отменить правки или остаться?",
+    ok: "Готово",
+    discard: "Отменить правки",
+    cancel: "Остаться",
+  });
+  if (choice === "commit") {
+    const pageId = getState().activePageId;
+    commitDeferredEdits();
+    if (pageId) await whenSaved(pageId);
+    return true;
+  }
+  if (choice === "discard") {
+    await discardDeferredEdits();
+    return true;
+  }
+  return false;
+}
+
 async function openFiles() {
   closeMenus();
+  if (!(await resolveDeferredOrAbort())) return;
   if (!(await confirmDiscardDirtyPackage(
     "Открыть файлы?",
     "Есть несохранённые изменения. Открытие может заменить текущий проект (например, .ilt.zip). Продолжить без сохранения?",
@@ -465,6 +492,7 @@ async function openFiles() {
 
 async function openFolder() {
   closeMenus();
+  if (!(await resolveDeferredOrAbort())) return;
   if (!(await confirmDiscardDirtyPackage(
     "Открыть папку?",
     "Есть несохранённые изменения. Открытие может заменить текущий проект. Продолжить без сохранения?",
@@ -490,6 +518,7 @@ function takeProject(data) {
 
 async function loadProject() {
   closeMenus();
+  if (!(await resolveDeferredOrAbort())) return;
   if (!(await confirmDiscardDirtyPackage(
     "Загрузить проект?",
     "Есть несохранённые изменения. Загрузка заменит текущий проект. Продолжить без сохранения?",
@@ -533,6 +562,7 @@ async function saveProjectAs() {
 async function closeActiveProject() {
   closeMenus();
   if (!getState().project) return;
+  if (!(await resolveDeferredOrAbort())) return;
   try {
     let data;
     try {
@@ -572,6 +602,7 @@ async function saveLanguages() {
 async function translatePage() {
   const pageId = getState().activePageId;
   if (!pageId) return;
+  if (!(await resolveDeferredOrAbort())) return;
   try {
     await translate("page", pageId);
     patch({ busy: true, batch: ensureRunStart() });
@@ -582,6 +613,7 @@ async function translatePage() {
 
 async function translateAll() {
   if (!getState().pages.length) return;
+  if (!(await resolveDeferredOrAbort())) return;
   const batch = getState().batch || {};
   const fresh = batch.status !== "running" && batch.status !== "paused";
   try {
@@ -619,6 +651,7 @@ async function retryLlm() {
 
 async function exitApp() {
   let skipBusyConfirm = false;
+  if (!(await resolveDeferredOrAbort())) return;
   if (getState().busy) {
     const index = getState().job.index || pageNumber(getState(), getState().activePageId);
     const total = getState().job.total || getState().pages.length;
@@ -655,6 +688,7 @@ async function exitApp() {
 async function onPageCommand(action, ids, pageId) {
   try {
     if (action === "translate" || action === "retranslate") {
+      if (String(pageId) === String(getState().activePageId) && !(await resolveDeferredOrAbort())) return;
       await translate("page", pageId);
       patch({ busy: true, batch: ensureRunStart() });
       return;
@@ -664,6 +698,8 @@ async function onPageCommand(action, ids, pageId) {
       return;
     }
     if (action === "remove") {
+      const touchesActive = ids.map(String).includes(String(getState().activePageId || ""));
+      if (touchesActive && !(await resolveDeferredOrAbort())) return;
       const ok = await confirm({
         title: ids.length > 1 ? "Убрать страницы из проекта?" : "Убрать страницу из проекта?",
         text: "Страницы будут убраны из проекта. Файлы оригиналов на диске останутся. Это нельзя отменить.",
@@ -819,13 +855,15 @@ function onCancelled() {
   });
 }
 
-function movePage(delta) {
+async function movePage(delta) {
   const state = getState();
   if (!state.pages.length) return;
   let index = state.pages.findIndex((page) => page.id === state.activePageId);
   if (index < 0) index = 0;
   index = Math.max(0, Math.min(state.pages.length - 1, index + delta));
   const id = state.pages[index].id;
+  if (id === state.activePageId) return;
+  if (!(await resolveDeferredOrAbort())) return;
   setAnchor(id);
   selectPages([id], id, id);
 }
@@ -875,6 +913,11 @@ async function onDrop(event) {
     if (looksLikeFiles) setBanner("drop", { text: DROP_HINT });
     return;
   }
+  if (!(await resolveDeferredOrAbort())) return;
+  if (!(await confirmDiscardDirtyPackage(
+    "Открыть файлы?",
+    "Есть несохранённые изменения. Открытие может заменить текущий проект. Продолжить без сохранения?",
+  ))) return;
   try {
     const data = await dropPaths(paths);
     takeProject(data);
@@ -971,10 +1014,14 @@ const batchActions = {
   })).catch(showError),
   importFolder: () => importChapterFolder(),
   openGlossary: () => openGlossary(),
-  focusPage: (pageId) => selectPages([pageId], pageId, pageId),
+  focusPage: async (pageId) => {
+    if (String(pageId) !== String(getState().activePageId || "") && !(await resolveDeferredOrAbort())) return;
+    selectPages([pageId], pageId, pageId);
+  },
 };
 
 async function importChapterFolder() {
+  if (!(await resolveDeferredOrAbort())) return;
   const chapters = await confirm({
     title: "Импорт папки",
     text: "Каждая подпапка — глава?",
@@ -1036,7 +1083,7 @@ function pasteRegionStyle() {
   });
 }
 
-function focusNextProblem() {
+async function focusNextProblem() {
   const pages = getState().pages;
   if (!pages.length) return;
   const problem = (page) => page.status === "error" || page.status === "offline" || page.overflow;
@@ -1044,6 +1091,7 @@ function focusNextProblem() {
   for (let step = 1; step <= pages.length; step += 1) {
     const page = pages[(start + step + pages.length) % pages.length];
     if (problem(page)) {
+      if (page.id !== getState().activePageId && !(await resolveDeferredOrAbort())) return;
       selectPages([page.id], page.id, page.id);
       return;
     }

@@ -20,6 +20,8 @@ let menuTitle;
 let contextId = "";
 let focusFromKeys = false;
 let onCommand = () => {};
+/** Перед сменой активной страницы (async → false = отмена). */
+let beforeLeavePage = async () => true;
 let drawnKey = "";
 let dragId = "";
 let dragMoved = false;
@@ -31,8 +33,9 @@ function icon(id, extra) {
   return `<svg class="${cls}" aria-hidden="true"><use href="icons/icons.svg#${id}"></use></svg>`;
 }
 
-export function init(command) {
+export function init(command, options = {}) {
   onCommand = command;
+  if (typeof options.beforeLeavePage === "function") beforeLeavePage = options.beforeLeavePage;
   list = document.querySelector("[data-role='page-list']");
   sum = document.querySelector(".pages__sum span");
   menu = document.querySelector("[data-role='context-menu']");
@@ -293,7 +296,16 @@ function onListKey(event) {
   }
 }
 
-function move(key, event) {
+async function applyPageSelection(ids, active, focus) {
+  const nextActive = active ? String(active) : "";
+  if (nextActive && nextActive !== String(getState().activePageId || "")) {
+    if (!(await beforeLeavePage())) return false;
+  }
+  selectPages(ids, active, focus);
+  return true;
+}
+
+async function move(key, event) {
   const current = getState();
   const pages = current.pages;
   const focus = current.focusPageId || current.activePageId || pages[0].id;
@@ -314,14 +326,14 @@ function move(key, event) {
     const start = pages.findIndex((page) => page.id === anchor);
     const from = Math.min(start < 0 ? index : start, index);
     const to = Math.max(start < 0 ? index : start, index);
-    selectPages(pages.slice(from, to + 1).map((page) => page.id), id, id);
+    await applyPageSelection(pages.slice(from, to + 1).map((page) => page.id), id, id);
     return;
   }
   setAnchor(id);
-  selectPages([id], id, id);
+  await applyPageSelection([id], id, id);
 }
 
-function choose(id, event, fromKeyboard) {
+async function choose(id, event, fromKeyboard) {
   const current = getState();
   const ids = current.pages.map((page) => page.id);
   focusFromKeys = fromKeyboard;
@@ -330,7 +342,7 @@ function choose(id, event, fromKeyboard) {
     const end = ids.indexOf(id);
     const from = Math.min(start < 0 ? end : start, end);
     const to = Math.max(start < 0 ? end : start, end);
-    selectPages(ids.slice(Math.max(0, from), to + 1), id, id);
+    await applyPageSelection(ids.slice(Math.max(0, from), to + 1), id, id);
     return;
   }
   if (event.ctrlKey || event.metaKey) {
@@ -340,14 +352,14 @@ function choose(id, event, fromKeyboard) {
     const next = ids.filter((item) => selected.has(item));
     const active = next.includes(id) ? id : next[0];
     setAnchor(id);
-    selectPages(next, active, id);
+    await applyPageSelection(next, active, id);
     return;
   }
   setAnchor(id);
-  selectPages([id], id, id);
+  await applyPageSelection([id], id, id);
 }
 
-function onContext(event) {
+async function onContext(event) {
   const option = event.target.closest("[data-page-id]");
   if (!option) return;
   event.preventDefault();
@@ -355,7 +367,7 @@ function onContext(event) {
   const current = getState();
   if (!current.selectedPageIds.includes(id)) {
     setAnchor(id);
-    selectPages([id], id, id);
+    if (!(await applyPageSelection([id], id, id))) return;
   } else {
     moveFocus(id);
   }

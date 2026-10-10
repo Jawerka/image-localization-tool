@@ -7,6 +7,8 @@ import { getState, isReadyStatus, plural, setBanner } from "./state.js";
 let overlay;
 let lastFocus = null;
 let confirmResolve = null;
+/** Когда true, confirm возвращает "commit" | "discard" | false вместо boolean. */
+let confirmChoiceMode = false;
 let pickResolve = null;
 let dirReady = false;
 let glossaryRows = null;
@@ -21,7 +23,12 @@ export function init() {
   overlay.querySelectorAll("[data-dialog-close]").forEach((button) => {
     button.addEventListener("click", () => closeTop());
   });
-  document.querySelector("[data-role='confirm-ok']").addEventListener("click", () => finishConfirm(true));
+  document.querySelector("[data-role='confirm-ok']").addEventListener("click", () => {
+    finishConfirm(confirmChoiceMode ? "commit" : true);
+  });
+  document.querySelector("[data-role='confirm-discard']")?.addEventListener("click", () => {
+    finishConfirm("discard");
+  });
   document.querySelector("[data-role='confirm-cancel']").addEventListener("click", () => finishConfirm(false));
   document.querySelector("[data-role='export-browse']").addEventListener("click", browseExport);
   document.querySelector("[data-role='export-go']").addEventListener("click", runExport);
@@ -53,11 +60,22 @@ export function closeTop() {
   return true;
 }
 
+/**
+ * Диалог подтверждения.
+ * Без options.discard — boolean (ok → true, cancel/Esc → false).
+ * С options.discard — "commit" | "discard" | false.
+ */
 export function confirm(options) {
+  confirmChoiceMode = Boolean(options.discard);
   document.querySelector("[data-role='confirm-title']").textContent = options.title;
   document.querySelector("[data-role='confirm-text']").textContent = options.text;
   document.querySelector("[data-role='confirm-ok']").textContent = options.ok || "ОК";
   document.querySelector("[data-role='confirm-cancel']").textContent = options.cancel || "Отмена";
+  const discardBtn = document.querySelector("[data-role='confirm-discard']");
+  if (discardBtn) {
+    discardBtn.hidden = !confirmChoiceMode;
+    discardBtn.textContent = options.discard || "Отменить правки";
+  }
   show("confirm");
   document.querySelector("[data-role='confirm-cancel']").focus();
   return new Promise((resolve) => {
@@ -260,6 +278,9 @@ function modelRow(item, index) {
 function finishConfirm(value) {
   const resolve = confirmResolve;
   confirmResolve = null;
+  confirmChoiceMode = false;
+  const discardBtn = document.querySelector("[data-role='confirm-discard']");
+  if (discardBtn) discardBtn.hidden = true;
   hide();
   if (resolve) resolve(value);
 }

@@ -84,6 +84,11 @@ export function init() {
   range.addEventListener("input", () => {
     patch({ brushSize: Number(range.value) || 1 });
   });
+  const sizeStrip = document.querySelector("[data-role='brush-size-label']");
+  sizeStrip?.addEventListener("wheel", (event) => {
+    event.preventDefault();
+    nudgeBrush(event.deltaY < 0 ? 1 : -1);
+  }, { passive: false });
   document.querySelector("[data-role='zoom-out']").addEventListener("click", () => stepZoom(-1));
   document.querySelector("[data-role='zoom-in']").addEventListener("click", () => stepZoom(1));
   document.querySelector("[data-role='zoom-value']").addEventListener("click", () => setZoom("fit"));
@@ -624,9 +629,9 @@ function icon(id) {
 
 function onPointerDown(event) {
   if (stage.hidden) return;
-  if (event.button !== 0 && event.button !== 1) return;
+  if (event.button !== 0 && event.button !== 1 && event.button !== 2) return;
   const pan = event.button === 1 || spaceDown || isSpaceDown() || getState().tool === "hand";
-  if (pan) {
+  if (pan && event.button !== 2) {
     event.preventDefault();
     drag = {
       kind: "pan",
@@ -643,8 +648,19 @@ function onPointerDown(event) {
   const state = getState();
   const point = imagePoint(event);
   if (!point) return;
+  if (event.button === 2) {
+    event.preventDefault();
+    drag = { kind: "stroke", mode: "erase", points: [point] };
+    drawStroke();
+    frame.setPointerCapture(event.pointerId);
+    return;
+  }
   if (state.tool === "brush" || state.tool === "eraser") {
-    drag = { kind: "stroke", points: [point] };
+    drag = {
+      kind: "stroke",
+      mode: state.tool === "eraser" ? "erase" : "paint",
+      points: [point],
+    };
     drawStroke();
     frame.setPointerCapture(event.pointerId);
     return;
@@ -794,7 +810,7 @@ function onPointerUp(event) {
   cursor.hidden = true;
   if (!done) return;
   if (done.kind === "stroke" && done.points.length) {
-    const mode = getState().tool === "eraser" ? "erase" : "paint";
+    const mode = done.mode === "erase" ? "erase" : "paint";
     const radius = getState().brushSize || 12;
     editDocument((document) => {
       document.strokes.push({
@@ -1080,7 +1096,8 @@ function drawPolylineDraft() {
 
 function moveCursor(event) {
   const tool = getState().tool;
-  if (!BRUSH_SIZE_TOOLS.has(tool) || !natural.w) {
+  const erasing = drag && drag.kind === "stroke" && drag.mode === "erase";
+  if ((!BRUSH_SIZE_TOOLS.has(tool) && !erasing) || !natural.w) {
     cursor.hidden = true;
     return;
   }
