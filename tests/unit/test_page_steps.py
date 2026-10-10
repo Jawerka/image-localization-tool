@@ -18,16 +18,16 @@ class _EmptyDetector:
         return []
 
 
-class _OverflowThenFit:
-    """Первый render — overflow, дальше — ок (как после shorten)."""
+class _AlwaysOverflow:
+    """Render всегда с overflow; запоминает force."""
 
     def __init__(self):
         self.calls = 0
+        self.last_force = None
 
     def render(self, image, regions, force=False):
         self.calls += 1
-        if force or self.calls > 1:
-            return image, []
+        self.last_force = force
         return image, [5]
 
 
@@ -65,19 +65,22 @@ def test_analyze_accepts_two_argument_callback():
     assert (20, "Регионов: 0") in seen
 
 
-def test_typeset_prepares_translator_before_shorten():
-    """apply_document / typeset часто без translator — shorten не должен падать на None."""
-    typesetter = _OverflowThenFit()
+def test_typeset_does_not_auto_shorten_on_overflow():
+    """Overflow только варнит; перевод и translator не трогаем."""
+    typesetter = _AlwaysOverflow()
     pipeline = PagePipeline(typesetter=typesetter)
     assert pipeline.translator is None
+    original = "очень длинный перевод который не влезает в рамку"
     region = TextRegion(
         id=5,
         bbox=(0, 0, 40, 20),
         text="hello world",
-        translation="очень длинный перевод который не влезает в рамку",
+        translation=original,
     )
     warnings: list[str] = []
     pipeline._typeset(Image.new("RGB", (80, 40), "white"), [region], "ru", warnings)
-    assert pipeline.translator is not None
-    assert not any("NoneType" in item for item in warnings)
-    assert typesetter.calls >= 2
+    assert pipeline.translator is None
+    assert region.translation == original
+    assert typesetter.calls == 1
+    assert typesetter.last_force is True
+    assert any("не влез" in item for item in warnings)

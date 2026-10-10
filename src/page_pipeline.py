@@ -399,7 +399,7 @@ class PagePipeline:
         cancel_check: CancelCheck | None = None,
         _skip_layout_scale: bool = False,
     ) -> tuple[Image.Image, list[int]]:
-        """Вёрстка с сокращением. Второй результат — id регионов, которые не влезли."""
+        """Вёрстка переводов. Второй результат — id регионов, которые не влезли."""
         report = _bind_report(progress_callback, cancel_check)
         if warnings is None:
             warnings = []
@@ -771,31 +771,7 @@ class PagePipeline:
             regions,
             enabled=bool(getattr(self.config, "auto_stylized_fonts", True)),
         )
-        rendered = image
-        overflow: list[int] = []
-        for attempt in range(3):
-            force = attempt == 2
-            rendered, overflow = self.typesetter.render(image, regions, force=force)
-            if not overflow or force:
-                break
-            # apply_document / typeset часто идут без заранее созданного translator
-            self._prepare_translator(warnings)
-            for region in regions:
-                if region.id not in overflow:
-                    continue
-                limit = max(8, int(len(region.translation) * 0.7))
-                try:
-                    region.translation = self.translator.shorten(
-                        region.translation,
-                        target_lang=target_lang,
-                        max_chars=limit,
-                        speaker_gender=region.speaker_gender,
-                        original=region.text,
-                    )
-                except Exception as exc:
-                    warnings.append(f"Не удалось сократить регион {region.id}: {exc}")
-                    rendered, overflow = self.typesetter.render(image, regions, force=True)
-                    return rendered, overflow
+        rendered, overflow = self.typesetter.render(image, regions, force=True)
         if overflow:
             warnings.append(f"Текст не влез полностью: {overflow}")
         return rendered, overflow

@@ -26,6 +26,10 @@ const ZOOM_MAX_PERCENT = 200;
 const ZOOM_STEP_PERCENT = 5;
 const MASK_DRAW_TOOLS = new Set(["brush", "eraser", "polyline"]);
 const BRUSH_SIZE_TOOLS = new Set(["brush", "eraser"]);
+/** Превью добавления в маску. */
+const MASK_PAINT_COLOR = "#16a34a";
+/** Превью удаления из маски (ластик). */
+const MASK_ERASE_COLOR = "#2563eb";
 
 let stageHost;
 let stage;
@@ -1069,7 +1073,8 @@ function drawStroke() {
   strokeLayer.setAttribute("viewBox", `0 0 ${natural.w} ${natural.h}`);
   const points = drag.points.map((point) => `${Math.round(point[0])},${Math.round(point[1])}`).join(" ");
   const width = Math.max(1, getState().brushSize || 12) * 2;
-  strokeLayer.innerHTML = `<polyline points="${points}" fill="none" stroke="#2563eb" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round" opacity="0.55"></polyline>`;
+  const color = drag.mode === "erase" ? MASK_ERASE_COLOR : MASK_PAINT_COLOR;
+  strokeLayer.innerHTML = `<polyline points="${points}" fill="none" stroke="${color}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round" opacity="0.55"></polyline>`;
 }
 
 function drawPolylineDraft() {
@@ -1082,14 +1087,15 @@ function drawPolylineDraft() {
   }
   strokeLayer.setAttribute("viewBox", `0 0 ${natural.w} ${natural.h}`);
   const joined = points.map((point) => `${Math.round(point[0])},${Math.round(point[1])}`).join(" ");
+  const color = MASK_PAINT_COLOR;
   const dots = polyDraft.points.map((point) => (
-    `<circle cx="${Math.round(point[0])}" cy="${Math.round(point[1])}" r="3" fill="#2563eb" opacity="0.85"></circle>`
+    `<circle cx="${Math.round(point[0])}" cy="${Math.round(point[1])}" r="3" fill="${color}" opacity="0.85"></circle>`
   )).join("");
   let shape = "";
   if (points.length >= 3) {
-    shape = `<polygon points="${joined}" fill="#2563eb" fill-opacity="0.28" stroke="#2563eb" stroke-width="2" stroke-linejoin="round" opacity="0.9"></polygon>`;
+    shape = `<polygon points="${joined}" fill="${color}" fill-opacity="0.28" stroke="${color}" stroke-width="2" stroke-linejoin="round" opacity="0.9"></polygon>`;
   } else if (points.length >= 2) {
-    shape = `<polyline points="${joined}" fill="none" stroke="#2563eb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.7"></polyline>`;
+    shape = `<polyline points="${joined}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.7"></polyline>`;
   }
   strokeLayer.innerHTML = `${shape}${dots}`;
 }
