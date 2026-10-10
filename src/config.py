@@ -55,6 +55,8 @@ class Config:
     text_margin: float = 0.08
     # Длинная сторона для разметки мелких страниц. 0 — без апскейла.
     layout_long_side: int = 2000
+    # Отступ маски ретуши от контура баллона внутрь (px).
+    bubble_mask_inset_px: int = 2
 
     @classmethod
     def load(cls, path: str | Path | None = None) -> "Config":

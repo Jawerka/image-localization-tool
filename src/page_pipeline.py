@@ -354,8 +354,9 @@ class PagePipeline:
         sfx_regions = [region for region in drawable if region.block_type == "sfx"]
         other_regions = [region for region in drawable if region.block_type != "sfx"]
         inks: dict[int, np.ndarray] = {}
-        mask_other = segment_regions(work, other_regions)
-        mask_sfx = segment_regions(work, sfx_regions, capture_ink=inks)
+        bubble_inset = int(getattr(self.config, "bubble_mask_inset_px", 2) or 0)
+        mask_other = segment_regions(work, other_regions, bubble_inset_px=bubble_inset)
+        mask_sfx = segment_regions(work, sfx_regions, capture_ink=inks, bubble_inset_px=bubble_inset)
         mask = np.maximum(mask_other, mask_sfx)
         self._merge_captured_sfx(work, sfx_regions, inks)
         mask = apply_strokes(mask, strokes or [])

@@ -96,15 +96,16 @@ def test_dialogue_bubble_mask_stays_inside_the_outline():
     draw.ellipse((24, 20, 136, 100), outline="black", width=3)
     region = TextRegion(
         id=1,
-        bbox=(2, 2, 156, 116),
+        bbox=(60, 45, 40, 30),
         bubble_bbox=(8, 8, 144, 104),
         text="HELLO",
         block_type="dialogue",
     )
     mask = segment_region(np.array(image), region)
     assert mask[60, 80] == 255
+    # На обводке / снаружи — без маски; чуть внутри — покрыто (inset=2).
     assert mask[60, 24] == 0
-    assert mask[60, 34] == 0
+    assert mask[60, 34] == 255
     assert mask[2, 2] == 0
     assert region.style.uppercase is True
 
