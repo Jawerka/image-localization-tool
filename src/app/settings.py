@@ -221,6 +221,7 @@ class AppSettings:
     reading_order: str = "auto"
     translate_sfx: bool = False
     sfx_mode: str = "skip"  # skip|replace
+    auto_stylized_fonts: bool = True
     device: str = "auto"
     glossary_path: str = ""
     detector_conf: float = 0.3
@@ -271,6 +272,7 @@ class AppSettings:
             mode = "replace"
         self.sfx_mode = mode
         self.translate_sfx = mode == "replace"
+        self.auto_stylized_fonts = _as_bool(self.auto_stylized_fonts, True)
         device = _raw_text(self.device, "auto")
         self.device = device or "auto"
         self.glossary_path = _raw_text(self.glossary_path, "")
@@ -332,6 +334,7 @@ class AppSettings:
             "reading_order": self.reading_order,
             "translate_sfx": self.translate_sfx,
             "sfx_mode": self.sfx_mode,
+            "auto_stylized_fonts": self.auto_stylized_fonts,
             "device": self.device,
             "glossary_path": self.glossary_path,
             "detector_conf": self.detector_conf,
@@ -425,6 +428,7 @@ class AppSettings:
         config.reading_order = self.reading_order
         config.sfx_mode = self.sfx_mode
         config.translate_sfx = self.sfx_mode == "replace"
+        config.auto_stylized_fonts = self.auto_stylized_fonts
         config.device = self.device
         config.glossary_path = self.glossary_path
         config.detector_conf = self.detector_conf

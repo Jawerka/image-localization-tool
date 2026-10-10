@@ -24,23 +24,37 @@ export function normalizeMaskStroke(stroke) {
   const points = Array.isArray(item.points)
     ? item.points.map((point) => [Number(point?.[0]) || 0, Number(point?.[1]) || 0])
     : [];
-  const mode = item.mode === "erase" ? "erase" : "paint";
+  let mode = "paint";
+  if (item.mode === "erase") mode = "erase";
+  else if (item.mode === "fill") mode = "fill";
   return { mode, radius, points, color: mode === "erase" ? "#000000" : "#ffffff" };
 }
 
 /**
- * Как ``apply_strokes`` в text_segmenter: линия thickness=2r, круги радиуса r.
+ * Как ``apply_strokes`` в text_segmenter: линия thickness=2r, круги радиуса r,
+ * либо заливка полигона для mode=fill.
  * ``ctx`` — CanvasRenderingContext2D или совместимый мок.
  */
 export function paintStrokeOnMask(ctx, stroke) {
   if (!ctx) return;
-  const { radius, points, color } = normalizeMaskStroke(stroke);
+  const { mode, radius, points, color } = normalizeMaskStroke(stroke);
   if (!points.length) return;
   ctx.fillStyle = color;
   ctx.strokeStyle = color;
   ctx.lineWidth = Math.max(1, radius * 2);
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
+  if (mode === "fill") {
+    if (points.length < 3) return;
+    ctx.beginPath();
+    ctx.moveTo(points[0][0], points[0][1]);
+    for (let index = 1; index < points.length; index += 1) {
+      ctx.lineTo(points[index][0], points[index][1]);
+    }
+    ctx.closePath();
+    ctx.fill();
+    return;
+  }
   if (points.length === 1) {
     ctx.beginPath();
     ctx.arc(points[0][0], points[0][1], radius, 0, Math.PI * 2);

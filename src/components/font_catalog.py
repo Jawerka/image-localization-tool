@@ -1,13 +1,15 @@
-"""Каталог файлов шрифтов: models/fonts, каталог пользователя и системные папки.
+"""Каталог файлов шрифтов: models/fonts, бандл, каталог пользователя и системные.
 
 Категория выбирается без учёта регистра по подстроке в семействе и имени файла.
 Порядок проверок фиксированный: handwritten, затем sfx, затем shout, иначе dialogue.
 
 handwritten: caveat, marck, neucha, pangolin, shantell, bad script, pacifico,
-handwriting, script.
+handwriting, script, firsttimewriting, first time writing, vyaz.
 sfx: creepster, eater, nosifer, unifraktur, pressstart, press start, special elite,
-impact.
-shout: russo, oswald, anton, bebas, bangers, black, display.
+impact, liber-struct, liber struct, publicpixel, public pixel, pixelzone, deltablock,
+delta block, unsightly.
+shout: russo, oswald, anton, bebas, bangers, black, display, blaec, napalm,
+operationnapalm, operation napalm.
 """
 
 from __future__ import annotations
@@ -19,10 +21,41 @@ from pathlib import Path
 from fontTools.ttLib import TTCollection, TTFont
 
 from src.utils.logger import logger
-from src.utils.paths import models_dir
+from src.utils.paths import bundle_root, install_root, models_dir, project_root
 
 _FONT_SUFFIXES = (".ttf", ".otf", ".ttc")
 _CYRILLIC = range(0x0410, 0x0450)
+
+# Роли автоподстановки. Человекочитаемая таблица — docs/FONTS.md.
+FONT_ROLE_DIALOGUE = "Heroika-Regular"
+FONT_ROLE_HANDWRITTEN = "FirstTimeWriting"
+FONT_ROLE_SHOUT = "Blaec-Regular"
+FONT_ROLE_SHOUT_ITALIC = "Blaec-Italic"
+FONT_ROLE_STENCIL = "OperationNapalm-Regular"
+FONT_ROLE_SFX = "DeltaBlock-Regular"
+FONT_ROLE_SFX_TECH = "Liber-Struct"
+FONT_ROLE_SFX_COMEDY = "Unsightly"
+FONT_ROLE_PIXEL = "Pixelzone"
+FONT_ROLE_PIXEL_BOLD = "PublicPixel"
+FONT_ROLE_DECOR = "VyazPixel"
+
+# Обратная совместимость со старыми именами в тестах/импортах.
+TRIAL_SFX_FONT = FONT_ROLE_SFX
+TRIAL_HANDWRITTEN_FONT = FONT_ROLE_HANDWRITTEN
+TRIAL_SHOUT_FONT = FONT_ROLE_SHOUT
+
+_LAUGHTER = (
+    "хаха",
+    "хихи",
+    "хех",
+    "хохо",
+    "haha",
+    "hehe",
+    "hihi",
+    "lol",
+    "лол",
+    "кек",
+)
 
 _HANDWRITTEN = (
     "caveat",
@@ -34,6 +67,9 @@ _HANDWRITTEN = (
     "pacifico",
     "handwriting",
     "script",
+    "firsttimewriting",
+    "first time writing",
+    "vyaz",
 )
 _SFX = (
     "creepster",
@@ -44,6 +80,14 @@ _SFX = (
     "press start",
     "special elite",
     "impact",
+    "liber-struct",
+    "liber struct",
+    "publicpixel",
+    "public pixel",
+    "pixelzone",
+    "deltablock",
+    "delta block",
+    "unsightly",
 )
 _SHOUT = (
     "russo",
@@ -53,6 +97,10 @@ _SHOUT = (
     "bangers",
     "black",
     "display",
+    "blaec",
+    "napalm",
+    "operationnapalm",
+    "operation napalm",
 )
 
 
@@ -90,21 +138,27 @@ def scan_fonts(
     user_dir: Path | None = None,
     system_dirs: list[Path] | None = None,
     include_system: bool = True,
+    include_bundle: bool | None = None,
 ) -> list[FontFace]:
     """Собрать лица .ttf/.otf/.ttc и отсортировать по id.
 
     По умолчанию модели берутся из ``models_dir() / "fonts"``.
-    Обход: модели, затем ``user_dir``, затем системные каталоги.
+    Обход: модели, бандл ``src/resources/fonts`` и ``fonts`` рядом с программой,
+    затем ``user_dir``, затем системные каталоги.
     id — stem файла. Если он уже занят, id становится ``{источник}-{stem}``,
-    где источник — ``models``, ``user`` или ``system``. Следующие совпадения
-    получают суффикс ``-2``, ``-3`` и так далее.
+    где источник — ``models``, ``bundle``, ``user`` или ``system``. Следующие
+    совпадения получают суффикс ``-2``, ``-3`` и так далее.
 
+    Бандл подключается, когда ``include_bundle`` истинно. По умолчанию — только
+    если ``models_fonts`` не передан (тесты с явным каталогом бандл не видят).
     Системные каталоги читаются только при ``include_system``. Если список
     не передан, берётся ``%WINDIR%/Fonts`` (по умолчанию ``C:\\Windows\\Fonts``).
     Отсутствующий каталог пропускается. Битый файл остаётся в списке
     с ``cyrillic=False`` и семейством из stem.
     """
     models_root = models_dir() / "fonts" if models_fonts is None else Path(models_fonts)
+    if include_bundle is None:
+        include_bundle = models_fonts is None
     if not include_system:
         system_roots: list[Path] = []
     elif system_dirs is None:
@@ -135,6 +189,9 @@ def scan_fonts(
             )
 
     consume("models", models_root)
+    if include_bundle:
+        for directory in _bundle_font_dirs():
+            consume("bundle", directory)
     if user_dir is not None:
         consume("user", Path(user_dir))
     for directory in system_roots:
@@ -142,6 +199,107 @@ def scan_fonts(
 
     faces.sort(key=lambda face: face.id)
     return faces
+
+
+def assign_stylized_fonts(
+    regions,
+    *,
+    enabled: bool = True,
+    faces: list[FontFace] | None = None,
+) -> None:
+    """Проставить ``font_id`` по ролям из ``docs/FONTS.md``, если слот пуст.
+
+    Не трогает регионы с уже заданным ``font_id`` или ``edited``.
+    Если файл роли отсутствует в каталоге — регион пропускается.
+    """
+    if not enabled:
+        return
+    catalog = faces if faces is not None else scan_fonts()
+    available = {face.id for face in catalog}
+    for region in regions:
+        style = getattr(region, "style", None)
+        if style is None:
+            continue
+        if str(getattr(style, "font_id", "") or "").strip():
+            continue
+        if bool(getattr(region, "edited", False)):
+            continue
+        font_id = role_font_id(region)
+        if not font_id or font_id not in available:
+            continue
+        style.font_id = font_id
+
+
+def role_font_id(region) -> str | None:
+    """Id шрифта по роли региона. См. ``docs/FONTS.md``."""
+    block = str(getattr(region, "block_type", "") or "").strip().lower()
+    text = str(getattr(region, "text", "") or "")
+    folded = "".join(ch.casefold() for ch in text if not ch.isspace())
+    letters = [ch for ch in text if ch.isalpha()]
+    uppercase = bool(letters) and all(ch.isupper() for ch in letters)
+    has_bubble = getattr(region, "bubble_bbox", None) is not None
+
+    if block == "sfx":
+        if _looks_like_laughter(folded):
+            return FONT_ROLE_SFX_COMEDY
+        if _looks_like_tech_sfx(text, folded):
+            return FONT_ROLE_SFX_TECH
+        return FONT_ROLE_SFX
+
+    if has_bubble and block in ("dialogue", "narration", ""):
+        return FONT_ROLE_DIALOGUE
+
+    if block == "title":
+        return FONT_ROLE_SHOUT
+
+    if block == "sign":
+        if uppercase:
+            return FONT_ROLE_STENCIL
+        return FONT_ROLE_HANDWRITTEN
+
+    if block == "noise":
+        return FONT_ROLE_PIXEL
+
+    if has_bubble:
+        return FONT_ROLE_DIALOGUE
+
+    # Free без баллона.
+    if uppercase:
+        return FONT_ROLE_SHOUT
+    return FONT_ROLE_HANDWRITTEN
+
+
+def _trial_font_id(region) -> str | None:
+    """Устарело: то же, что ``role_font_id``."""
+    return role_font_id(region)
+
+
+def _looks_like_laughter(folded: str) -> bool:
+    if not folded:
+        return False
+    return any(token in folded for token in _LAUGHTER)
+
+
+def _looks_like_tech_sfx(text: str, folded: str) -> bool:
+    """Короткий «кодовый» SFX: цифры или смесь латиницы с цифрами без пробелов."""
+    stripped = text.strip()
+    if not stripped or len(stripped) > 8:
+        return False
+    digits = sum(ch.isdigit() for ch in stripped)
+    if digits >= 2:
+        return True
+    if digits >= 1 and any(ch.isascii() and ch.isalpha() for ch in stripped):
+        return True
+    return False
+
+
+def _bundle_font_dirs() -> list[Path]:
+    """Каталоги встроенных шрифтов (Heroika, CC0-проба)."""
+    return [
+        bundle_root() / "src" / "resources" / "fonts",
+        install_root() / "fonts",
+        project_root() / "src" / "resources" / "fonts",
+    ]
 
 
 def find_font(font_id: str, faces: list[FontFace] | None = None) -> FontFace | None:

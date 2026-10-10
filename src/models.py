@@ -238,7 +238,7 @@ class TextRegion:
 
 @dataclass
 class MaskStroke:
-    """Штрих кисти или ластика поверх маски букв."""
+    """Штрих кисти, ластика или заливка лассо поверх маски букв."""
 
     mode: str
     radius: int
@@ -254,7 +254,7 @@ class MaskStroke:
     @classmethod
     def from_dict(cls, data: dict) -> "MaskStroke":
         mode = str(data.get("mode") or "")
-        if mode not in ("paint", "erase"):
+        if mode not in ("paint", "erase", "fill"):
             raise ValueError(f"Некорректный режим штриха: {mode}")
         points = [(int(point[0]), int(point[1])) for point in data.get("points") or []]
         return cls(mode=mode, radius=int(data.get("radius") or 0), points=points)

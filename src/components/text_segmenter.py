@@ -9,6 +9,9 @@ from PIL import Image
 from src.models import MaskStroke, TextRegion
 from src.utils.mask_metrics import otsu_threshold
 
+# Отступ маски от контура чернил для SFX и free без баллона.
+_INK_PAD_PX = 4
+
 
 def _line_heights(ink: np.ndarray) -> list[int]:
     rows = np.where(np.any(ink, axis=1))[0]
@@ -279,10 +282,12 @@ def segment_region(
     ink_bool = binary > 0
     heights = _line_heights(ink_bool)
     line_height = int(np.median(heights)) if heights else max(8, box_h)
-    radius = max(2, int(round(line_height * 0.22)))
-    if region.block_type == "sfx":
-        # Обводка звукоподражания шире диалога: штрих должен попасть в маску.
-        radius = max(radius + 2, int(round(radius * 1.6)))
+    # SFX и free без баллона: маска по контуру чернил +4px, без жирного пятна.
+    tight_ink = region.block_type == "sfx" or region.bubble_bbox is None
+    if tight_ink:
+        radius = _INK_PAD_PX
+    else:
+        radius = max(2, int(round(line_height * 0.22)))
     kernel_size = radius * 2 + 1
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
     dilated = cv2.dilate(binary, kernel, iterations=1)
@@ -306,16 +311,23 @@ def segment_region(
 
 
 def apply_strokes(mask: np.ndarray, strokes: list[MaskStroke]) -> np.ndarray:
-    """Наложить штрихи кисти и ластика. Входная маска не меняется."""
+    """Наложить штрихи кисти, ластика и заливку лассо. Входная маска не меняется."""
     result = np.array(mask, copy=True)
     if not strokes:
         return result
     for stroke in strokes:
+        points = [(int(point[0]), int(point[1])) for point in stroke.points]
+        if not points:
+            continue
+        if stroke.mode == "fill":
+            if len(points) >= 3:
+                contour = np.asarray(points, dtype=np.int32).reshape((-1, 1, 2))
+                cv2.fillPoly(result, [contour], 255, lineType=cv2.LINE_8)
+            continue
         radius = int(stroke.radius)
-        if radius <= 0 or not stroke.points:
+        if radius <= 0:
             continue
         color = 255 if stroke.mode == "paint" else 0
-        points = [(int(point[0]), int(point[1])) for point in stroke.points]
         thickness = max(1, radius * 2)
         if len(points) == 1:
             cv2.circle(result, points[0], radius, color, thickness=-1, lineType=cv2.LINE_8)

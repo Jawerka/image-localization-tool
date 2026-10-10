@@ -71,22 +71,40 @@ def test_build_script_is_ascii_and_checks_exit_codes():
 
 
 def test_cuda_dlls_are_dropped_and_cpu_torch_stays():
-    assert is_cuda_binary("torch/lib/torch_cuda.dll")
-    assert is_cuda_binary("cublasLt64_13.dll")
-    assert is_cuda_binary("onnxruntime_providers_cuda.dll")
+    # Весь torch/lib оставляем; чужой CUDA (onnxruntime EP, npp) — drop.
+    assert not is_cuda_binary("torch/lib/torch_cuda.dll")
+    assert not is_cuda_binary("torch/lib/c10_cuda.dll")
+    assert not is_cuda_binary("torch/lib/cublasLt64_13.dll")
+    assert not is_cuda_binary("torch/lib/cupti64_2025.3.0.dll")
+    assert not is_cuda_binary("torch/lib/nvrtc64_130_0.dll")
+    assert not is_cuda_binary("torch\\lib\\curand64_10.dll")
     assert not is_cuda_binary("torch/lib/torch_cpu.dll")
     assert not is_cuda_binary("torch/cuda/__init__.py")
+    assert is_cuda_binary("onnxruntime_providers_cuda.dll")
+    assert is_cuda_binary("nppc64_13.dll")
+    assert is_cuda_binary("cublasLt64_13.dll")  # вне torch/lib
     kept = drop_cuda_entries([
         ("torch/lib/torch_cuda.dll", "src", "BINARY"),
+        ("torch/lib/cublasLt64_13.dll", "src", "BINARY"),
+        ("torch/lib/cupti64_2025.3.0.dll", "src", "BINARY"),
+        ("cublasLt64_13.dll", "src", "BINARY"),
+        ("onnxruntime_providers_cuda.dll", "src", "BINARY"),
         ("torch/lib/torch_cpu.dll", "src", "BINARY"),
         ("torch/cuda/__init__.py", "src", "DATA"),
     ])
-    assert [item[0] for item in kept] == ["torch/lib/torch_cpu.dll", "torch/cuda/__init__.py"]
+    assert [item[0] for item in kept] == [
+        "torch/lib/torch_cuda.dll",
+        "torch/lib/cublasLt64_13.dll",
+        "torch/lib/cupti64_2025.3.0.dll",
+        "torch/lib/torch_cpu.dll",
+        "torch/cuda/__init__.py",
+    ]
 
 
 def test_spec_drops_cuda_binaries_without_excluding_torch():
     text = SPEC.read_text(encoding="utf-8")
     assert "drop_cuda_entries" in text
+    assert "pyi_rth_torch_dlls" in text
 
 
 def test_spec_does_not_exclude_torch():

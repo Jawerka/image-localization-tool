@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import cv2
@@ -13,9 +14,16 @@ from src.utils.paths import resolve_model
 
 
 def resolve_device(preference: str = "auto") -> str:
-    """auto → cuda, если torch его видит, иначе cpu."""
+    """auto → cuda, если torch его видит, иначе cpu.
+
+    В frozen Windows-сборке auto → cpu: CUDA-инференс в onedir нестабилен,
+    а LaMa на CPU достаточна. Явный ``cuda`` в настройках по-прежнему пробует GPU
+    с фолбэком на CPU в ``_lama_after_failure``.
+    """
     if preference and preference != "auto":
         return preference
+    if getattr(sys, "frozen", False):
+        return "cpu"
     try:
         import torch
         if torch.cuda.is_available():
@@ -163,12 +171,31 @@ class LamaInpainter:
             try:
                 result = self._lama_crop(result, component, lama_mask)
             except Exception as exc:
-                logger.warning(f"LaMa fallback to OpenCV: {exc}")
-                note = f"Очистка переключена на OpenCV (LaMa недоступна): {exc}"
-                if note not in self.last_warnings:
-                    self.last_warnings.append(note)
-                result = self._opencv_window(result, component, lama_mask)
+                result = self._lama_after_failure(result, component, lama_mask, exc)
         return Image.fromarray(result)
+
+    def _lama_after_failure(
+        self,
+        image: np.ndarray,
+        component: np.ndarray,
+        lama_mask: np.ndarray,
+        exc: BaseException,
+    ) -> np.ndarray:
+        """При сбое CUDA — один retry на CPU; иначе OpenCV и баннер."""
+        detail = f"{type(exc).__name__}: {exc!r}"
+        if str(self.device).startswith("cuda"):
+            logger.warning("LaMa CUDA failed (%s), retry on CPU", detail)
+            self._model = None
+            self.device = "cpu"
+            try:
+                return self._lama_crop(image, component, lama_mask)
+            except Exception as cpu_exc:
+                detail = f"{type(cpu_exc).__name__}: {cpu_exc!r}"
+        logger.warning("LaMa fallback to OpenCV: %s", detail)
+        note = f"Очистка переключена на OpenCV (LaMa недоступна): {detail}"
+        if note not in self.last_warnings:
+            self.last_warnings.append(note)
+        return self._opencv_window(image, component, lama_mask)
 
     def _fill_if_uniform(
         self,

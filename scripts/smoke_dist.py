@@ -24,7 +24,8 @@ _VERSION_RE = re.compile(
     r"""^[ \t]*__version__\s*=\s*(['"])([^'"]+)\1\s*$""",
     re.MULTILINE,
 )
-# Имена без подстроки cuda: cublas, cufft, npp*. «cuda» ловит torch_cuda, cudart, cudnn.
+# Чужой CUDA-стек (onnxruntime EP, npp* и т.п.). Всё из torch/lib не трогаем:
+# иначе WinError 126 на shm.dll (не хватает зависимостей torch_cuda / torch_cpu).
 _CUDA_MARKERS = (
     "cuda",
     "cublas",
@@ -41,18 +42,39 @@ _CUDA_MARKERS = (
     "npps",
 )
 _BINARY_SUFFIXES = (".dll", ".so", ".dylib", ".pyd")
+_TORCH_LIB_MARKERS = ("torch/lib/", "torch\\lib\\", "/torch/lib", "\\torch\\lib")
+# Минимальный набор в onedir для import torch + LaMa (CUDA-сборка).
+_REQUIRED_TORCH_DLL_GLOBS = (
+    "shm.dll",
+    "torch_cpu.dll",
+    "torch_cuda.dll",
+    "c10.dll",
+    "c10_cuda.dll",
+    "cudart64_*.dll",
+    "cublas64_*.dll",
+    "cupti64_*.dll",
+)
+
+
+def _is_torch_lib_path(path: str) -> bool:
+    """Путь внутри каталога библиотек PyTorch — никогда не выкидываем."""
+    normalized = str(path).replace("\\", "/").casefold()
+    return "/torch/lib/" in f"/{normalized}/" or normalized.endswith("/torch/lib")
 
 
 def is_cuda_binary(path: str) -> bool:
-    """DLL CUDA по имени файла. ``torch_cpu.dll`` сюда не попадает."""
-    name = Path(str(path)).name.casefold()
+    """DLL CUDA вне ``torch/lib``. Файлы PyTorch всегда остаются в сборке."""
+    text = str(path)
+    if _is_torch_lib_path(text):
+        return False
+    name = Path(text).name.casefold()
     if not name.endswith(_BINARY_SUFFIXES):
         return False
     return any(marker in name for marker in _CUDA_MARKERS)
 
 
 def drop_cuda_entries(entries):
-    """Убрать из списка PyInstaller записи, чьё имя — библиотека CUDA."""
+    """Убрать из списка PyInstaller чужие CUDA DLL; ``torch/lib`` не трогать."""
     kept = []
     for entry in entries:
         name = entry[0] if isinstance(entry, (tuple, list)) and entry else entry
@@ -60,6 +82,21 @@ def drop_cuda_entries(entries):
             continue
         kept.append(entry)
     return kept
+
+
+def torch_lib_problems(dist: Path) -> list[str]:
+    """Проверка обязательных DLL PyTorch в onedir."""
+    lib = Path(dist) / "_internal" / "torch" / "lib"
+    if not lib.is_dir():
+        return [f"нет каталога torch/lib: {lib}"]
+    problems: list[str] = []
+    for pattern in _REQUIRED_TORCH_DLL_GLOBS:
+        if "*" in pattern:
+            if not any(lib.glob(pattern)):
+                problems.append(f"нет {pattern} в {lib}")
+        elif not (lib / pattern).is_file():
+            problems.append(f"нет {lib / pattern}")
+    return problems
 
 
 def repo_root() -> Path:
@@ -156,6 +193,9 @@ def dist_problems(dist: Path, source_root: Path | None = None) -> list[str]:
         font = dist / "fonts" / name
         if not font.is_file():
             problems.append(f"нет шрифта: {font}")
+    # Юнит-тест stage кладёт только web/fonts без torch — полный onedir всегда с torch.
+    if (internal / "torch").is_dir():
+        problems.extend(torch_lib_problems(dist))
     return problems
 
 

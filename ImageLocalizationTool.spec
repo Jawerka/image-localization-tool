@@ -142,7 +142,7 @@ a = Analysis(
     ],
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=[str(project_dir / "scripts" / "pyi_rth_torch_dlls.py")],
     excludes=[
         "pytest",
         "IPython",
@@ -155,7 +155,7 @@ a = Analysis(
     optimize=0,
 )
 
-# torch остаётся. Из сборки уходят только DLL CUDA, чтобы установщик влез в релиз.
+# torch/lib целиком остаётся. Режем только чужой CUDA (onnxruntime EP, npp*…).
 a.binaries = drop_cuda_entries(a.binaries)
 a.datas = drop_cuda_entries(a.datas)
 

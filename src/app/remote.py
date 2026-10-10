@@ -169,6 +169,7 @@ def _pipeline_fingerprint(settings: AppSettings) -> str:
             "llm_thinking": settings.llm_thinking,
             "reading_order": settings.reading_order,
             "translate_sfx": settings.translate_sfx,
+            "auto_stylized_fonts": settings.auto_stylized_fonts,
             "device": settings.device,
             "glossary_path": settings.glossary_path,
             "detector_conf": settings.detector_conf,

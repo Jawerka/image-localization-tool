@@ -21,6 +21,7 @@ from src.components.rapid_ocr import RapidOcr
 from src.components.llm_translator import ArgosBlockTranslator, LlmTranslator, load_glossary
 from src.components.sfx_style import estimate_style
 from src.components.lama_inpainter import LamaInpainter
+from src.components.font_catalog import assign_stylized_fonts
 from src.components.typesetter import Typesetter
 from src.utils.llm_client import LlmClient
 from src.utils.logger import logger
@@ -745,9 +746,16 @@ class PagePipeline:
             logger.warning(f"Inpaint failed: {exc}")
             warnings.append(f"Очистка не удалась: {exc}")
             return image
-        for note in getattr(self.inpainter, "last_warnings", None) or []:
-            text = str(note)
-            if text and text not in warnings:
+        notes = [str(note) for note in (getattr(self.inpainter, "last_warnings", None) or []) if note]
+        if not notes:
+            # Успешная LaMa/заливка — убрать устаревший баннер про OpenCV/shm.
+            stale = ("очистка переключена на opencv", "lama недоступна", "shm.dll")
+            warnings[:] = [
+                item for item in warnings
+                if not any(marker in str(item).casefold() for marker in stale)
+            ]
+        for text in notes:
+            if text not in warnings:
                 warnings.append(text)
         return cleaned
 
@@ -758,6 +766,10 @@ class PagePipeline:
         target_lang: str,
         warnings: list[str],
     ) -> tuple[Image.Image, list[int]]:
+        assign_stylized_fonts(
+            regions,
+            enabled=bool(getattr(self.config, "auto_stylized_fonts", True)),
+        )
         rendered = image
         overflow: list[int] = []
         for attempt in range(3):

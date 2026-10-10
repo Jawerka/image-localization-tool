@@ -348,6 +348,15 @@ progress::-moz-progress-bar {
   flex-shrink: 0;
 }
 
+.banner__close {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+}
+
+.banner__close:hover:not(:disabled) {
+  color: var(--text-primary);
+}
+
 .badge {
   display: inline-flex;
   align-items: center;

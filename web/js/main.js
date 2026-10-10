@@ -41,7 +41,6 @@ import {
 } from "./settings.js";
 import {
   applyBootstrap,
-  clampBox,
   deviceLabel,
   commitDeferredEdits,
   editDocument,
@@ -57,6 +56,10 @@ import {
   selectRegion,
   setAnchor,
   setBanner,
+  dismissBanner,
+  healDismissedBanners,
+  isBannerDismissed,
+  nudgeSelectedRegion,
   setProject,
   settingsForSave,
   subscribe,
@@ -64,7 +67,14 @@ import {
   updatePage,
   visualStatus,
 } from "./state.js";
-import { init as initViewer, nudgeBrush, setSpace, setZoom } from "./viewer.js";
+import {
+  cancelPolylineDraft,
+  commitPolylineDraft,
+  init as initViewer,
+  nudgeBrush,
+  setSpace,
+  setZoom,
+} from "./viewer.js";
 
 let bannerMarkup = "";
 let recentMarkup = "";
@@ -107,6 +117,7 @@ function start() {
     nudge,
     deleteRegion,
     brush: nudgeBrush,
+    commitPolyline: () => commitPolylineDraft(),
     tool: (tool) => patch({ tool }),
     view: (view) => patch({ view }),
     mask: () => patch({ showMask: !getState().showMask }),
@@ -279,10 +290,14 @@ function renderBanners(state) {
   state.banners.forEach((banner) => {
     if (!items.some((item) => item.id === banner.id)) items.push(banner);
   });
-  const markup = items.map((banner) => `<div class="banner banner--warning" data-role="banner" role="status">
+  const visible = items.filter((banner) => !isBannerDismissed(banner.id));
+  // После отрисовки снять dismiss у системных полос, если причина уже ушла.
+  queueMicrotask(() => healDismissedBanners(getState()));
+  const markup = visible.map((banner) => `<div class="banner banner--warning" data-role="banner" data-banner-id="${escapeText(banner.id)}" role="status">
     <svg class="icon banner__icon" aria-hidden="true"><use href="icons/icons.svg#warning"></use></svg>
     <p class="banner__text">${escapeText(banner.text)}</p>
     <div class="banner__actions">${(banner.actions || []).map((action) => `<button type="button" class="btn ${action.id === "settings" || action.id === "models" ? "btn-accent" : "btn-ghost"}" data-banner-action="${escapeText(action.id)}" data-tab="${escapeText(action.tab || "")}">${escapeText(action.label)}</button>`).join("")}</div>
+    <button type="button" class="btn btn-ghost btn-icon banner__close" data-banner-dismiss data-banner-id="${escapeText(banner.id)}" aria-label="Закрыть">${icon("close")}</button>
   </div>`).join("");
   if (markup === bannerMarkup) return;
   bannerMarkup = markup;
@@ -375,6 +390,11 @@ function renderRunClock() {
 }
 
 function onBannerClick(event) {
+  const close = event.target.closest("[data-banner-dismiss]");
+  if (close) {
+    dismissBanner(close.dataset.bannerId || "");
+    return;
+  }
   const button = event.target.closest("[data-banner-action]");
   if (!button) return;
   const action = button.dataset.bannerAction;
@@ -684,28 +704,7 @@ function movePage(delta) {
 }
 
 function nudge(key, mods) {
-  const id = getState().selectedRegionId;
-  if (id == null) return;
-  const step = mods.shift ? 10 : 1;
-  editDocument((document) => {
-    const region = findRegion(document, id);
-    if (!region) return;
-    let [x, y, width, height] = region.bbox;
-    if (mods.alt) {
-      if (key === "ArrowRight") width += step;
-      if (key === "ArrowLeft") width -= step;
-      if (key === "ArrowDown") height += step;
-      if (key === "ArrowUp") height -= step;
-    } else {
-      if (key === "ArrowRight") x += step;
-      if (key === "ArrowLeft") x -= step;
-      if (key === "ArrowDown") y += step;
-      if (key === "ArrowUp") y -= step;
-    }
-    const size = getState().imageSize;
-    region.bbox = clampBox([x, y, width, height], size.w, size.h);
-    region.edited = true;
-  });
+  nudgeSelectedRegion(key, mods || {});
 }
 
 function deleteRegion() {
@@ -725,6 +724,7 @@ function escape() {
     return;
   }
   if (isWizard()) return;
+  if (cancelPolylineDraft()) return;
   if (getState().busy || batchIsLive()) {
     stopJobs();
     return;

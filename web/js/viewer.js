@@ -19,11 +19,13 @@ import {
 } from "./state.js";
 import { isSpaceDown } from "./keys.js";
 
-const TOOLS = ["select", "region", "brush", "eraser", "hand"];
+const TOOLS = ["select", "region", "brush", "polyline", "eraser", "hand"];
 const VIEWS = ["original", "result", "compare"];
 const ZOOM_MIN_PERCENT = 10;
 const ZOOM_MAX_PERCENT = 200;
 const ZOOM_STEP_PERCENT = 5;
+const MASK_DRAW_TOOLS = new Set(["brush", "eraser", "polyline"]);
+const BRUSH_SIZE_TOOLS = new Set(["brush", "eraser"]);
 
 let stageHost;
 let stage;
@@ -53,6 +55,8 @@ let seenPageId = "";
 let scrollHome = false;
 /** Локальная маска на время deferApply / ожидания серверного обновления после «Готово». */
 let maskDraft = null;
+/** Черновик ломаной: вершины + точка под курсором для резинки. */
+let polyDraft = null;
 
 export function init() {
   stageHost = document.querySelector("[data-role='stage-host']");
@@ -175,6 +179,33 @@ export function nudgeBrush(delta) {
   patch({ brushSize: next });
 }
 
+export function hasPolylineDraft() {
+  return Boolean(polyDraft && polyDraft.points.length);
+}
+
+/** Отменить черновик лассо. True, если что-то сбросили. */
+export function cancelPolylineDraft() {
+  if (!polyDraft) return false;
+  polyDraft = null;
+  if (strokeLayer) strokeLayer.innerHTML = "";
+  return true;
+}
+
+/** Завершить лассо заливкой полигона. True, если штрих записан. */
+export function commitPolylineDraft() {
+  if (!polyDraft || polyDraft.points.length < 3) {
+    cancelPolylineDraft();
+    return false;
+  }
+  const points = polyDraft.points.map((point) => [Math.round(point[0]), Math.round(point[1])]);
+  polyDraft = null;
+  if (strokeLayer) strokeLayer.innerHTML = "";
+  editDocument((document) => {
+    document.strokes.push({ mode: "fill", radius: 1, points });
+  }, { deferApply: true, coalesce: "stroke" });
+  return true;
+}
+
 function bindRadios(selector, key, order) {
   const group = document.querySelector(selector);
   group.addEventListener("click", (event) => {
@@ -209,8 +240,12 @@ function sync(state) {
   document.querySelector("[data-role='redo']").disabled = !state.redoCount;
   const range = document.querySelector("[data-role='brush-size']");
   const brushLabel = document.querySelector("[data-role='brush-size-label']");
-  const brushOn = state.tool === "brush" || state.tool === "eraser";
+  const brushOn = BRUSH_SIZE_TOOLS.has(state.tool);
   if (brushLabel) brushLabel.hidden = !brushOn;
+  if (state.tool !== "polyline" && polyDraft) {
+    polyDraft = null;
+    if (strokeLayer) strokeLayer.innerHTML = "";
+  }
   if (document.activeElement !== range) range.value = String(state.brushSize);
   if (sizeLabel) sizeLabel.textContent = String(state.brushSize);
 
@@ -231,6 +266,7 @@ function sync(state) {
   if (page.id !== seenPageId) {
     seenPageId = page.id;
     clearMaskDraft();
+    cancelPolylineDraft();
     home = state.zoom !== "fit";
     scrollHome = home;
     if (home) pinScroll();
@@ -256,7 +292,10 @@ function sync(state) {
   renderBoxes(state);
   renderProgress(state, page);
   renderSteps(state, page);
-  stage.classList.toggle("is-cross", (state.tool === "region" || state.tool === "brush" || state.tool === "eraser") && !spaceDown);
+  stage.classList.toggle(
+    "is-cross",
+    (state.tool === "region" || MASK_DRAW_TOOLS.has(state.tool)) && !spaceDown,
+  );
   syncPanCursor();
   layout();
   if (home) pinScroll();
@@ -610,6 +649,17 @@ function onPointerDown(event) {
     frame.setPointerCapture(event.pointerId);
     return;
   }
+  if (state.tool === "polyline") {
+    event.preventDefault();
+    if (!polyDraft) polyDraft = { points: [], hover: null };
+    const last = polyDraft.points[polyDraft.points.length - 1];
+    if (!last || Math.abs(last[0] - point[0]) >= 1 || Math.abs(last[1] - point[1]) >= 1) {
+      polyDraft.points.push(point);
+    }
+    polyDraft.hover = null;
+    drawPolylineDraft();
+    return;
+  }
   if (state.tool === "region") {
     drag = { kind: "draft", x: point[0], y: point[1], point };
     frame.setPointerCapture(event.pointerId);
@@ -650,6 +700,11 @@ function onPointerDown(event) {
 
 function onPointerMove(event) {
   moveCursor(event);
+  if (getState().tool === "polyline" && polyDraft) {
+    const point = imagePoint(event);
+    polyDraft.hover = point;
+    drawPolylineDraft();
+  }
   if (!drag) return;
   if (drag.kind === "pan") {
     stage.scrollLeft = drag.left - (event.clientX - drag.x);
@@ -878,6 +933,19 @@ function placeWarpNode(id, index, local, bw, bh) {
 }
 
 function onDoubleClick(event) {
+  if (getState().tool === "polyline" && polyDraft) {
+    event.preventDefault();
+    // Второй клик dblclick уже добавил вершину — убрать дубликат рядом с предыдущей.
+    if (polyDraft.points.length >= 2) {
+      const last = polyDraft.points[polyDraft.points.length - 1];
+      const prev = polyDraft.points[polyDraft.points.length - 2];
+      if (Math.abs(last[0] - prev[0]) < 2 && Math.abs(last[1] - prev[1]) < 2) {
+        polyDraft.points.pop();
+      }
+    }
+    commitPolylineDraft();
+    return;
+  }
   const node = styleHandle(event);
   if (!node || node.dataset.styleHandle !== "point") return;
   event.preventDefault();
@@ -988,9 +1056,31 @@ function drawStroke() {
   strokeLayer.innerHTML = `<polyline points="${points}" fill="none" stroke="#2563eb" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round" opacity="0.55"></polyline>`;
 }
 
+function drawPolylineDraft() {
+  if (!polyDraft || !natural.w || !strokeLayer) return;
+  const points = polyDraft.points.slice();
+  if (polyDraft.hover) points.push(polyDraft.hover);
+  if (!points.length) {
+    strokeLayer.innerHTML = "";
+    return;
+  }
+  strokeLayer.setAttribute("viewBox", `0 0 ${natural.w} ${natural.h}`);
+  const joined = points.map((point) => `${Math.round(point[0])},${Math.round(point[1])}`).join(" ");
+  const dots = polyDraft.points.map((point) => (
+    `<circle cx="${Math.round(point[0])}" cy="${Math.round(point[1])}" r="3" fill="#2563eb" opacity="0.85"></circle>`
+  )).join("");
+  let shape = "";
+  if (points.length >= 3) {
+    shape = `<polygon points="${joined}" fill="#2563eb" fill-opacity="0.28" stroke="#2563eb" stroke-width="2" stroke-linejoin="round" opacity="0.9"></polygon>`;
+  } else if (points.length >= 2) {
+    shape = `<polyline points="${joined}" fill="none" stroke="#2563eb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.7"></polyline>`;
+  }
+  strokeLayer.innerHTML = `${shape}${dots}`;
+}
+
 function moveCursor(event) {
   const tool = getState().tool;
-  if ((tool !== "brush" && tool !== "eraser") || !natural.w) {
+  if (!BRUSH_SIZE_TOOLS.has(tool) || !natural.w) {
     cursor.hidden = true;
     return;
   }

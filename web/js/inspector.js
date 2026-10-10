@@ -8,6 +8,7 @@ import {
   editDocument,
   findRegion,
   getState,
+  nudgeSelectedRegion,
   patch,
   reloadDetail,
   sameId,
@@ -17,9 +18,11 @@ import {
   statusText,
   subscribe,
   whenSaved,
+  blankRegion,
+  clampBox,
+  nextRegionId,
 } from "./state.js";
 import { setStylePreview, viewCenter } from "./viewer.js";
-import { blankRegion, clampBox, nextRegionId } from "./state.js";
 
 const TYPES = [
   ["dialogue", "диалог"],
@@ -173,6 +176,12 @@ function renderRegions(state, page) {
     list.querySelectorAll("[data-font-nav]").forEach((button) => {
       button.addEventListener("click", () => onFontNav(button));
     });
+    list.querySelectorAll("[data-nudge]").forEach((button) => {
+      button.addEventListener("mousedown", (event) => event.preventDefault());
+      button.addEventListener("click", (event) => {
+        nudgeSelectedRegion(button.dataset.nudge, { shift: event.shiftKey });
+      });
+    });
     syncFontSelectFaces(list);
     if (regionId && field) {
       const next = list.querySelector(`[data-region-id="${cssEscape(regionId)}"] [data-field="${field}"]`);
@@ -254,6 +263,7 @@ function card(region, index, state, detailsOpen = null) {
       <button type="button" class="btn btn-ghost" data-region-action="reset-style">Сбросить стили</button>
       <button type="button" class="btn btn-ghost" data-region-action="delete">${icon("delete")}Удалить</button>
     </div>
+    ${nudgePadMarkup()}
     <div class="region-card__row">
       ${fontMarkup(region, state)}
       <label class="choice">
@@ -587,6 +597,26 @@ const CARD_WARPS = [
   ["perspective", "Перспектива"],
   ["mesh", "Сетка"],
 ];
+
+function nudgePadMarkup() {
+  const cell = (key, label, symbol) => (
+    `<button type="button" class="btn btn-ghost btn-icon nudge-pad__btn" data-nudge="${key}" aria-label="${label}" title="${label} (Shift: 10px)">${symbol}</button>`
+  );
+  return `<div class="nudge-pad" role="group" aria-label="Позиция рамки">
+    <span class="nudge-pad__label">Позиция <span class="muted">1 / Shift 10</span></span>
+    <div class="nudge-pad__grid">
+      <span class="nudge-pad__spacer" aria-hidden="true"></span>
+      ${cell("ArrowUp", "Вверх", "↑")}
+      <span class="nudge-pad__spacer" aria-hidden="true"></span>
+      ${cell("ArrowLeft", "Влево", "←")}
+      <span class="nudge-pad__spacer" aria-hidden="true"></span>
+      ${cell("ArrowRight", "Вправо", "→")}
+      <span class="nudge-pad__spacer" aria-hidden="true"></span>
+      ${cell("ArrowDown", "Вниз", "↓")}
+      <span class="nudge-pad__spacer" aria-hidden="true"></span>
+    </div>
+  </div>`;
+}
 
 function cardStyleMarkup(region, state, detailsOpen = null) {
   const fonts = Array.isArray(state.fonts) ? state.fonts : [];

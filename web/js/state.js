@@ -19,6 +19,7 @@ export const DEFAULT_SETTINGS = {
   reading_order: "auto",
   translate_sfx: false,
   sfx_mode: "skip",
+  auto_stylized_fonts: true,
   remote_enabled: false,
   remote_bind: "0.0.0.0",
   remote_port: 8765,
@@ -101,6 +102,7 @@ function emptyState() {
     curtain: 0.58,
     imageSize: { w: 0, h: 0 },
     banners: [],
+    dismissedBanners: [],
     undoCount: 0,
     redoCount: 0,
     paths: null,
@@ -215,7 +217,7 @@ export function normalizeDocument(raw) {
     regions: Array.isArray(data.regions) ? data.regions.map(normalizeRegion) : [],
     strokes: Array.isArray(data.strokes)
       ? data.strokes.map((stroke) => ({
-        mode: stroke.mode === "erase" ? "erase" : "paint",
+        mode: stroke.mode === "erase" ? "erase" : (stroke.mode === "fill" ? "fill" : "paint"),
         radius: Math.max(1, Number(stroke.radius) || 1),
         points: Array.isArray(stroke.points)
           ? stroke.points.map((point) => [Number(point[0]) || 0, Number(point[1]) || 0])
@@ -695,12 +697,40 @@ function readVersion(response, fallback) {
 
 export function setBanner(id, banner) {
   const banners = state.banners.filter((item) => item.id !== id);
-  if (banner) banners.push({ id, tone: banner.tone || "warning", text: banner.text, actions: banner.actions || [] });
+  if (banner) {
+    banners.push({ id, tone: banner.tone || "warning", text: banner.text, actions: banner.actions || [] });
+    // Новая полоса снова показывается, даже если раньше её закрыли крестиком.
+    const dismissedBanners = (state.dismissedBanners || []).filter((item) => item !== id);
+    patch({ banners, dismissedBanners });
+    return;
+  }
   patch({ banners });
 }
 
 export function dismissBanner(id) {
-  setBanner(id, null);
+  if (!id) return;
+  const banners = state.banners.filter((item) => item.id !== id);
+  const dismissed = new Set(state.dismissedBanners || []);
+  dismissed.add(id);
+  patch({ banners, dismissedBanners: [...dismissed] });
+}
+
+export function isBannerDismissed(id) {
+  return (state.dismissedBanners || []).includes(id);
+}
+
+/** Снять dismiss у системных полос, когда исходная причина уже неактуальна. */
+export function healDismissedBanners(snapshot = state) {
+  const dismissed = snapshot.dismissedBanners || [];
+  if (!dismissed.length) return;
+  const keep = dismissed.filter((id) => {
+    if (id === "models") return snapshot.modelsReady === false;
+    if (id === "llm") return snapshot.llm?.ok === false;
+    if (id === "settings-warning") return Boolean(snapshot.settingsWarning);
+    return true;
+  });
+  if (keep.length === dismissed.length) return;
+  patch({ dismissedBanners: keep });
 }
 
 export function selectRegion(regionId) {
@@ -734,6 +764,32 @@ export function clampBox(box, width, height) {
     y = Math.max(0, y);
   }
   return [x, y, boxW, boxH];
+}
+
+/** Сдвиг или (с Alt) изменение размера bbox выбранного региона. */
+export function nudgeSelectedRegion(key, mods = {}) {
+  const id = state.selectedRegionId;
+  if (id == null) return;
+  const step = mods.shift ? 10 : 1;
+  editDocument((document) => {
+    const region = findRegion(document, id);
+    if (!region) return;
+    let [x, y, width, height] = region.bbox;
+    if (mods.alt) {
+      if (key === "ArrowRight") width += step;
+      if (key === "ArrowLeft") width -= step;
+      if (key === "ArrowDown") height += step;
+      if (key === "ArrowUp") height -= step;
+    } else {
+      if (key === "ArrowRight") x += step;
+      if (key === "ArrowLeft") x -= step;
+      if (key === "ArrowDown") y += step;
+      if (key === "ArrowUp") y -= step;
+    }
+    const size = state.imageSize || { w: 0, h: 0 };
+    region.bbox = clampBox([x, y, width, height], size.w, size.h);
+    region.edited = true;
+  });
 }
 
 export function blankRegion(id, bbox) {

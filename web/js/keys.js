@@ -70,6 +70,13 @@ function onKey(event) {
   const settingsOpen = Boolean(actions.settingsOpen?.());
   const typing = isTyping(target);
 
+  if (key === "Enter" && !event.ctrlKey && !event.altKey && !event.metaKey && !typing && !settingsOpen) {
+    if (actions.commitPolyline?.()) {
+      event.preventDefault();
+      return;
+    }
+  }
+
   if (key === " " && !typing && !settingsOpen && !inPageList(target) && target?.tagName !== "BUTTON") {
     event.preventDefault();
     if (!event.repeat) {
@@ -193,7 +200,14 @@ function onKey(event) {
 
   if (event.ctrlKey || event.altKey || event.metaKey) return;
   if (!singleKeys()) return;
-  const toolByCode = { KeyV: "select", KeyR: "region", KeyB: "brush", KeyE: "eraser", KeyH: "hand" };
+  const toolByCode = {
+    KeyV: "select",
+    KeyR: "region",
+    KeyB: "brush",
+    KeyP: "polyline",
+    KeyE: "eraser",
+    KeyH: "hand",
+  };
   const viewByCode = { Digit1: "original", Digit2: "result", Digit3: "compare" };
   if (toolByCode[event.code]) {
     event.preventDefault();

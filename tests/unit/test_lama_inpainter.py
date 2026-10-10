@@ -263,3 +263,48 @@ def test_short_stroke_is_one_full_size_pass():
     inpainter.inpaint(Image.fromarray(image), mask)
 
     assert sizes == [(_ceil_mod(y1 - y0), _ceil_mod(x1 - x0))]
+
+
+def test_cuda_failure_retries_on_cpu_without_opencv_banner():
+    """Сбой на CUDA → один retry на CPU, баннер OpenCV не нужен."""
+    rng = np.random.default_rng(4)
+    image = rng.integers(0, 256, size=(80, 80, 3), dtype=np.uint8)
+    mask = np.zeros((80, 80), dtype=np.uint8)
+    mask[20:50, 20:50] = 255
+
+    inpainter = LamaInpainter(device="cuda")
+    inpainter._model = object()
+    calls: list[str] = []
+
+    def fake_crop(rgb, component, lama_mask):
+        calls.append(inpainter.device)
+        if inpainter.device.startswith("cuda"):
+            raise RuntimeError()
+        out = rgb.copy()
+        out[component > 0] = 123
+        return out
+
+    inpainter._lama_crop = fake_crop
+    result = np.array(inpainter.inpaint(Image.fromarray(image), mask, allow_flat_fill=False))
+    assert calls == ["cuda", "cpu"]
+    assert inpainter.device == "cpu"
+    assert inpainter._model is None
+    assert inpainter.last_warnings == []
+    assert int(result[35, 35, 0]) == 123
+
+
+def test_cpu_failure_falls_back_to_opencv_with_typed_warning():
+    image = np.full((64, 64, 3), 40, dtype=np.uint8)
+    mask = np.zeros((64, 64), dtype=np.uint8)
+    mask[16:48, 16:48] = 255
+
+    inpainter = LamaInpainter(device="cpu")
+
+    def fail(*args, **kwargs):
+        raise RuntimeError()
+
+    inpainter._lama_crop = fail
+    inpainter.inpaint(Image.fromarray(image), mask, allow_flat_fill=False)
+    assert inpainter.last_warnings
+    assert "RuntimeError" in inpainter.last_warnings[0]
+    assert "OpenCV" in inpainter.last_warnings[0]

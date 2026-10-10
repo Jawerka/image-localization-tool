@@ -44,6 +44,8 @@ class Config:
     translate_sfx: bool = False
     # skip | replace. replace включает перевод звукоподражаний.
     sfx_mode: str = "skip"
+    # Проба: автоподстановка CC0-шрифтов для SFX и free-текста.
+    auto_stylized_fonts: bool = True
     device: str = "auto"
     glossary_path: str = ""
     detector_conf: float = 0.3

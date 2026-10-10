@@ -197,6 +197,7 @@ function readForm() {
   next.reading_order = document.getElementById("set-reading").value;
   next.translate_sfx = document.getElementById("set-sfx").checked;
   next.sfx_mode = next.translate_sfx ? "replace" : "skip";
+  next.auto_stylized_fonts = document.getElementById("set-auto-fonts").checked;
   next.remote_enabled = document.getElementById("set-remote").checked;
   next.remote_bind = document.getElementById("set-remote-bind").value.trim() || "0.0.0.0";
   next.remote_port = Math.max(1, Math.min(65535, Math.round(numberValue("set-remote-port", 8765))));
@@ -231,6 +232,7 @@ function fill(settings) {
   document.getElementById("set-target").value = settings.target_lang || "ru";
   document.getElementById("set-reading").value = settings.reading_order || "auto";
   document.getElementById("set-sfx").checked = Boolean(settings.translate_sfx);
+  document.getElementById("set-auto-fonts").checked = settings.auto_stylized_fonts !== false;
   document.getElementById("set-remote").checked = Boolean(settings.remote_enabled);
   document.getElementById("set-remote-bind").value = settings.remote_bind || "0.0.0.0";
   document.getElementById("set-remote-port").value = String(settings.remote_port || 8765);

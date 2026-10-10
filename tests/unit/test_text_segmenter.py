@@ -1,5 +1,6 @@
 """Пиксельная маска на синтетическом кропе."""
 
+import cv2
 import numpy as np
 from PIL import Image, ImageDraw
 
@@ -108,14 +109,26 @@ def test_dialogue_bubble_mask_stays_inside_the_outline():
     assert region.style.uppercase is True
 
 
-def test_sfx_mask_is_dilated_more_than_dialogue():
+def test_sfx_mask_hugs_ink_plus_four_px():
     image = np.full((80, 140, 3), 255, dtype=np.uint8)
     image[30:50, 30:110] = 0
-    dialogue = TextRegion(id=1, bbox=(16, 16, 108, 48), text="HI", block_type="dialogue")
     sfx = TextRegion(id=2, bbox=(16, 16, 108, 48), text="BANG", block_type="sfx")
-    mask_dialogue = segment_region(image, dialogue)
     mask_sfx = segment_region(image, sfx)
-    assert int(mask_sfx.sum()) > int(mask_dialogue.sum())
+
+    ink = np.zeros((80, 140), dtype=np.uint8)
+    ink[30:50, 30:110] = 255
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+    expected = cv2.dilate(ink, kernel, iterations=1)
+    # Маска должна совпадать с dilate(ink, +4px) внутри bbox-кропа (pad=3).
+    assert int(mask_sfx.sum()) == int(expected.sum())
+    # Старый жирный режим (radius ~ line_height) был заметно больше.
+    fat_radius = max(2, int(round(20 * 0.22)))
+    fat_radius = max(fat_radius + 2, int(round(fat_radius * 1.6)))
+    fat_kernel = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE, (fat_radius * 2 + 1, fat_radius * 2 + 1)
+    )
+    fat = cv2.dilate(ink, fat_kernel, iterations=1)
+    assert int(mask_sfx.sum()) < int(fat.sum())
 
 
 def test_apply_strokes_paints_and_erases_without_mutating_input():
@@ -146,3 +159,17 @@ def test_apply_strokes_paints_and_erases_without_mutating_input():
         MaskStroke(mode="paint", radius=3, points=[(0, 0)]),
     ])
     assert clipped[0, 0] == 255
+
+
+def test_apply_strokes_fill_polygon():
+    mask = np.zeros((20, 20), dtype=np.uint8)
+    filled = apply_strokes(mask, [
+        MaskStroke(mode="fill", radius=1, points=[(2, 2), (17, 2), (17, 17), (2, 17)]),
+    ])
+    assert filled[10, 10] == 255
+    assert filled[0, 0] == 0
+    assert int(mask.sum()) == 0
+    too_few = apply_strokes(mask, [
+        MaskStroke(mode="fill", radius=1, points=[(2, 2), (17, 2)]),
+    ])
+    assert int(too_few.sum()) == 0

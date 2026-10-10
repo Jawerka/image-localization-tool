@@ -408,6 +408,35 @@
   border: 1px solid var(--border);
 }
 
+.nudge-pad {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.nudge-pad__label {
+  font-size: 12px;
+}
+
+.nudge-pad__grid {
+  display: grid;
+  grid-template-columns: repeat(3, var(--btn-h));
+  grid-template-rows: repeat(3, var(--btn-h));
+  gap: 2px;
+  width: max-content;
+}
+
+.nudge-pad__btn {
+  width: var(--btn-h);
+  padding: 0;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.nudge-pad__spacer {
+  display: block;
+}
+
 .region-card--selected {
   border-color: var(--border-strong);
   box-shadow: inset 3px 0 0 var(--primary);

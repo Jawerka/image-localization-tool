@@ -218,6 +218,7 @@ tests/
 | Детектор ogkalu | [Hugging Face](https://huggingface.co/ogkalu/comic-text-and-bubble-detector) | скачивается отдельно |
 | LaMa-manga | [Sanster/models](https://github.com/Sanster/models) | скачивается отдельно |
 | Heroika и OFL-шрифты | OFL 1.1 | лежат в `src/resources/fonts/` |
+| CC0 comic-проба (GGBotNet) | CC0 1.0 | см. [docs/FONTS.md](docs/FONTS.md); файлы и `CC0.txt` в `src/resources/fonts/` |
 | Argos Translate | git-зависимость в `requirements.txt` | оффлайн-фолбэк перевода |
 
 ## Спецификации

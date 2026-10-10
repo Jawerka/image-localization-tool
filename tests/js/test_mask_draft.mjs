@@ -105,4 +105,34 @@ describe("normalizeMaskStroke / paintStrokeOnMask", () => {
     assert.ok(calls.includes("stroke"));
     assert.ok(calls.some((item) => Array.isArray(item) && item[0] === "arc"));
   });
+
+  it("fills a closed polygon for mode fill", () => {
+    const calls = [];
+    const ctx = {
+      beginPath() { calls.push("begin"); },
+      closePath() { calls.push("close"); },
+      arc() { calls.push("arc"); },
+      fill() { calls.push("fill"); },
+      stroke() { calls.push("stroke"); },
+      moveTo(x, y) { calls.push(["move", x, y]); },
+      lineTo(x, y) { calls.push(["line", x, y]); },
+      fillStyle: "",
+      strokeStyle: "",
+      lineWidth: 0,
+      lineCap: "",
+      lineJoin: "",
+    };
+    const stroke = normalizeMaskStroke({
+      mode: "fill",
+      radius: 1,
+      points: [[0, 0], [10, 0], [10, 10]],
+    });
+    assert.equal(stroke.mode, "fill");
+    assert.equal(stroke.color, "#ffffff");
+    paintStrokeOnMask(ctx, stroke);
+    assert.ok(calls.includes("close"));
+    assert.ok(calls.includes("fill"));
+    assert.ok(!calls.includes("stroke"));
+    assert.ok(!calls.includes("arc"));
+  });
 });

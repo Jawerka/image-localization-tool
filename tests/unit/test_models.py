@@ -96,5 +96,12 @@ class TestMaskStroke:
         assert stroke.radius == 4
         assert stroke.points == [(1, 2), (3, 4)]
         assert MaskStroke.from_dict(stroke.to_dict()) == stroke
+        filled = MaskStroke.from_dict({
+            "mode": "fill",
+            "radius": 1,
+            "points": [[0, 0], [10, 0], [10, 10]],
+        })
+        assert filled.mode == "fill"
+        assert MaskStroke.from_dict(filled.to_dict()) == filled
         with pytest.raises(ValueError):
             MaskStroke.from_dict({"mode": "scribble", "radius": 1, "points": []})
