@@ -211,7 +211,7 @@ export function commitPolylineDraft() {
   if (strokeLayer) strokeLayer.innerHTML = "";
   editDocument((document) => {
     document.strokes.push({ mode: "fill", radius: 1, points });
-  }, { deferApply: true, coalesce: "stroke" });
+  }, { deferApply: true });
   return true;
 }
 
@@ -822,7 +822,7 @@ function onPointerUp(event) {
         radius,
         points: done.points.map((point) => [Math.round(point[0]), Math.round(point[1])]),
       });
-    }, { deferApply: true, coalesce: "stroke" });
+    }, { deferApply: true });
     strokeLayer.innerHTML = "";
   }
   if (done.kind === "draft") {

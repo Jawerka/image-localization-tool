@@ -1,6 +1,12 @@
 /* Состояние вкладки: проект, документ, стек отмены. После перезагрузки берётся с сервера. */
 
 import { getPage, putDocument } from "./api.js";
+import {
+  isDeferredPending,
+  nextDeferredBaseline,
+  shouldDeferEdit,
+  shouldPushHistory,
+} from "./deferred_edits.js";
 
 const HISTORY_LIMIT = 50;
 
@@ -58,6 +64,8 @@ const acked = new Map();
 
 let state = emptyState();
 let coalesceKey = "";
+/** contentKey документа на входе в deferred-сессию (последний applied). */
+let deferredBaselineKey = "";
 let saveTimer = 0;
 let timerPage = "";
 let inflight = "";
@@ -394,6 +402,7 @@ export function selectPages(ids, activeId, focusId) {
   if (changed && state.deferredApply && state.activePageId) {
     /* Уход без resolveDeferredOrAbort: не flush, черновик отбрасываем. */
     pendingBody.delete(state.activePageId);
+    deferredBaselineKey = "";
   }
   if (changed && timerPage && timerPage !== active) {
     const leaving = timerPage;
@@ -518,14 +527,16 @@ export function editDocument(mutator, options = {}) {
   if (contentKey(next) === before) return;
   const key = options.coalesce || "";
   const history = historyOf(pageId);
-  if (!key || key !== coalesceKey) {
+  if (shouldPushHistory(key, coalesceKey)) {
     history.past.push(clone(state.document));
     if (history.past.length > HISTORY_LIMIT) history.past.shift();
     history.future = [];
     coalesceKey = key;
   }
   if (!key) coalesceKey = "";
-  if (options.deferApply) {
+  const defer = shouldDeferEdit(options.deferApply, state.deferredApply);
+  if (defer) {
+    deferredBaselineKey = nextDeferredBaseline(deferredBaselineKey, before);
     state = { ...state, document: next, deferredApply: true };
     pendingBody.set(pageId, clone(next));
     syncHistoryFlags();
@@ -533,22 +544,24 @@ export function editDocument(mutator, options = {}) {
     return;
   }
   state = { ...state, document: next, deferredApply: false };
+  deferredBaselineKey = "";
   pendingBody.set(pageId, clone(next));
   syncHistoryFlags();
   emit();
   scheduleSave(pageId, options.debounce || 0);
 }
 
-/** Сохранить накопленные правки (кисть/ластик) и запустить пересчёт. */
+/** Сохранить накопленные правки (кисть/ластик/стили) и запустить пересчёт. */
 export function commitDeferredEdits() {
   if (!state.activePageId || !state.document) return;
   if (!state.deferredApply && !pendingBody.has(state.activePageId)) return;
+  deferredBaselineKey = "";
   state = { ...state, deferredApply: false };
   emit();
   scheduleSave(state.activePageId, 0);
 }
 
-/** Сбросить неподтверждённые штрихи и перезагрузить документ с сервера. */
+/** Сбросить неподтверждённые правки и перезагрузить документ с сервера. */
 export function discardDeferredEdits() {
   const pageId = state.activePageId;
   if (!pageId) return Promise.resolve();
@@ -559,6 +572,7 @@ export function discardDeferredEdits() {
     timerPage = "";
   }
   coalesceKey = "";
+  deferredBaselineKey = "";
   state = { ...state, deferredApply: false };
   clearHistory(pageId);
   emit();
@@ -575,18 +589,40 @@ export function discardDeferredEdits() {
   });
 }
 
+function restoreHistoryDocument(document) {
+  const pageId = state.activePageId;
+  coalesceKey = "";
+  const key = contentKey(document);
+  const hadBaseline = Boolean(deferredBaselineKey);
+  const pending = isDeferredPending(key, deferredBaselineKey);
+  state = { ...state, document, deferredApply: pending };
+  if (pending) {
+    pendingBody.set(pageId, clone(document));
+    syncHistoryFlags();
+    emit();
+    return;
+  }
+  deferredBaselineKey = "";
+  if (hadBaseline) {
+    /* Откат к applied baseline — черновик сброшен, save не нужен. */
+    pendingBody.delete(pageId);
+    syncHistoryFlags();
+    emit();
+    return;
+  }
+  pendingBody.set(pageId, clone(document));
+  syncHistoryFlags();
+  emit();
+  scheduleSave(pageId, 0);
+}
+
 export function undo() {
   if (!state.activePageId || !state.document) return;
   const history = historyOf(state.activePageId);
   if (!history.past.length) return;
   history.future.push(clone(state.document));
   if (history.future.length > HISTORY_LIMIT) history.future.shift();
-  const previous = history.past.pop();
-  coalesceKey = "";
-  state = { ...state, document: previous, deferredApply: false };
-  syncHistoryFlags();
-  emit();
-  scheduleSave(state.activePageId, 0);
+  restoreHistoryDocument(history.past.pop());
 }
 
 export function redo() {
@@ -595,12 +631,7 @@ export function redo() {
   if (!history.future.length) return;
   history.past.push(clone(state.document));
   if (history.past.length > HISTORY_LIMIT) history.past.shift();
-  const next = history.future.pop();
-  coalesceKey = "";
-  state = { ...state, document: next, deferredApply: false };
-  syncHistoryFlags();
-  emit();
-  scheduleSave(state.activePageId, 0);
+  restoreHistoryDocument(history.future.pop());
 }
 
 export function clearHistory(pageId) {

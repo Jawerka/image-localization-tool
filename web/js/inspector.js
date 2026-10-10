@@ -380,7 +380,11 @@ function onField(input) {
       const output = input.parentElement?.querySelector("output");
       if (output) output.textContent = Number(region.style.warp.bend).toFixed(2);
     }
-  }, { debounce: slow ? 500 : 0, coalesce: slow ? `${field}:${id}` : "" });
+  }, {
+    deferApply: true,
+    debounce: slow ? 500 : 0,
+    coalesce: slow ? `${field}:${id}` : "",
+  });
 }
 
 function bindFontField(input) {
@@ -471,7 +475,7 @@ function commitFont(regionId) {
     region.edited = true;
     region.style = { ...(region.style || {}) };
     region.style.font_size_override = value;
-  }, { debounce: 0, coalesce: `font:${regionId}` });
+  }, { deferApply: true, debounce: 0, coalesce: `font:${regionId}` });
 }
 
 function cancelFontDraft(input, regionId) {
@@ -760,7 +764,7 @@ function onInk(button) {
     region.style = { ...(region.style || {}) };
     region.style.fill_rgb = ink === "white" ? [255, 255, 255] : [0, 0, 0];
     region.style.fill_locked = true;
-  });
+  }, { deferApply: true });
 }
 
 function onCardWarp(button) {
@@ -774,7 +778,7 @@ function onCardWarp(button) {
     region.edited = true;
     region.style = { ...(region.style || {}) };
     applyCardWarp(region, preset);
-  });
+  }, { deferApply: true });
 }
 
 function onCardStyle(button) {
@@ -789,7 +793,7 @@ function onCardStyle(button) {
     if (!region) return;
     region.edited = true;
     region.style = applyProjectStyle(region.style || {}, preset.style);
-  });
+  }, { deferApply: true });
 }
 
 /** Наложить сохранённый стиль проекта на стиль региона. */
@@ -876,7 +880,7 @@ async function onAction(button) {
       warp.quad = null;
       warp.mesh = null;
       region.style.warp = warp;
-    });
+    }, { deferApply: true });
     return;
   }
   patch({ pendingAction: { pageId, regionId: id, action } });
