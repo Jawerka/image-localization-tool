@@ -25,6 +25,7 @@ wheels/
 
 # Virtual environment
 venv/
+venv-release/
 ENV/
 env/
 .venv

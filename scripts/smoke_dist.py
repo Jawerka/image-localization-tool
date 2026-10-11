@@ -46,12 +46,16 @@ _CUDA_MARKERS = (
 )
 _BINARY_SUFFIXES = (".dll", ".so", ".dylib", ".pyd")
 _TORCH_LIB_MARKERS = ("torch/lib/", "torch\\lib\\", "/torch/lib", "\\torch\\lib")
-# Минимальный набор в onedir для import torch + LaMa (CUDA-сборка).
+# Минимальный набор в onedir для import torch + LaMa. CPU-сборка (релиз) несёт
+# только это; CUDA-набор проверяем ниже, когда torch_cuda.dll реально в бандле.
 _REQUIRED_TORCH_DLL_GLOBS = (
     "shm.dll",
     "torch_cpu.dll",
-    "torch_cuda.dll",
     "c10.dll",
+)
+# Дополнительно для CUDA-сборки (dev-машина с GPU).
+_REQUIRED_TORCH_CUDA_DLL_GLOBS = (
+    "torch_cuda.dll",
     "c10_cuda.dll",
     "cudart64_*.dll",
     "cublas64_*.dll",
@@ -88,12 +92,19 @@ def drop_cuda_entries(entries):
 
 
 def torch_lib_problems(dist: Path) -> list[str]:
-    """Проверка обязательных DLL PyTorch в сайдкаре."""
+    """Проверка обязательных DLL PyTorch в сайдкаре.
+
+    CPU-сборке (релиз) хватает CPU-набора; CUDA-набор требуется, только если
+    ``torch_cuda.dll`` реально попал в бандл (сборка с dev-venv на GPU).
+    """
     lib = Path(dist) / SIDECAR_DIR_NAME / "_internal" / "torch" / "lib"
     if not lib.is_dir():
         return [f"нет каталога torch/lib: {lib}"]
+    required = list(_REQUIRED_TORCH_DLL_GLOBS)
+    if (lib / "torch_cuda.dll").is_file():
+        required.extend(_REQUIRED_TORCH_CUDA_DLL_GLOBS)
     problems: list[str] = []
-    for pattern in _REQUIRED_TORCH_DLL_GLOBS:
+    for pattern in required:
         if "*" in pattern:
             if not any(lib.glob(pattern)):
                 problems.append(f"нет {pattern} в {lib}")

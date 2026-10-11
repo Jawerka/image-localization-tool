@@ -10,12 +10,14 @@ from pathlib import Path
 
 from scripts.smoke_dist import (
     EXE_NAME,
+    SIDECAR_DIR_NAME,
     dist_problems,
     drop_cuda_entries,
     expected_font_names,
     is_cuda_binary,
     read_app_version,
     stage_runtime_files,
+    torch_lib_problems,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -106,6 +108,30 @@ def test_spec_drops_cuda_binaries_without_excluding_torch():
     text = SPEC.read_text(encoding="utf-8")
     assert "drop_cuda_entries" in text
     assert "pyi_rth_torch_dlls" in text
+
+
+def test_torch_lib_problems_accepts_cpu_bundle(tmp_path):
+    lib = tmp_path / SIDECAR_DIR_NAME / "_internal" / "torch" / "lib"
+    lib.mkdir(parents=True)
+    for name in ("shm.dll", "torch_cpu.dll", "c10.dll"):
+        (lib / name).write_bytes(b"")
+    assert torch_lib_problems(tmp_path) == []
+
+
+def test_torch_lib_problems_requires_cuda_set_when_torch_cuda_present(tmp_path):
+    lib = tmp_path / SIDECAR_DIR_NAME / "_internal" / "torch" / "lib"
+    lib.mkdir(parents=True)
+    for name in ("shm.dll", "torch_cpu.dll", "c10.dll", "torch_cuda.dll"):
+        (lib / name).write_bytes(b"")
+    assert torch_lib_problems(tmp_path), "CUDA-бандл без c10_cuda/cudart неполон"
+    for name in (
+        "c10_cuda.dll",
+        "cudart64_130.dll",
+        "cublas64_13.dll",
+        "cupti64_2025.3.0.dll",
+    ):
+        (lib / name).write_bytes(b"")
+    assert torch_lib_problems(tmp_path) == []
 
 
 def test_spec_does_not_exclude_torch():

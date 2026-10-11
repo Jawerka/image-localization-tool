@@ -174,6 +174,19 @@ python scripts\build-extension.py
 
 Проверка каталога сборки: `python scripts\smoke_dist.py`.
 
+Релизная сборка идёт с CPU-сборкой torch: модели в установщик не вкладываются
+(их скачивает мастер первого запуска), а CUDA-стек в сайдкаре — это лишние ~2.5 ГБ.
+
+```powershell
+python -m venv venv-release
+.\venv-release\Scripts\python.exe -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+.\venv-release\Scripts\python.exe -m pip install -r requirements.txt pyinstaller
+.\scripts\build-windows.ps1 -SkipModels -BuildPython venv-release\Scripts\python.exe
+```
+
+CUDA-сборку torch ставьте только в dev-`venv` (`scripts\setup_models.py --torch-cuda`):
+она нужна для локального GPU-ускорения и в релиз не попадает.
+
 Деплой:
 
 ```powershell

@@ -12,6 +12,7 @@
 #>
 param(
     [string] $OutputDir = "",
+    [string] $BuildPython = "",
     [switch] $SkipPyInstaller,
     [switch] $SkipFlutter,
     [switch] $SkipInno,
@@ -33,6 +34,17 @@ function Invoke-Checked {
 }
 
 function Resolve-BuildPython {
+    param([string] $Override = "")
+    if ($Override) {
+        $path = $Override
+        if (-not [System.IO.Path]::IsPathRooted($path)) {
+            $path = Join-Path $RepoRoot $path
+        }
+        if (-not (Test-Path -LiteralPath $path)) {
+            throw "Build Python not found: $path"
+        }
+        return $path
+    }
     $venvPy = Join-Path $RepoRoot 'venv\Scripts\python.exe'
     if (Test-Path -LiteralPath $venvPy) {
         return $venvPy
@@ -110,7 +122,7 @@ function Copy-ModelsBesideExe {
 }
 
 # torch stays in the bundle. Do not add it to spec excludes.
-$Python = Resolve-BuildPython
+$Python = Resolve-BuildPython -Override $BuildPython
 $version = Get-AppVersion -Python $Python
 Write-Host "==> Version $version"
 
