@@ -33,7 +33,7 @@
 - [x] T015 `.github/workflows/release.yml`: скачивает hosted-колесо argos из draft (ретраи); linux-локи без установки torch; проверка воспроизводимости `locks/py310-<id>-linux.lock` (бутстрап-артефакт); upload tar.gz + `packs-linux.json` + `SHA256SUMS-linux.txt` (без `packs/*.7z`)
 - [x] T016 `scripts/publish-release.ps1`: Windows-фаза читает `dist/locks/packs.json`, грузит колесо argos (фильтр расширений по версии); ассеты и `SHA256SUMS` без `.7z`; Final merge; гейт после загрузок
 - [x] T017 deprecated-шапки в `scripts/build-runtime-packs.ps1` и `scripts/build-runtime-pack.py` (ASCII)
-- [ ] T018 `locks/py310-<id>-linux.lock`: бутстрап из RC-прогона CI, затем коммит; финальный прогон — строгая сверка
+- [x] T018 `locks/py310-<id>-linux.lock`: бутстрап из RC-прогона CI (bootstrap-артефакт), закоммичены `bfab938`; финальный прогон — строгая сверка
 
 ## UI и документация — US4/US5
 
@@ -47,7 +47,7 @@
 - [x] T023 pytest полный (477+ тестов) + `flutter analyze` + `flutter test` — зелёные
 - [x] T024 Прогон `e2e-runtime-local.ps1` — ЗЕЛЁНЫЙ: dev+frozen установка, dry-run публикации (9 ассетов), Tier 1 HEAD 74 URL, Tier 2 `import torch ok: 2.11.0+cpu`
 - [ ] T025 Installer smoke: GUI-мастер (размер/источник/время) — вручную; GPU-часть выполнена скриптом: cu128 установлен, `torch 2.11.0+cu128`, `cuda: True`, RTX 5060 Laptop
-- [ ] T026 RC `v1.0.1-rc1`: CI зелёный, `py310-<id>-linux.lock` скачан и закоммичен, `publish-release.ps1 -Phase Final -DryRun`
+- [x] T026 RC `v1.0.1-rc1`: CI run 38178462902 зелёный (linux-локи, tar.gz, `packs-linux.json` в draft); linux-локи закоммичены; `publish-release.ps1 -Phase Final -DryRun -TagOverride v1.0.1-rc1` — merge ок (5 паков, sums 10 файлов)
 - [ ] T027 Финальный `v1.0.1`: сборка/публикация (после T025–T026; по подтверждению)
 
 ## Зависимости
