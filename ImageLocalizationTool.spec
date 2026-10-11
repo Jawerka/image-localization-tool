@@ -242,7 +242,9 @@ class _StagedCollect(COLLECT):
     def assemble(self):
         super().assemble()
         dist_root = Path(DISTPATH) / sidecar_name
-        exe_path = dist_root / f"{app_name}.exe"
+        # На Linux у бинарника нет суффикса .exe.
+        exe_name = f"{app_name}.exe" if sys.platform == "win32" else app_name
+        exe_path = dist_root / exe_name
         if not exe_path.is_file():
             raise RuntimeError(f"Onedir exe is missing after COLLECT: {exe_path}")
         stage_runtime_files(dist_root, project_dir)

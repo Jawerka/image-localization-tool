@@ -94,3 +94,10 @@ def test_spec_guards_find_spec_for_missing_webview():
     assert "_has_module(_mod_name)" in text
     # родитель dotted-имени импортируется: без webview был ModuleNotFoundError
     assert "if importlib.util.find_spec(_mod_name) is not None:" not in text
+
+
+def test_spec_checks_the_built_exe_by_platform():
+    text = SPEC.read_text(encoding="utf-8")
+    # на Linux бинарник без .exe: COLLECT-проверка не должна требовать суффикс
+    assert 'exe_name = f"{app_name}.exe" if sys.platform == "win32" else app_name' in text
+    assert 'exe_path = dist_root / f"{app_name}.exe"' not in text
