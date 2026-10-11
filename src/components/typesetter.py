@@ -605,13 +605,9 @@ def _pillow_rotate_matrix(
 
 
 def _source_to_dest(matrix: list[float], x: float, y: float) -> tuple[float, float]:
+    """Точка слоя → координаты развёрнутого кадра (прямое преобразование)."""
     a, b, c, d, e, f = matrix
-    det = a * e - b * d
-    if abs(det) < 1e-12:
-        return 0.0, 0.0
-    vx = x - c
-    vy = y - f
-    return (e * vx - b * vy) / det, (-d * vx + a * vy) / det
+    return a * x + b * y + c, d * x + e * y + f
 
 
 def _rotate_layer(
