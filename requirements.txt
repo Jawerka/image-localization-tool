@@ -1,5 +1,5 @@
 # Translation (Argos Translate - оффлайн)
-argos-translate @ git+https://github.com/argosopentech/argos-translate.git
+argostranslate @ git+https://github.com/argosopentech/argos-translate.git
 
 # Image processing / ML
 torch>=2.0.0
