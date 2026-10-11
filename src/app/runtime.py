@@ -1,10 +1,12 @@
 """Компоненты рантайма: манифест, установка, удаление и активация паков.
 
-Пак — архив ``.7z`` с каталогом ``site-packages`` внутри (torch с зависимостями
-или argostranslate со стеком). Установка: скачать в ``.part``, сверить sha256,
-распаковать в ``<runtime>/<id>.tmp``, записать маркер ``pack.json`` и атомарно
-переименовать в ``<runtime>/<id>``. Активация добавляет ``site-packages`` в
-``sys.path`` и ``torch/lib`` — в DLL-поиск Windows; вызывается при старте
+Пак — набор официальных pip-колёс (schema 2, ``format:"wheels"``) либо архив
+``.7z`` со старым ``site-packages`` (schema 1, совместимость). Установка:
+скачать файлы в ``.parts``/``.part``, сверить sha256 каждого, распаковать в
+``<runtime>/<id>.tmp``, записать маркер ``pack.json`` и атомарно переименовать
+в ``<runtime>/<id>``. Колёса распаковываются пофайлово (без ``extractall``) с
+проверкой путей и правилом конфликтов. Активация добавляет ``site-packages``
+в ``sys.path`` и ``torch/lib`` — в DLL-поиск Windows; вызывается при старте
 sidecar и в spawn-ребёнке воркера до первого импорта torch.
 """
 
@@ -21,8 +23,10 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from urllib.parse import urlsplit
 
 from src.app import __version__
 from src.app.events import WorkerEvent
@@ -33,6 +37,7 @@ PACKS_DIR_NAME = "runtime"
 MARKER_NAME = "pack.json"
 MANIFEST_BASENAME = "runtime_manifest.json"
 PART_SUFFIX = ".part"
+WHEELS_PART_SUFFIX = ".parts"
 TMP_SUFFIX = ".tmp"
 STDLIB_ZIP_NAME = "stdlib.zip"
 RELEASE_BASE = "https://github.com/Jawerka/image-localization-tool/releases/download"
@@ -52,6 +57,16 @@ _cache_lock = threading.Lock()
 
 
 @dataclass(frozen=True)
+class WheelFile:
+    """Файл колеса в записи schema 2 (``format:"wheels"``)."""
+
+    name: str
+    url: str
+    sha256: str
+    size_bytes: int
+
+
+@dataclass(frozen=True)
 class Pack:
     """Запись манифеста, отфильтрованная под текущую платформу."""
 
@@ -65,10 +80,53 @@ class Pack:
     sha256: str
     size_bytes: int
     driver_min: int | None = None
+    format: str = ""
+    files: tuple[WheelFile, ...] = ()
+    source: str = ""
 
     @property
     def site_packages_name(self) -> str:
         return "site-packages"
+
+    @property
+    def is_wheels(self) -> bool:
+        return bool(self.files)
+
+    @property
+    def effective_size(self) -> int:
+        """Размер записи: суммарный по файлам или объявленный (archive)."""
+        if self.files:
+            return sum(item.size_bytes for item in self.files)
+        return self.size_bytes
+
+
+def _is_sha256(text: str) -> bool:
+    return len(text) == 64 and all(char in "0123456789abcdef" for char in text)
+
+
+def _source_from_url(url: str) -> str:
+    """Человекочитаемый источник файла по хосту URL."""
+    try:
+        host = urlsplit(str(url or "")).hostname or ""
+    except ValueError:
+        return ""
+    host = host.casefold()
+    if host.endswith("pythonhosted.org"):
+        return "PyPI"
+    if host.endswith("pytorch.org"):
+        return "PyTorch CDN"
+    if host.endswith("github.com") or host.endswith("githubusercontent.com"):
+        return "GitHub releases"
+    return host
+
+
+def _source_label(urls: list[str]) -> str:
+    labels: list[str] = []
+    for url in urls:
+        label = _source_from_url(url)
+        if label and label not in labels:
+            labels.append(label)
+    return " + ".join(labels)
 
 
 def platform_tag() -> str:
@@ -184,8 +242,22 @@ def load_manifest(force: bool = False) -> dict:
     return bundled
 
 
+def _record_has_hash(raw: dict) -> bool:
+    """Есть ли у записи настоящие хэши: sha256 (archive) или files[] (wheels)."""
+    if str(raw.get("sha256") or "").strip():
+        return True
+    files = raw.get("files")
+    if isinstance(files, list) and files:
+        return all(
+            isinstance(item, dict)
+            and _is_sha256(str(item.get("sha256") or "").strip().casefold())
+            for item in files
+        )
+    return False
+
+
 def _has_platform_packs(manifest: dict) -> bool:
-    """Есть ли пак текущей платформы с настоящим sha256.
+    """Есть ли пак текущей платформы с настоящими хэшами.
 
     Плейсхолдеры без sha (встроенные записи Linux до релизного манифеста)
     не считаются: база должна синхронно получить релизный манифест.
@@ -199,7 +271,7 @@ def _has_platform_packs(manifest: dict) -> bool:
             continue
         if str(raw.get("python") or current_py) != current_py:
             continue
-        if str(raw.get("sha256") or "").strip():
+        if _record_has_hash(raw):
             return True
     return False
 
@@ -235,6 +307,33 @@ def platform_packs(manifest: dict | None = None) -> list[Pack]:
     return result
 
 
+def _files_from_raw(raw: dict) -> tuple[WheelFile, ...]:
+    """Разобрать ``files[]`` записи schema 2.
+
+    ``ValueError`` — запись невалидна и должна быть пропущена целиком.
+    """
+    raw_files = raw.get("files")
+    if not isinstance(raw_files, list) or not raw_files:
+        raise ValueError("files пуст")
+    files: list[WheelFile] = []
+    names: set[str] = set()
+    for item in raw_files:
+        if not isinstance(item, dict):
+            raise ValueError("элемент files — не объект")
+        name = PurePosixPath(str(item.get("name") or "").replace("\\", "/")).name
+        url = str(item.get("url") or "").strip()
+        sha = str(item.get("sha256") or "").strip().casefold()
+        try:
+            size = int(item.get("size_bytes") or 0)
+        except (TypeError, ValueError):
+            size = 0
+        if not name or name in names or not url or not _is_sha256(sha) or size <= 0:
+            raise ValueError(f"некорректный файл: {name or '?'}")
+        names.add(name)
+        files.append(WheelFile(name=name, url=url, sha256=sha, size_bytes=size))
+    return tuple(files)
+
+
 def _pack_from_dict(raw: dict) -> Pack | None:
     pack_id = str(raw.get("id") or "").strip()
     if not pack_id:
@@ -251,6 +350,31 @@ def _pack_from_dict(raw: dict) -> Pack | None:
         size_value = int(raw.get("size_bytes") or 0)
     except (TypeError, ValueError):
         size_value = 0
+    url_value = str(raw.get("url") or "")
+    format_value = str(raw.get("format") or "").strip().casefold()
+    files: tuple[WheelFile, ...] = ()
+    if "files" in raw or format_value == "wheels":
+        try:
+            files = _files_from_raw(raw)
+        except ValueError as exc:
+            logger.warning("Запись %s манифеста пропущена: %s", pack_id, exc)
+            return None
+        computed = sum(item.size_bytes for item in files)
+        if size_value not in (0, computed):
+            logger.warning(
+                "Запись %s манифеста пропущена: size_bytes %s ≠ сумма файлов %s",
+                pack_id,
+                size_value,
+                computed,
+            )
+            return None
+        size_value = computed
+    if files:
+        source = _source_label([item.url for item in files])
+        pack_format = "wheels"
+    else:
+        source = _source_from_url(url_value)
+        pack_format = format_value or "archive"
     return Pack(
         id=pack_id,
         title=str(raw.get("title") or pack_id),
@@ -258,10 +382,13 @@ def _pack_from_dict(raw: dict) -> Pack | None:
         platform=str(raw.get("os") or raw.get("platform") or ""),
         python=str(raw.get("python") or ""),
         version=str(raw.get("version") or ""),
-        url=str(raw.get("url") or ""),
+        url=url_value,
         sha256=str(raw.get("sha256") or "").strip().lower(),
         size_bytes=size_value,
         driver_min=driver_value,
+        format=pack_format,
+        files=files,
+        source=source,
     )
 
 
@@ -354,7 +481,9 @@ def status(device: str = "auto") -> dict:
                 "title": pack.title,
                 "kind": pack.kind,
                 "version": pack.version,
-                "size_bytes": pack.size_bytes,
+                "size_bytes": pack.effective_size,
+                "format": pack.format,
+                "source": pack.source,
                 "state": "installed" if installed else "available",
                 "installed_version": installed_version(pack.id) if installed else "",
                 "installed_bytes": directory_bytes(pack_dir(pack.id)) if installed else 0,
@@ -452,7 +581,8 @@ def download_and_install(pack: Pack | str, progress=None, retries: int = 1) -> P
     """Скачать, проверить и распаковать пак. Возвращает каталог установки.
 
     ``progress(done, total, state, message)`` вызывается на скачивании и
-    распаковке. Повторная установка уже стоящего пака — no-op.
+    распаковке. Wheels-записи качаются пофайлово (``.parts``), archive — одним
+    архивом (``.part``). Повторная установка уже стоящего пака — no-op.
     """
     if isinstance(pack, str):
         pack = pack_by_id(pack)
@@ -464,11 +594,18 @@ def download_and_install(pack: Pack | str, progress=None, retries: int = 1) -> P
     root = runtime_root()
     root.mkdir(parents=True, exist_ok=True)
     archive = root / f"{pack.id}{PART_SUFFIX}"
+    staging = root / f"{pack.id}{WHEELS_PART_SUFFIX}"
     temporary = root / f"{pack.id}{TMP_SUFFIX}"
     try:
-        _download_pack(pack, archive, progress, retries)
+        if pack.is_wheels:
+            _download_files(pack, staging, progress, retries)
+        else:
+            _download_pack(pack, archive, progress, retries)
         _notify(progress, 0, 0, "installing", "распаковка")
-        _extract_pack(pack, archive, temporary)
+        if pack.is_wheels:
+            _extract_wheels(pack, staging, temporary)
+        else:
+            _extract_pack(pack, archive, temporary)
         _write_marker(temporary, pack)
         if destination.exists():
             shutil.rmtree(destination)
@@ -476,6 +613,8 @@ def download_and_install(pack: Pack | str, progress=None, retries: int = 1) -> P
     finally:
         if archive.exists():
             archive.unlink(missing_ok=True)
+        if staging.exists():
+            shutil.rmtree(staging, ignore_errors=True)
         if temporary.exists():
             shutil.rmtree(temporary, ignore_errors=True)
     activate_path(destination)
@@ -543,6 +682,119 @@ def _download_once(pack: Pack, archive: Path, progress) -> None:
         raise RuntimeError(f"Не сходится sha256 компонента {pack.id}")
 
 
+def _download_files(pack: Pack, staging: Path, progress, retries: int) -> None:
+    """Пофайлово скачать колёса записи: ``.part`` на файл, sha256 каждого."""
+    if staging.exists():
+        shutil.rmtree(staging)
+    staging.mkdir(parents=True, exist_ok=True)
+    total = pack.effective_size
+    done = 0
+    for wheel in pack.files:
+        target = staging / wheel.name
+        part = staging / f"{wheel.name}{PART_SUFFIX}"
+        last_error: Exception | None = None
+        for attempt in range(max(0, retries) + 1):
+            try:
+                _download_file(wheel, part, progress, done, total)
+                break
+            except urllib.error.HTTPError as exc:
+                raise RuntimeError(f"Сервер вернул {exc.code} для файла {wheel.name}") from exc
+            except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as exc:
+                last_error = exc
+                if part.exists():
+                    part.unlink(missing_ok=True)
+                if attempt < retries:
+                    logger.info("Повтор загрузки %s (%s)", wheel.name, exc)
+                    time.sleep(2.0 + 2.0 * attempt)
+        else:
+            raise RuntimeError(f"Не удалось скачать файл {wheel.name}: {last_error}")
+        part.replace(target)
+        done += wheel.size_bytes
+
+
+def _download_file(wheel: WheelFile, target: Path, progress, base: int, total: int) -> None:
+    request = urllib.request.Request(
+        wheel.url, headers={"User-Agent": f"ImageLocalizationTool/{__version__}"}
+    )
+    hasher = hashlib.sha256()
+    done = 0
+    _notify(progress, base, total, "downloading", "")
+    with urllib.request.urlopen(request, timeout=_DOWNLOAD_TIMEOUT) as response:
+        with target.open("wb") as handle:
+            while True:
+                chunk = response.read(_CHUNK)
+                if not chunk:
+                    break
+                handle.write(chunk)
+                hasher.update(chunk)
+                done += len(chunk)
+                _notify(progress, base + done, total, "downloading", "")
+    digest = hasher.hexdigest()
+    if wheel.sha256 and digest != wheel.sha256:
+        raise RuntimeError(f"Не сходится sha256 файла {wheel.name}")
+
+
+def _extract_wheels(pack: Pack, staging: Path, temporary: Path) -> None:
+    """Пофайловая распаковка колёс: сортировка, zip-slip, конфликты."""
+    if temporary.exists():
+        shutil.rmtree(temporary)
+    site = temporary / "site-packages"
+    site.mkdir(parents=True)
+    for wheel in sorted(pack.files, key=lambda item: item.name):
+        path = staging / wheel.name
+        if not path.is_file():
+            raise RuntimeError(f"Нет файла колеса {wheel.name}")
+        _extract_wheel(path, site)
+    if not any(site.iterdir()):
+        raise RuntimeError(f"Колёса пака {pack.id} пусты")
+
+
+def _extract_wheel(path: Path, site: Path) -> None:
+    try:
+        archive = zipfile.ZipFile(path)
+    except (OSError, zipfile.BadZipFile) as exc:
+        raise RuntimeError(f"Не удалось открыть колесо {path.name}: {exc}") from exc
+    with archive:
+        for info in archive.infolist():
+            pure = PurePosixPath(str(info.filename).replace("\\", "/"))
+            if pure.is_absolute() or ".." in pure.parts:
+                raise RuntimeError(f"Недопустимый путь в колесе: {info.filename}")
+            parts = pure.parts
+            if not parts or info.is_dir():
+                continue
+            if any(part.endswith(".data") for part in parts):
+                continue
+            target = site.joinpath(*parts)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if target.exists():
+                if _zip_entry_equals(archive, info, target):
+                    continue
+                raise RuntimeError(f"Конфликт файла между колёсами: {pure.as_posix()}")
+            try:
+                with archive.open(info) as source, target.open("wb") as destination:
+                    shutil.copyfileobj(source, destination, _CHUNK)
+            except OSError as exc:
+                raise RuntimeError(f"Не удалось распаковать {info.filename}: {exc}") from exc
+
+
+def _zip_entry_equals(archive: zipfile.ZipFile, info: zipfile.ZipInfo, target: Path) -> bool:
+    """Совпадает ли содержимое entry с уже распакованным файлом."""
+    try:
+        if target.stat().st_size != info.file_size:
+            return False
+    except OSError:
+        return False
+    existing = hashlib.sha256()
+    with target.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(_CHUNK), b""):
+            existing.update(chunk)
+    incoming = hashlib.sha256()
+    with archive.open(info) as source:
+        for chunk in iter(lambda: source.read(_CHUNK), b""):
+            incoming.update(chunk)
+    return existing.digest() == incoming.digest()
+
+
 def _extract_pack(pack: Pack, archive: Path, temporary: Path) -> None:
     if temporary.exists():
         shutil.rmtree(temporary)
@@ -571,9 +823,14 @@ def _write_marker(directory: Path, pack: Pack) -> None:
     payload = {
         "id": pack.id,
         "version": pack.version,
-        "sha256": pack.sha256,
         "installed_at": time.time(),
     }
+    if pack.is_wheels:
+        payload["format"] = "wheels"
+        payload["files"] = {item.name: item.sha256 for item in pack.files}
+    else:
+        payload["format"] = "archive"
+        payload["sha256"] = pack.sha256
     (directory / MARKER_NAME).write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )

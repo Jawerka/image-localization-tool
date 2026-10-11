@@ -6,6 +6,7 @@ import hashlib
 import json
 import sys
 import types
+import zipfile
 from pathlib import Path
 
 import py7zr
@@ -42,10 +43,10 @@ def _pack_dict(pack_id: str = "torch-cpu", kind: str = "torch", *, url: str = ""
     return entry
 
 
-def _use(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, packs: list[dict]) -> Path:
+def _use(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, packs: list[dict], schema: int = 1) -> Path:
     """Манифест через env-URL и отдельный install_root для теста."""
     path = tmp_path / "manifest.json"
-    path.write_text(json.dumps({"schema": 1, "app": "1.0.0", "packs": packs}), encoding="utf-8")
+    path.write_text(json.dumps({"schema": schema, "app": "1.0.1", "packs": packs}), encoding="utf-8")
     monkeypatch.setenv("ILT_RUNTIME_MANIFEST_URL", path.as_uri())
     monkeypatch.setenv("ILT_INSTALL_ROOT", str(tmp_path / "install"))
     return path
@@ -314,3 +315,204 @@ def test_manifest_not_fetched_when_bundled_sha_present(monkeypatch, tmp_path):
     data = runtime.load_manifest(force=True)
     assert data["packs"][0]["id"] == "torch-cpu"
     assert calls == []
+
+
+def _make_wheel(path: Path, entries: dict[str, str | bytes]) -> str:
+    """Собрать минимальное колесо (zip). Возвращает sha256 файла."""
+    with zipfile.ZipFile(path, "w") as archive:
+        for arcname, content in entries.items():
+            archive.writestr(arcname, content)
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _wheel_file(path: Path) -> dict:
+    return {
+        "name": path.name,
+        "url": path.as_uri(),
+        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "size_bytes": path.stat().st_size,
+    }
+
+
+def _wheels_pack_dict(pack_id: str, files: list[dict], **extra) -> dict:
+    record = {
+        "id": pack_id,
+        "title": pack_id,
+        "kind": "torch",
+        "os": runtime.platform_tag(),
+        "python": runtime.python_tag(),
+        "version": "1.0",
+        "format": "wheels",
+        "size_bytes": sum(int(item["size_bytes"]) for item in files),
+        "files": files,
+    }
+    record.update(extra)
+    return record
+
+
+def test_wheels_install_files_and_marker(monkeypatch, tmp_path):
+    alpha = tmp_path / "alpha-1.0-py3-none-any.whl"
+    _make_wheel(alpha, {
+        "alpha/__init__.py": "VALUE = 1\n",
+        "alpha-1.0.dist-info/METADATA": "Name: alpha\nVersion: 1.0\n",
+        "alpha-1.0.dist-info/RECORD": "alpha/__init__.py,,\n",
+    })
+    beta = tmp_path / "beta-1.0-py3-none-any.whl"
+    _make_wheel(beta, {"beta.py": "B = 2\n"})
+    record = _wheels_pack_dict("torch-cpu", [_wheel_file(alpha), _wheel_file(beta)])
+    _use(monkeypatch, tmp_path, [record], schema=2)
+    events: list[tuple] = []
+    destination = runtime.download_and_install(
+        "torch-cpu", lambda done, total, state, message: events.append((state, done, total))
+    )
+    site = destination / "site-packages"
+    assert (site / "alpha" / "__init__.py").read_text(encoding="utf-8") == "VALUE = 1\n"
+    assert (site / "beta.py").is_file()
+    assert (site / "alpha-1.0.dist-info" / "RECORD").is_file()
+    marker = json.loads((destination / "pack.json").read_text(encoding="utf-8"))
+    assert marker["format"] == "wheels"
+    assert set(marker["files"]) == {alpha.name, beta.name}
+    assert events[0][0] == "downloading"
+    assert any(state == "downloading" and total == record["size_bytes"] for state, _d, total in events)
+    assert events[-1][0] == "installed"
+    root = tmp_path / "install" / "runtime"
+    assert not (root / "torch-cpu.parts").exists()
+    assert not (root / "torch-cpu.tmp").exists()
+    assert runtime.is_installed("torch-cpu")
+
+
+def test_wheels_sha_mismatch_leaves_no_trace(monkeypatch, tmp_path):
+    wheel = tmp_path / "gamma-1.0-py3-none-any.whl"
+    _make_wheel(wheel, {"gamma/__init__.py": "G = 1\n"})
+    item = _wheel_file(wheel)
+    item["sha256"] = "0" * 64
+    record = _wheels_pack_dict("torch-cpu", [item])
+    _use(monkeypatch, tmp_path, [record], schema=2)
+    with pytest.raises(RuntimeError, match="sha256"):
+        runtime.download_and_install("torch-cpu")
+    root = tmp_path / "install" / "runtime"
+    assert not runtime.is_installed("torch-cpu")
+    assert not (root / "torch-cpu.parts").exists()
+    assert not (root / "torch-cpu.tmp").exists()
+
+
+def test_wheels_same_content_conflict_is_skipped(monkeypatch, tmp_path):
+    first = tmp_path / "a-shared-1.0-py3-none-any.whl"
+    second = tmp_path / "b-shared-1.0-py3-none-any.whl"
+    _make_wheel(first, {"shared/data.txt": "одинаково\n"})
+    _make_wheel(second, {"shared/data.txt": "одинаково\n"})
+    record = _wheels_pack_dict("torch-cpu", [_wheel_file(first), _wheel_file(second)])
+    _use(monkeypatch, tmp_path, [record], schema=2)
+    destination = runtime.download_and_install("torch-cpu")
+    shared = destination / "site-packages" / "shared" / "data.txt"
+    assert shared.read_text(encoding="utf-8") == "одинаково\n"
+
+
+def test_wheels_different_content_conflict_fails(monkeypatch, tmp_path):
+    first = tmp_path / "a-shared-1.0-py3-none-any.whl"
+    second = tmp_path / "b-shared-1.0-py3-none-any.whl"
+    _make_wheel(first, {"shared/data.txt": "первый\n"})
+    _make_wheel(second, {"shared/data.txt": "второй\n"})
+    record = _wheels_pack_dict("torch-cpu", [_wheel_file(first), _wheel_file(second)])
+    _use(monkeypatch, tmp_path, [record], schema=2)
+    with pytest.raises(RuntimeError, match="Конфликт"):
+        runtime.download_and_install("torch-cpu")
+    root = tmp_path / "install" / "runtime"
+    assert not (root / "torch-cpu.tmp").exists()
+    assert not runtime.is_installed("torch-cpu")
+
+
+def test_wheels_skip_data_scripts_and_keep_record(monkeypatch, tmp_path):
+    wheel = tmp_path / "delta-1.0-py3-none-any.whl"
+    _make_wheel(wheel, {
+        "delta/__init__.py": "D = 1\n",
+        "delta-1.0.data/scripts/delta.exe": b"MZfake",
+        "delta-1.0.dist-info/RECORD": "delta/__init__.py,,\n",
+    })
+    record = _wheels_pack_dict("torch-cpu", [_wheel_file(wheel)])
+    _use(monkeypatch, tmp_path, [record], schema=2)
+    destination = runtime.download_and_install("torch-cpu")
+    site = destination / "site-packages"
+    assert (site / "delta" / "__init__.py").is_file()
+    assert (site / "delta-1.0.dist-info" / "RECORD").is_file()
+    assert not (site / "delta-1.0.data").exists()
+
+
+def test_wheels_zip_slip_rejected(monkeypatch, tmp_path):
+    wheel = tmp_path / "evil-1.0-py3-none-any.whl"
+    _make_wheel(wheel, {"../evil.py": "E = 1\n"})
+    record = _wheels_pack_dict("torch-cpu", [_wheel_file(wheel)])
+    _use(monkeypatch, tmp_path, [record], schema=2)
+    with pytest.raises(RuntimeError, match="Недопустимый путь"):
+        runtime.download_and_install("torch-cpu")
+
+
+def test_wheels_extraction_order_is_sorted(monkeypatch, tmp_path):
+    beta = tmp_path / "beta-1.0-py3-none-any.whl"
+    alpha = tmp_path / "alpha-1.0-py3-none-any.whl"
+    _make_wheel(beta, {"beta.py": "B = 1\n"})
+    _make_wheel(alpha, {"alpha.py": "A = 1\n"})
+    record = _wheels_pack_dict("torch-cpu", [_wheel_file(beta), _wheel_file(alpha)])
+    _use(monkeypatch, tmp_path, [record], schema=2)
+    calls: list[str] = []
+    real = runtime._extract_wheel
+
+    def spy(path, site):
+        calls.append(path.name)
+        return real(path, site)
+
+    monkeypatch.setattr(runtime, "_extract_wheel", spy)
+    runtime.download_and_install("torch-cpu")
+    assert calls == [alpha.name, beta.name]
+
+
+def test_wheels_record_validation(monkeypatch, tmp_path):
+    wheel = tmp_path / "eps-1.0-py3-none-any.whl"
+    _make_wheel(wheel, {"eps/__init__.py": "E = 1\n"})
+    item = _wheel_file(wheel)
+    good = _wheels_pack_dict("torch-cpu", [item])
+    pack = runtime._pack_from_dict(good)
+    assert pack is not None and pack.is_wheels
+    assert pack.effective_size == item["size_bytes"]
+    bad_sum = _wheels_pack_dict("torch-cpu", [item])
+    bad_sum["size_bytes"] = item["size_bytes"] + 1
+    assert runtime._pack_from_dict(bad_sum) is None
+    bad_sha = _wheels_pack_dict("torch-cpu", [dict(item, sha256="xyz")])
+    assert runtime._pack_from_dict(bad_sha) is None
+    empty = {"id": "torch-cpu", "format": "wheels", "files": [], "size_bytes": 0}
+    assert runtime._pack_from_dict(empty) is None
+
+
+def test_wheels_source_and_status(monkeypatch, tmp_path):
+    wheel = tmp_path / "zeta-1.0-py3-none-any.whl"
+    _make_wheel(wheel, {"zeta/__init__.py": "Z = 1\n"})
+    item = _wheel_file(wheel)
+    item["url"] = "https://files.pythonhosted.org/packages/x/zeta-1.0-py3-none-any.whl"
+    record = _wheels_pack_dict("argos", [item], kind="argos")
+    _use(monkeypatch, tmp_path, [record], schema=2)
+    monkeypatch.setattr("src.app.hardware.detect", lambda refresh=False: {"recommended": "torch-cpu"})
+    monkeypatch.setattr(runtime, "torch_state", lambda refresh=False: (False, False))
+    entry = runtime.status("auto")["packs"][0]
+    assert entry["source"] == "PyPI"
+    assert entry["format"] == "wheels"
+    assert entry["size_bytes"] == item["size_bytes"]
+
+
+def test_has_platform_packs_accepts_wheels():
+    record = {
+        "id": "torch-cpu",
+        "kind": "torch",
+        "os": runtime.platform_tag(),
+        "python": runtime.python_tag(),
+        "format": "wheels",
+        "size_bytes": 3,
+        "files": [
+            {
+                "name": "a.whl",
+                "url": "https://files.pythonhosted.org/a.whl",
+                "sha256": "a" * 64,
+                "size_bytes": 3,
+            }
+        ],
+    }
+    assert runtime._has_platform_packs({"packs": [record]}) is True

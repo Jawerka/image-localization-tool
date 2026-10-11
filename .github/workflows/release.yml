@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag, e.g. v1.0.0"
+        description: "Release tag, e.g. v1.0.1"
         required: true
 
 permissions:
@@ -14,9 +14,11 @@ permissions:
 
 jobs:
   linux:
-    name: Linux sidecar & runtime packs
+    name: Linux sidecar & runtime locks
     runs-on: ubuntu-latest
     timeout-minutes: 150
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -43,7 +45,7 @@ jobs:
       - name: Install build dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements-release.txt pyinstaller py7zr
+          pip install -r requirements-release.txt pyinstaller
 
       - name: Build stdlib.zip
         run: python scripts/build-stdlib-zip.py
@@ -70,37 +72,59 @@ jobs:
           chmod +x "$ROOT/deploy.sh"
           tar -C dist/server -czf "dist/ImageLocalizationTool-${VERSION}-server-linux-x64.tar.gz" ImageLocalizationTool
 
-      - name: Build torch-cpu-linux pack
+      - name: Wait for the hosted argos wheel
         run: |
           set -eux
-          python -m venv build/runtime-venvs/torch-cpu
-          build/runtime-venvs/torch-cpu/bin/pip install --upgrade pip
-          build/runtime-venvs/torch-cpu/bin/pip install torch==2.11.0 --index-url https://download.pytorch.org/whl/cpu
-          python scripts/build-runtime-pack.py \
-            --venv build/runtime-venvs/torch-cpu \
-            --kind torch --variant cpu --platform linux --out dist/packs
+          TAG="${{ steps.meta.outputs.tag }}"
+          mkdir -p build/argos-wheel
+          for i in $(seq 1 60); do
+            if gh release download "$TAG" -p 'argostranslate-*.whl' --dir build/argos-wheel --clobber 2>/dev/null; then
+              ls -l build/argos-wheel
+              exit 0
+            fi
+            echo "waiting for the argostranslate wheel in $TAG ($i/60)"
+            sleep 15
+          done
+          echo "::error::argostranslate wheel asset not found in release $TAG"
+          exit 1
 
-      - name: Build argos-linux pack
+      - name: Build linux locks (no torch install)
         run: |
           set -eux
-          python -m venv build/runtime-venvs/argos
-          build/runtime-venvs/argos/bin/pip install --upgrade pip
-          build/runtime-venvs/argos/bin/pip install \
-            "argostranslate @ git+https://github.com/argosopentech/argos-translate.git"
-          python scripts/build-runtime-pack.py \
-            --venv build/runtime-venvs/argos \
-            --kind argos --platform linux --out dist/packs
+          python scripts/build_runtime_locks.py --pack torch-cpu --os linux --out dist/locks
+          python scripts/build_runtime_locks.py --pack argos --os linux --out dist/locks \
+            --hosted-wheel "$(ls build/argos-wheel/argostranslate-*.whl)"
+
+      - name: Check lock reproducibility
+        run: |
+          set -eux
+          mkdir -p build/locks-bootstrap
+          for f in dist/locks/py310-*-linux.lock; do
+            base="$(basename "$f")"
+            if [ -f "locks/$base" ]; then
+              diff -u "locks/$base" "$f"
+            else
+              echo "::warning::locks/$base is missing (bootstrap): commit it from the artifact"
+              cp "$f" build/locks-bootstrap/
+            fi
+          done
+
+      - name: Upload bootstrap locks
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-locks-bootstrap
+          path: build/locks-bootstrap/
+          if-no-files-found: ignore
 
       - name: Checksums for Linux assets
         run: |
           set -eux
           cd dist
-          sha256sum packs/*.7z ImageLocalizationTool-*-server-linux-x64.tar.gz > SHA256SUMS-linux.txt
-          cp packs/packs.json packs-linux.json
+          sha256sum ImageLocalizationTool-*-server-linux-x64.tar.gz > SHA256SUMS-linux.txt
+          cp locks/packs.json packs-linux.json
 
       - name: Upload to release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -eux
           TAG="${{ steps.meta.outputs.tag }}"
@@ -108,7 +132,6 @@ jobs:
           gh release view "$TAG" >/dev/null 2>&1 \
             || gh release create "$TAG" --draft --title "$VERSION" --notes "Linux assets for $TAG"
           gh release upload "$TAG" \
-            dist/packs/*.7z \
             dist/ImageLocalizationTool-*-server-linux-x64.tar.gz \
             dist/packs-linux.json \
             dist/SHA256SUMS-linux.txt \

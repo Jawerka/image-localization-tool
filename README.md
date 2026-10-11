@@ -174,18 +174,22 @@ python scripts\build-extension.py
 
 Проверка каталога сборки: `python scripts\smoke_dist.py`.
 
-Релизная сборка идёт с CPU-сборкой torch: модели в установщик не вкладываются
-(их скачивает мастер первого запуска), а CUDA-стек в сайдкаре — это лишние ~2.5 ГБ.
+База релиза лёгкая: ни torch, ни Argos-стека в ней нет (`requirements-release.txt`),
+модели и рантайм-компоненты докачиваются при первом запуске. Сборка релиза:
 
 ```powershell
 python -m venv venv-release
-.\venv-release\Scripts\python.exe -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-.\venv-release\Scripts\python.exe -m pip install -r requirements.txt pyinstaller
+.\venv-release\Scripts\python.exe -m pip install -r requirements-release.txt pyinstaller
 .\scripts\build-windows.ps1 -SkipModels -BuildPython venv-release\Scripts\python.exe
 ```
 
-CUDA-сборку torch ставьте только в dev-`venv` (`scripts\setup_models.py --torch-cuda`):
-она нужна для локального GPU-ускорения и в релиз не попадает.
+При первом запуске мастер предложит компоненты по выбору железа: `torch-cpu` (~125 МБ),
+`torch-cu128` (~2.5 ГБ на NVIDIA с драйвером 570+) и `argos` (~90 МБ) — большие файлы
+скачиваются в фоне с официальных PyPI/PyTorch CDN. Позже их можно поставить в
+«Настройках → Компоненты» или без окна: `ImageLocalizationTool.exe --deploy cpu|argos|all`.
+
+CUDA-сборку torch для локальной разработки ставьте только в dev-`venv`
+(`scripts\setup_models.py --torch-cuda`): в релиз она не попадает.
 
 Деплой:
 

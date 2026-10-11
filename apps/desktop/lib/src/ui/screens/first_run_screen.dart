@@ -405,6 +405,8 @@ class _FirstRunScreenState extends State<FirstRunScreen> {
                       ),
                       Text(
                         '${_formatBytes(pack.sizeBytes)}'
+                        '${pack.source.isNotEmpty ? ' · ${pack.source}' : ''}'
+                        ' · ${_formatEta(pack.sizeBytes)}'
                         '${pack.recommended ? ' · рекомендовано' : ''}',
                         style: theme.textTheme.labelSmall?.copyWith(
                           color: pack.recommended
@@ -597,4 +599,11 @@ String _formatBytes(int value) {
   }
   if (value >= 1024) return '${(value / 1024).toStringAsFixed(0)} КБ';
   return '$value Б';
+}
+
+/// Ожидаемое время загрузки (грубо, ~10 МБ/с): «<1 мин» или «~N мин».
+String _formatEta(int bytes) {
+  final seconds = bytes / (10 * 1024 * 1024);
+  if (seconds < 60) return '<1 мин';
+  return '~${(seconds / 60).ceil()} мин';
 }

@@ -58,15 +58,26 @@ if (Test-Path -LiteralPath $stage) {
 }
 New-Item -ItemType Directory -Path $stage -Force | Out-Null
 
-# Copy the app without personal state: models/runtime/data stay empty.
+# Copy the app without personal state: top-level models/runtime/data stay empty.
+# /XD with a full path only: a bare name excludes directories at any depth
+# and would drop desktop\data (Flutter assets), cv2\data, rapidocr\models.
+$excludedDirs = @('models', 'runtime', 'data') |
+    ForEach-Object { Join-Path $DistDir $_ }
 $robocopyArgs = @(
-    $DistDir, $stage, '/E', '/XD', 'models', 'runtime', 'data',
+    $DistDir, $stage, '/E', '/XD') + $excludedDirs + @(
     '/NFL', '/NDL', '/NJH', '/NJS', '/nc', '/ns', '/np'
 )
 & robocopy @robocopyArgs
 $code = $LASTEXITCODE
 if ($code -ge 8) {
     throw "robocopy failed with exit code $code"
+}
+
+# Guard against losing nested directories: without Flutter assets the host will not start.
+foreach ($required in @('desktop\data\flutter_assets', 'desktop\data\app.so', 'sidecar\ImageLocalizationTool.exe')) {
+    if (-not (Test-Path -LiteralPath (Join-Path $stage $required))) {
+        throw "Portable staging incomplete: $required"
+    }
 }
 
 foreach ($folder in @('data', 'models', 'runtime')) {
@@ -84,3 +95,5 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
     $stage, $zip, [System.IO.Compression.CompressionLevel]::Optimal, $true)
 Write-Host "Portable zip: $zip" -ForegroundColor Green
 Write-Host ("  {0:N1} MB" -f ((Get-Item -LiteralPath $zip).Length / 1MB))
+
+exit 0

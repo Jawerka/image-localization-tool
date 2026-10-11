@@ -52,7 +52,9 @@ if (-not (Test-Path -LiteralPath $Dest)) {
 
 $exclude = @()
 if (-not $IncludeModels) {
-    $exclude += 'models'
+    # Full path: /XD with a bare name excludes directories at any depth
+    # (rapidocr\models, torch\models, etc.).
+    $exclude += (Join-Path $DistDir 'models')
     Write-Host "==> Mirror (excluding models) $DistDir -> $Dest"
 } else {
     Write-Host "==> Mirror (including models) $DistDir -> $Dest"

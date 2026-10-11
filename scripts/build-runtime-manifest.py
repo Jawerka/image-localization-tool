@@ -1,11 +1,12 @@
-"""Собрать релизный манифест рантайма из сводки паков.
+"""Собрать релизный манифест рантайма (schema 2) из сводки локов.
 
-Читает ``dist/packs/packs.json`` (его пишет ``scripts/build-runtime-pack.py``),
-подставляет URL ассетов релиза и пишет:
+Читает сводки ``dist/locks/packs.json`` (пишет ``scripts/build_runtime_locks.py``),
+переносит wheels-записи как есть и пишет:
 
-- ``dist/ilt-runtime-manifest-<ver>.json`` — ассет релиза;
-- ``src/app/runtime_manifest.json`` — встроенную копию (по умолчанию):
-  базовая сборка несёт реальные sha256, и установка работает офлайн.
+- ``dist/ilt-runtime-manifest-<ver>.json`` — ассет релиза (проверяется
+  ``validate_manifest`` до записи);
+- ``src/app/runtime_manifest.json`` — встроенную копию (по умолчанию), сливая
+  со старыми записями: базовая сборка работает офлайн.
 
 Запуск:
     python scripts/build-runtime-manifest.py
@@ -24,55 +25,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from scripts.manifest_tools import build_manifest, merge_entries, validate_manifest  # noqa: E402
 from scripts.smoke_dist import read_app_version  # noqa: E402
 from src.app.runtime import RELEASE_BASE  # noqa: E402
-
-KIND_ORDER = {"torch": 0, "argos": 1}
-
-
-def build_manifest(version: str, packs: list[dict], url_base: str = RELEASE_BASE) -> dict:
-    """Записи packs.json → манифест с URL релиза."""
-    entries: list[dict] = []
-    for record in packs:
-        filename = str(record.get("file") or "")
-        if not filename:
-            continue
-        entry = {
-            "id": str(record.get("id") or ""),
-            "title": str(record.get("title") or record.get("id") or ""),
-            "kind": str(record.get("kind") or ""),
-            "os": str(record.get("os") or ""),
-            "arch": str(record.get("arch") or "x64"),
-            "python": str(record.get("python") or ""),
-            "version": str(record.get("version") or ""),
-            "url": f"{url_base}/v{version}/{filename}",
-            "sha256": str(record.get("sha256") or ""),
-            "size_bytes": int(record.get("size_bytes") or 0),
-        }
-        if record.get("driver_min") is not None:
-            entry["driver_min"] = int(record["driver_min"])
-        entries.append(entry)
-    entries.sort(key=lambda item: (item["os"], KIND_ORDER.get(item["kind"], 9), item["id"]))
-    return {"schema": 1, "app": version, "packs": entries}
-
-
-def merge_entries(base: list[dict], overlay: list[dict]) -> list[dict]:
-    """Слить записи манифеста по (id, os): новые перекрывают старые."""
-    merged: list[dict] = []
-    for entry in overlay:
-        merged.append(entry)
-    keys = {(item.get("id"), item.get("os")) for item in overlay}
-    for entry in base:
-        if (entry.get("id"), entry.get("os")) not in keys:
-            merged.append(entry)
-    merged.sort(
-        key=lambda item: (
-            str(item.get("os")),
-            KIND_ORDER.get(str(item.get("kind")), 9),
-            str(item.get("id")),
-        )
-    )
-    return merged
 
 
 def load_packs(path: Path) -> list[dict]:
@@ -83,12 +38,12 @@ def load_packs(path: Path) -> list[dict]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Манифест рантайма релиза")
+    parser = argparse.ArgumentParser(description="Манифест рантайма релиза (schema 2)")
     parser.add_argument(
         "--packs",
         action="append",
         default=None,
-        help="сводка паков; можно указать несколько (поздние перекрывают ранние)",
+        help="сводка локов; можно указать несколько (поздние перекрывают ранние)",
     )
     parser.add_argument("--out", default="", help="по умолчанию dist/ilt-runtime-manifest-<ver>.json")
     parser.add_argument("--bundled", default="src/app/runtime_manifest.json")
@@ -98,12 +53,20 @@ def main(argv: list[str] | None = None) -> int:
 
     version = read_app_version(ROOT)
     entries: list[dict] = []
-    for packs_arg in args.packs or ["dist/packs/packs.json"]:
+    for packs_arg in args.packs or ["dist/locks/packs.json"]:
         packs_path = Path(packs_arg)
         if not packs_path.is_absolute():
             packs_path = ROOT / packs_path
+        if not packs_path.is_file():
+            raise SystemExit(f"Нет сводки локов: {packs_path}. Сначала build_runtime_locks.py.")
         entries = merge_entries(entries, load_packs(packs_path))
     manifest = build_manifest(version, entries, args.url_base)
+
+    issues = validate_manifest(manifest)
+    if issues:
+        for issue in issues:
+            print(f"ОШИБКА: {issue}", file=sys.stderr)
+        raise SystemExit("Манифест не прошёл валидацию полноты")
 
     out_path = Path(args.out) if args.out else Path("dist") / f"ilt-runtime-manifest-{version}.json"
     if not out_path.is_absolute():
@@ -111,7 +74,7 @@ def main(argv: list[str] | None = None) -> int:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(manifest, ensure_ascii=False, indent=2) + "\n"
     out_path.write_text(text, encoding="utf-8")
-    print(f"Манифест релиза: {out_path} (паков: {len(manifest['packs'])})")
+    print(f"Манифест релиза: {out_path} (schema 2, паков: {len(manifest['packs'])})")
 
     if not args.no_bundled:
         bundled = Path(args.bundled)
@@ -124,6 +87,8 @@ def main(argv: list[str] | None = None) -> int:
                 existing = {}
             old_packs = existing.get("packs") if isinstance(existing, dict) else None
             if isinstance(old_packs, list):
+                # Старые записи (в т.ч. плейсхолдеры schema 1) остаются запасным
+                # путём; встроенную копию не валидируем строго.
                 manifest["packs"] = merge_entries(old_packs, manifest["packs"])
         bundled.write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"

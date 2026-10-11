@@ -17,6 +17,8 @@ Map<String, dynamic> _runtimeReply() => {
           'size_bytes': 178000000,
           'state': 'available',
           'recommended': false,
+          'format': 'wheels',
+          'source': 'PyPI + PyTorch CDN',
         },
         {
           'id': 'torch-cu128',
@@ -26,6 +28,8 @@ Map<String, dynamic> _runtimeReply() => {
           'size_bytes': 1400000000,
           'state': 'available',
           'recommended': true,
+          'format': 'wheels',
+          'source': 'PyPI + PyTorch CDN',
         },
         {
           'id': 'argos',
@@ -34,6 +38,8 @@ Map<String, dynamic> _runtimeReply() => {
           'version': '1.11.1',
           'size_bytes': 100000000,
           'state': 'available',
+          'format': 'wheels',
+          'source': 'PyPI + GitHub releases',
         },
       ],
       'hardware': {
@@ -81,6 +87,9 @@ void main() {
     expect(find.text('PyTorch CUDA 12.8 (NVIDIA)'), findsOneWidget);
     expect(find.textContaining('рекомендовано'), findsOneWidget);
     expect(find.textContaining('CUDA доступна'), findsOneWidget);
+    expect(find.textContaining('PyTorch CDN'), findsWidgets);
+    expect(find.textContaining('~3 мин'), findsOneWidget);
+    expect(find.textContaining('<1 мин'), findsWidgets);
 
     await tester.tap(find.byKey(const Key('wizard-runtime-download-torch-cu128')));
     await tester.pump();

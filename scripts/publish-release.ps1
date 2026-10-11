@@ -5,12 +5,13 @@
 
 .DESCRIPTION
   Phase Windows (local):
-    1. check local assets (setup, portable zip, server zip, packs, extensions);
-    2. rebuild release runtime manifest from dist/packs/packs.json;
+    1. check local assets (setup, portable zip, server zip, argos wheel, extensions);
+    2. rebuild release runtime manifest from dist/locks/packs.json;
     3. write dist/SHA256SUMS-windows.txt;
     4. with -ResetTag delete the old release, its tag and assets;
        with -PushTag push the fresh tag;
-    5. create a draft release and upload the missing assets one file at a time.
+    5. create a draft release and upload the missing assets one file at a time
+       (including the built argostranslate wheel for the argos pack).
 
   Phase Final (after the Linux CI run):
     1. download packs-linux.json and SHA256SUMS-linux.txt from the release;
@@ -29,6 +30,7 @@
   .\scripts\publish-release.ps1 -DryRun
   .\scripts\publish-release.ps1 -PushTag
   .\scripts\publish-release.ps1 -Phase Final -Publish
+  .\scripts\publish-release.ps1 -Phase Final -DryRun -TagOverride v1.0.1-rc1
 #>
 param(
     [ValidateSet('Windows', 'Final')]
@@ -37,7 +39,8 @@ param(
     [switch] $PushTag,
     [switch] $Replace,
     [switch] $Publish,
-    [switch] $DryRun
+    [switch] $DryRun,
+    [string] $TagOverride = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -135,6 +138,28 @@ function Get-Sha256Line {
     return ('{0}  {1}' -f $hash, (Split-Path -Leaf $Path))
 }
 
+function Invoke-ReleaseGate {
+    # Tier 1 gate: manifest structure + HEAD of every URL. Our own draft
+    # release assets are not anonymously downloadable, so they are checked
+    # through the GitHub API with the gh token.
+    param(
+        [string]$Tag,
+        [string]$Manifest,
+        [string]$Python
+    )
+    $token = (& gh auth token 2>$null | Out-String).Trim()
+    $previousToken = $env:GH_TOKEN
+    if ($token) { $env:GH_TOKEN = $token }
+    try {
+        Invoke-Checked {
+            & $Python (Join-Path $RepoRoot 'scripts\check_release.py') `
+                '--manifest' $Manifest '--assets' 'dist'
+        } "check_release.py ($Tag)"
+    } finally {
+        $env:GH_TOKEN = $previousToken
+    }
+}
+
 function Resolve-BuildPython {
     $venvPy = Join-Path $RepoRoot 'venv\Scripts\python.exe'
     if (Test-Path -LiteralPath $venvPy) { return $venvPy }
@@ -155,7 +180,7 @@ function Get-NotesFile {
 }
 
 $version = Get-AppVersion
-$tag = "v$version"
+$tag = if ($TagOverride) { $TagOverride } else { "v$version" }
 $notes = Get-NotesFile -Version $version
 $python = Resolve-BuildPython
 
@@ -168,11 +193,15 @@ if ($Phase -eq 'Windows') {
             throw "Missing asset: $path. Build it first (build-windows.ps1, package-portable.ps1, package-server.ps1)."
         }
     }
-    $packs = @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'dist\packs') -Filter '*.7z' | Sort-Object Name)
-    if ($packs.Count -eq 0) {
-        throw 'No runtime packs in dist\packs. Run scripts\build-runtime-packs.ps1.'
+    $locksSummary = Join-Path $RepoRoot 'dist\locks\packs.json'
+    if (-not (Test-Path -LiteralPath $locksSummary)) {
+        throw 'No lock summary in dist\locks. Run scripts\build-runtime-locks.ps1.'
     }
-    $extensions = @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'dist') -Filter 'ilt-extension-*.zip' | Sort-Object Name)
+    $locksWheels = @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'dist\locks') -Filter 'argostranslate-*.whl' | Sort-Object Name)
+    if ($locksWheels.Count -eq 0) {
+        throw 'No hosted argostranslate wheel in dist\locks. Run scripts\build-runtime-locks.ps1.'
+    }
+    $extensions = @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'dist') -Filter "ilt-extension-*-$version.zip" | Sort-Object Name)
     if ($extensions.Count -eq 0) {
         throw 'No extension zips. Run python scripts\build-extension.py.'
     }
@@ -183,7 +212,7 @@ if ($Phase -eq 'Windows') {
     } 'build-runtime-manifest.py'
 
     $manifest = Join-Path $RepoRoot "dist\ilt-runtime-manifest-$version.json"
-    $assets = @($setup, $portable, $serverZip, $manifest) + $packs.FullName + $extensions.FullName
+    $assets = @($setup, $portable, $serverZip, $manifest) + $locksWheels.FullName + $extensions.FullName
     $sumLines = @($assets | ForEach-Object { Get-Sha256Line -Path $_ })
     $sumPath = Join-Path $RepoRoot 'dist\SHA256SUMS-windows.txt'
     $sumLines | Set-Content -LiteralPath $sumPath -Encoding ASCII
@@ -214,6 +243,7 @@ if ($Phase -eq 'Windows') {
     }
     $existing = Get-ReleaseAssetMap -Tag $tag
     Send-ReleaseAssets -Tag $tag -Paths $assets -Existing $existing -Replace:$Replace
+    Invoke-ReleaseGate -Tag $tag -Manifest $manifest -Python $python
     Write-Host "Windows phase done: draft $tag" -ForegroundColor Green
     if (-not $Publish) {
         Write-Host 'Next: wait for the Linux CI, then run -Phase Final -Publish.'
@@ -231,7 +261,7 @@ if ($Phase -eq 'Final') {
         & gh release download $tag -p 'packs-linux.json' -p 'SHA256SUMS-linux.txt' --dir $tmp --clobber
     } "download Linux metadata ($tag)"
 
-    $winSummary = Join-Path $RepoRoot 'dist\packs\packs.json'
+    $winSummary = Join-Path $RepoRoot 'dist\locks\packs.json'
     $linuxSummary = Join-Path $tmp 'packs-linux.json'
     if (-not (Test-Path -LiteralPath $linuxSummary)) {
         throw "No Linux pack summary: $linuxSummary. Did the CI finish?"
@@ -262,6 +292,7 @@ if ($Phase -eq 'Final') {
     # Windows-only one uploaded earlier, so the metadata allows --clobber.
     $existing = Get-ReleaseAssetMap -Tag $tag
     Send-ReleaseAssets -Tag $tag -Paths @($manifest, $sumPath) -Existing $existing -Replace
+    Invoke-ReleaseGate -Tag $tag -Manifest $manifest -Python $python
     if ($Publish) {
         Invoke-Checked {
             & gh release edit $tag --draft=false

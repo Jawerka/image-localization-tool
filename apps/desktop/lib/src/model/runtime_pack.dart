@@ -12,6 +12,8 @@ class RuntimePack {
     this.error = '',
     this.done = 0,
     this.total = 0,
+    this.format = '',
+    this.source = '',
   });
 
   final String id;
@@ -25,6 +27,8 @@ class RuntimePack {
   final String error;
   final int done;
   final int total;
+  final String format;
+  final String source;
 
   bool get installed => state == 'installed';
   bool get downloading => state == 'downloading' || state == 'installing';
@@ -46,6 +50,8 @@ class RuntimePack {
         state: '${json['state'] ?? 'available'}',
         recommended: json['recommended'] == true,
         error: '${json['error'] ?? ''}',
+        format: '${json['format'] ?? ''}',
+        source: '${json['source'] ?? ''}',
       );
 
   RuntimePack copyWith({String? state, int? done, int? total, String? error}) =>
@@ -61,6 +67,8 @@ class RuntimePack {
         error: error ?? this.error,
         done: done ?? this.done,
         total: total ?? this.total,
+        format: format,
+        source: source,
       );
 }
 

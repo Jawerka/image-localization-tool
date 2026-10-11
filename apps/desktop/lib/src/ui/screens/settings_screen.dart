@@ -910,7 +910,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               ? 'ошибка: ${pack.error}'
                               : (pack.installed
                                   ? 'Готово · ${_bytes(pack.installedBytes)}'
-                                  : 'не скачано · ${_bytes(pack.sizeBytes)}'),
+                                  : 'не скачано · ${_bytes(pack.sizeBytes)}'
+                                      '${pack.source.isNotEmpty ? ' · ${pack.source}' : ''}'
+                                      ' · ${_eta(pack.sizeBytes)}'),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.labelSmall?.copyWith(
@@ -1086,5 +1088,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
     if (value >= 1024) return '${(value / 1024).toStringAsFixed(0)} КБ';
     return '$value Б';
+  }
+
+  /// Ожидаемое время загрузки (грубо, ~10 МБ/с): «<1 мин» или «~N мин».
+  static String _eta(int value) {
+    final seconds = value / (10 * 1024 * 1024);
+    if (seconds < 60) return '<1 мин';
+    return '~${(seconds / 60).ceil()} мин';
   }
 }

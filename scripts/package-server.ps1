@@ -102,3 +102,5 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
     $stage, $zip, [System.IO.Compression.CompressionLevel]::Optimal, $true)
 Write-Host "Server zip: $zip" -ForegroundColor Green
 Write-Host ("  {0:N1} MB" -f ((Get-Item -LiteralPath $zip).Length / 1MB))
+
+exit 0

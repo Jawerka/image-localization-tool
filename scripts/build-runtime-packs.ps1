@@ -1,9 +1,11 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Build runtime .7z packs (torch cpu/cu128, argos) from clean venvs.
+  DEPRECATED (specs/032-runtime-wheelset): legacy .7z pack build. Use
+  scripts/build-runtime-locks.ps1 - the runtime installs from official wheels.
 
 .DESCRIPTION
+  Builds runtime .7z packs (torch cpu/cu128, argos) from clean venvs.
   Creates build/runtime-venvs/<name>, installs pinned packages, then calls
   scripts/build-runtime-pack.py (it trims site-packages, writes LZMA2 .7z and
   updates dist/packs/packs.json with sha256 and size). The script interpreter
