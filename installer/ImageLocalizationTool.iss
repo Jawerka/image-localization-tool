@@ -32,7 +32,7 @@ DisableProgramGroupPage=yes
 OutputDir={#OutputDir}
 OutputBaseFilename=ImageLocalizationTool-{#AppVersion}-windows-x64-setup
 UninstallDisplayIcon={app}\{#MyAppEntry}
-Compression=lzma2
+Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
 ArchitecturesAllowed=x64
@@ -48,7 +48,9 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "{#DistDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; runtime/ (компоненты torch/Argos) и data/ в установщик не входят:
+; паки качаются из программы, data/ — признак портативной раскладки.
+Source: "{#DistDir}\*"; DestDir: "{app}"; Excludes: "runtime,data"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; Upgrade over the pywebview layout: drop the old root exe and its bundle.
 [InstallDelete]

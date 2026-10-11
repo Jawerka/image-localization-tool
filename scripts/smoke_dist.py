@@ -5,9 +5,14 @@
 Версия живёт только в ``src/app/__init__.py``. Модели кладёт
 ``scripts/build-windows.ps1`` в корень раскладки уже после сборки.
 
+Релизная база не должна нести torch: ``--expect-no-torch`` валит
+сборку, если каталог ``torch`` попал в ``_internal``. ``stdlib.zip`` в
+``_internal`` обязателен для любого onedir: внешний torch-пак требует
+полный stdlib (см. specs/030-runtime-deployment/research.md).
+
 Запуск:
     python scripts/smoke_dist.py
-    python scripts/smoke_dist.py dist\\ImageLocalizationTool
+    python scripts/smoke_dist.py dist\\ImageLocalizationTool --expect-no-torch
 """
 
 from __future__ import annotations
@@ -184,7 +189,12 @@ def _stage_fonts(src: Path, dest: Path) -> None:
     shutil.copytree(src, dest)
 
 
-def dist_problems(dist: Path, source_root: Path | None = None) -> list[str]:
+def dist_problems(
+    dist: Path,
+    source_root: Path | None = None,
+    *,
+    expect_no_torch: bool = False,
+) -> list[str]:
     """Список проблем layout. Пустой список — каталог годится."""
     root = Path(source_root) if source_root is not None else repo_root()
     dist = Path(dist)
@@ -203,6 +213,8 @@ def dist_problems(dist: Path, source_root: Path | None = None) -> list[str]:
     internal = dist / SIDECAR_DIR_NAME / "_internal"
     if not internal.is_dir():
         problems.append(f"нет каталога _internal: {internal}")
+    elif not (internal / "stdlib.zip").is_file():
+        problems.append(f"нет stdlib.zip (frozen stdlib неполон): {internal / 'stdlib.zip'}")
     index = dist / "web" / "index.html"
     if not index.is_file():
         problems.append(f"нет web/index.html: {index}")
@@ -215,17 +227,24 @@ def dist_problems(dist: Path, source_root: Path | None = None) -> list[str]:
         font = dist / "fonts" / name
         if not font.is_file():
             problems.append(f"нет шрифта: {font}")
-    # Юнит-тест stage кладёт только web/fonts без torch — полный onedir всегда с torch.
     if (internal / "torch").is_dir():
-        problems.extend(torch_lib_problems(dist))
+        if expect_no_torch:
+            problems.append(
+                f"релизная база не должна нести torch: {internal / 'torch'}"
+            )
+        else:
+            # Dev-сборка с torch: минимальный CPU-набор обязателен.
+            problems.extend(torch_lib_problems(dist))
     return problems
 
 
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
+    expect_no_torch = "--expect-no-torch" in args
+    args = [item for item in args if item != "--expect-no-torch"]
     if len(args) > 1:
         print(
-            "Запуск: python scripts/smoke_dist.py [dist\\ImageLocalizationTool]",
+            "Запуск: python scripts/smoke_dist.py [dist\\ImageLocalizationTool] [--expect-no-torch]",
             file=sys.stderr,
         )
         return 2
@@ -239,7 +258,7 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
-    problems = dist_problems(dist)
+    problems = dist_problems(dist, expect_no_torch=expect_no_torch)
     if problems:
         print(f"Сборка не прошла проверку: {dist}", file=sys.stderr)
         for item in problems:

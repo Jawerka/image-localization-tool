@@ -12,8 +12,13 @@ PyInstaller onedir для Image Localization Tool.
 Каталог models/ сюда не входит. Его копирует scripts/build-windows.ps1
 в корень dist/ImageLocalizationTool/models уже после сборки.
 
+База релиза — без torch и Argos-стека: они ставятся отдельными паками
+(specs/030-runtime-deployment, src/app/runtime.py). torch/Argos/спутники
+исключены, чтобы onedir не распух и не тянул CUDA. Вместе с базой кладётся
+stdlib.zip (scripts/build-stdlib-zip.py): frozen stdlib неполон, а внешнему
+torch нужны модули вроде timeit.
+
 Нужен PyInstaller 6: собранные библиотеки лежат в _internal.
-torch не исключать: LaMa и Argos (stanza) без него не работают.
 """
 
 import importlib.util
@@ -73,6 +78,17 @@ for _mod_name in (
 ):
     if importlib.util.find_spec(_mod_name) is not None:
         webview_hidden.append(_mod_name)
+
+# stdlib.zip готовит scripts/build-windows.ps1 до запуска spec. Без него
+# сборка не падает (dev), но релизная база обязана нести архив: smoke ловит.
+stdlib_zip = project_dir / "build" / "runtime" / "stdlib.zip"
+datas = [*rapidocr_datas]
+if stdlib_zip.is_file():
+    datas.append((str(stdlib_zip), "."))
+else:
+    print(f"WARNING: нет {stdlib_zip}; stdlib.zip не попадёт в _internal")
+# Встроенный манифест рантайма: список паков и sha256 для офлайн-установки.
+datas.append((str(project_dir / "src" / "app" / "runtime_manifest.json"), "src/app"))
 
 
 def _file_version_tuple(version: str) -> tuple:
@@ -134,10 +150,13 @@ a = Analysis(
     [str(project_dir / "src" / "app" / "__main__.py")],
     pathex=[str(project_dir)],
     binaries=[],
-    datas=[*rapidocr_datas],
+    datas=datas,
     hiddenimports=[
         "src",
         "src.app",
+        "src.app.runtime",
+        "src.app.hardware",
+        "src.app.deploy",
         "src.page_pipeline",
         "rarfile",
         "py7zr",
@@ -146,9 +165,31 @@ a = Analysis(
     ],
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[str(project_dir / "scripts" / "pyi_rth_torch_dlls.py")],
+    runtime_hooks=[],
     excludes=[
+        # Тяжёлые рантаймы — внешние паки (specs/030): в базе их нет.
+        "torch",
+        "torchvision",
+        "torchgen",
+        "functorch",
+        "argostranslate",
+        "ctranslate2",
+        "spacy",
+        "stanza",
+        "sentencepiece",
+        "sacremoses",
+        "minisbd",
+        "sympy",
+        "networkx",
+        "jinja2",
+        "mpmath",
+        "scipy",
+        "matplotlib",
+        # Dev-инструменты.
+        "playwright",
         "pytest",
+        "black",
+        "ruff",
         "IPython",
         "jupyter",
         "notebook",
@@ -159,7 +200,7 @@ a = Analysis(
     optimize=0,
 )
 
-# torch/lib целиком остаётся. Режем только чужой CUDA (onnxruntime EP, npp*…).
+# Базы torch не касается (его нет). Режем чужой CUDA: onnxruntime EP, npp* и т.п.
 a.binaries = drop_cuda_entries(a.binaries)
 a.datas = drop_cuda_entries(a.datas)
 

@@ -16,7 +16,9 @@ param(
     [switch] $SkipPyInstaller,
     [switch] $SkipFlutter,
     [switch] $SkipInno,
-    [switch] $SkipModels
+    [switch] $SkipModels,
+    [switch] $Portable,
+    [switch] $ServerZip
 )
 
 $ErrorActionPreference = 'Stop'
@@ -121,7 +123,7 @@ function Copy-ModelsBesideExe {
     Copy-Item -LiteralPath $source -Destination $dest -Recurse -Force
 }
 
-# torch stays in the bundle. Do not add it to spec excludes.
+# torch is not bundled: runtime packs ship separately (specs/030).
 $Python = Resolve-BuildPython -Override $BuildPython
 $version = Get-AppVersion -Python $Python
 Write-Host "==> Version $version"
@@ -130,6 +132,12 @@ $DistDir = Join-Path $RepoRoot 'dist\ImageLocalizationTool'
 $SidecarBuildDir = Join-Path $RepoRoot 'dist\ilt_sidecar'
 $FlutterReleaseDir = Join-Path $RepoRoot 'apps\desktop\build\windows\x64\runner\Release'
 $Spec = Join-Path $RepoRoot 'ImageLocalizationTool.spec'
+
+# Frozen stdlib is incomplete (torch needs timeit etc.); ship the full zip.
+Write-Host "==> Stage stdlib.zip"
+Invoke-Checked {
+    & $Python (Join-Path $RepoRoot 'scripts\build-stdlib-zip.py')
+} 'build-stdlib-zip.py'
 
 # Layout: {dist}/desktop = Flutter host, {dist}/sidecar = PyInstaller bundle,
 # web/ and fonts/ at the dist root (models optional, copied below).
@@ -229,7 +237,7 @@ if ($SkipModels) {
 }
 
 $smoke = Join-Path $RepoRoot 'scripts\smoke_dist.py'
-& $Python $smoke $DistDir
+& $Python $smoke $DistDir '--expect-no-torch'
 if ($LASTEXITCODE -ne 0) {
     $smokeCode = $LASTEXITCODE
     Write-Host "smoke_dist.py failed with exit code $smokeCode"
@@ -267,6 +275,17 @@ if ($SkipInno) {
         throw "Installer was not created: $setup"
     }
     Write-Host "Created $setup"
+}
+
+if ($Portable) {
+    Invoke-Checked {
+        & (Join-Path $RepoRoot 'scripts\package-portable.ps1')
+    } 'package-portable.ps1'
+}
+if ($ServerZip) {
+    Invoke-Checked {
+        & (Join-Path $RepoRoot 'scripts\package-server.ps1')
+    } 'package-server.ps1'
 }
 
 Write-Host ""

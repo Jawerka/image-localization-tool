@@ -1,7 +1,8 @@
-"""Сборка unpacked-расширения MV3 в dist/chromium и dist/firefox.
+"""Сборка unpacked-расширения MV3 в dist/chromium и dist/firefox + zip-ассеты.
 
 Без сети и без сборщиков: копирует extension/src, кладёт нужный манифест
 и рисует PNG 16/48 через zlib. Pillow используется, только если уже стоит.
+В конце оба дерева пакуются в dist/ilt-extension-<browser>-<version>.zip.
 """
 
 from __future__ import annotations
@@ -9,10 +10,17 @@ from __future__ import annotations
 import json
 import shutil
 import struct
+import sys
+import zipfile
 import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from scripts.smoke_dist import read_app_version  # noqa: E402
+
 EXT_DIR = ROOT / "extension"
 SRC_DIR = EXT_DIR / "src"
 DIST_DIR = ROOT / "dist"
@@ -117,8 +125,18 @@ def _write_icons(*dirs: Path) -> None:
         write_png(directory / "icon48.png", 48, ICON_OUTER, ICON_INNER)
 
 
+def _zip_tree(tree: Path, target: Path) -> None:
+    """Zip содержимого дерева расширения с относительными путями."""
+    if target.exists():
+        target.unlink()
+    with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
+        for file in sorted(tree.rglob("*")):
+            if file.is_file():
+                archive.write(file, file.relative_to(tree).as_posix())
+
+
 def build() -> None:
-    """Собирает оба дерева dist и иконки в extension/icons."""
+    """Собирает оба дерева dist, иконки и zip-ассеты релиза."""
     chromium = _load_manifest(EXT_DIR / "manifest.chromium.json")
     firefox = _load_manifest(EXT_DIR / "manifest.firefox.json")
     _check_manifests(chromium, firefox)
@@ -132,6 +150,11 @@ def build() -> None:
     _write_manifest(chromium_dir, chromium)
     _write_manifest(firefox_dir, firefox)
     _write_icons(chromium_dir / "icons", firefox_dir / "icons", EXT_DIR / "icons")
+
+    version = read_app_version(ROOT)
+    DIST_DIR.mkdir(parents=True, exist_ok=True)
+    _zip_tree(chromium_dir, DIST_DIR / f"ilt-extension-chromium-{version}.zip")
+    _zip_tree(firefox_dir, DIST_DIR / f"ilt-extension-firefox-{version}.zip")
 
 
 def main() -> None:
