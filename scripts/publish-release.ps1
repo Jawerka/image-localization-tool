@@ -47,6 +47,22 @@ function Invoke-Checked {
     }
 }
 
+function Invoke-Quiet {
+    # Run a native command swallowing stderr; returns $LASTEXITCODE.
+    # PS 5.1 turns native stderr into a terminating error under EAP=Stop, so the
+    # caller lowers EAP for the duration of the call (gh release view/delete log
+    # to stderr even when the outcome is expected).
+    param([scriptblock]$Command)
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $Command 2>&1 | Out-Null
+        return $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+}
+
 function Get-AppVersion {
     $text = Get-Content -LiteralPath (Join-Path $RepoRoot 'src\app\__init__.py') -Raw
     $match = [regex]::Match($text, "__version__\s*=\s*['""]([^'""]+)['""]")
@@ -124,19 +140,16 @@ if ($Phase -eq 'Windows') {
 
     if ($ResetTag) {
         Write-Host "==> ResetTag $tag"
-        # stderr нативных команд гасим: иначе PS5.1 с EAP=Stop падает на пустом выводе.
-        & gh release delete $tag --yes --cleanup-tag 2>&1 | Out-Null
-        & git tag -d $tag 2>&1 | Out-Null
-        & git push origin ":refs/tags/$tag" 2>&1 | Out-Null
+        Invoke-Quiet { & gh release delete $tag --yes --cleanup-tag } | Out-Null
+        Invoke-Quiet { & git tag -d $tag } | Out-Null
+        Invoke-Quiet { & git push origin ":refs/tags/$tag" } | Out-Null
     }
     if ($PushTag) {
         Invoke-Checked { & git tag -f $tag } "git tag -f $tag"
         Invoke-Checked { & git push -f origin $tag } "git push $tag"
     }
 
-    $releaseExists = $false
-    & gh release view $tag 2>&1 | Out-Null
-    if ($LASTEXITCODE -eq 0) { $releaseExists = $true }
+    $releaseExists = (Invoke-Quiet { & gh release view $tag }) -eq 0
     if (-not $releaseExists) {
         Invoke-Checked {
             & gh release create $tag --draft --title $version --notes-file $notes
