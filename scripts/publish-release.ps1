@@ -135,7 +135,7 @@ if ($Phase -eq 'Windows') {
     }
 
     $releaseExists = $false
-    & gh release view $tag *> $null
+    & gh release view $tag 2>&1 | Out-Null
     if ($LASTEXITCODE -eq 0) { $releaseExists = $true }
     if (-not $releaseExists) {
         Invoke-Checked {
