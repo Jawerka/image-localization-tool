@@ -236,33 +236,24 @@ if ($Phase -eq 'Final') {
     if (-not (Test-Path -LiteralPath $linuxSummary)) {
         throw "No Linux pack summary: $linuxSummary. Did the CI finish?"
     }
-    $merged = [System.Collections.Generic.List[object]]::new()
-    $seen = @{}
-    foreach ($file in @($winSummary, $linuxSummary)) {
-        $items = @(Get-Content -LiteralPath $file -Raw | ConvertFrom-Json)
-        foreach ($item in $items) {
-            $key = "$($item.id)/$($item.os)"
-            if ($seen.ContainsKey($key)) { continue }
-            $seen[$key] = $true
-            $merged.Add($item)
-        }
-    }
-    $mergedPath = Join-Path $tmp 'packs-all.json'
-    $merged | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $mergedPath -Encoding UTF8
-
+    # Python merges the summaries by (id, os); a later --packs wins.
     Invoke-Checked {
         & $python (Join-Path $RepoRoot 'scripts\build-runtime-manifest.py') `
-            '--packs' $mergedPath '--out' "dist\ilt-runtime-manifest-$version.json" '--no-bundled'
+            '--packs' $winSummary '--packs' $linuxSummary `
+            '--out' "dist\ilt-runtime-manifest-$version.json" '--no-bundled'
     } 'build-runtime-manifest.py (merged)'
 
-    $winLines = @(Get-Content -LiteralPath (Join-Path $RepoRoot 'dist\SHA256SUMS-windows.txt'))
+    $manifest = Join-Path $RepoRoot "dist\ilt-runtime-manifest-$version.json"
+    # This phase rebuilds the manifest, so its checksum line must be fresh;
+    # the Windows list still carries the win-only manifest hash.
+    $winLines = @(Get-Content -LiteralPath (Join-Path $RepoRoot 'dist\SHA256SUMS-windows.txt') |
+        Where-Object { $_ -notmatch 'ilt-runtime-manifest-.*\.json$' })
     $linuxLines = @(Get-Content -LiteralPath (Join-Path $tmp 'SHA256SUMS-linux.txt'))
-    $allLines = @($winLines + $linuxLines | Sort-Object)
+    $manifestLine = Get-Sha256Line -Path $manifest
+    $allLines = @($winLines + $linuxLines + $manifestLine | Sort-Object)
     $sumPath = Join-Path $RepoRoot 'dist\SHA256SUMS.txt'
     $allLines | Set-Content -LiteralPath $sumPath -Encoding ASCII
     Write-Host "==> SHA256SUMS.txt ($($allLines.Count) files)"
-
-    $manifest = Join-Path $RepoRoot "dist\ilt-runtime-manifest-$version.json"
     if ($DryRun) {
         Write-Host "Dry run: manifest $manifest and sums are ready, gh untouched."
         return

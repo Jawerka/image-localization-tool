@@ -88,6 +88,15 @@ def test_publish_release_script_uploads_per_file_and_gates_clobber():
     assert "upload $tag @assets" not in text
 
 
+def test_publish_release_merges_pack_summaries_in_python():
+    data = PUBLISH.read_bytes()
+    text = data.decode("ascii")
+    # Склейка сводок — в Python: PS 5.1 ConvertFrom-Json портит массивы
+    assert "'--packs' $winSummary '--packs' $linuxSummary" in text
+    assert "packs-all.json" not in text
+    assert "$seen" not in text
+
+
 def test_spec_guards_find_spec_for_missing_webview():
     text = SPEC.read_text(encoding="utf-8")
     assert "def _has_module(" in text
@@ -101,3 +110,78 @@ def test_spec_checks_the_built_exe_by_platform():
     # на Linux бинарник без .exe: COLLECT-проверка не должна требовать суффикс
     assert 'exe_name = f"{app_name}.exe" if sys.platform == "win32" else app_name' in text
     assert 'exe_path = dist_root / f"{app_name}.exe"' not in text
+
+
+def test_publish_release_refreshes_the_manifest_line_in_sums():
+    text = PUBLISH.read_text(encoding="ascii")
+    # Final пересобирает манифест: строка в SHA256SUMS.txt должна быть свежей
+    assert "$manifestLine" in text
+    assert "ilt-runtime-manifest-.*\\.json$" in text
+
+
+def test_runtime_manifest_cli_merges_two_pack_summaries(tmp_path):
+    import importlib.util
+    import json
+
+    spec = importlib.util.spec_from_file_location(
+        "build_runtime_manifest", ROOT / "scripts" / "build-runtime-manifest.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+
+    win = tmp_path / "packs.json"
+    win.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "torch-cpu",
+                    "kind": "torch",
+                    "os": "win",
+                    "file": "ilt-runtime-torch-cpu-win.7z",
+                    "sha256": "a" * 64,
+                    "size_bytes": 1,
+                    "version": "2.11.0+cpu",
+                    "python": "310",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    linux = tmp_path / "packs-linux.json"
+    # BOM не должен ронять чтение сводки
+    linux.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "argos",
+                    "kind": "argos",
+                    "os": "linux",
+                    "file": "ilt-runtime-argos-linux.7z",
+                    "sha256": "b" * 64,
+                    "size_bytes": 2,
+                    "version": "1.11.1",
+                    "python": "310",
+                }
+            ]
+        ),
+        encoding="utf-8-sig",
+    )
+    out = tmp_path / "manifest.json"
+
+    status = module.main(
+        [
+            "--packs",
+            str(win),
+            "--packs",
+            str(linux),
+            "--out",
+            str(out),
+            "--no-bundled",
+        ]
+    )
+
+    assert status == 0
+    manifest = json.loads(out.read_text(encoding="utf-8"))
+    keys = sorted((item["id"], item["os"]) for item in manifest["packs"])
+    assert keys == [("argos", "linux"), ("torch-cpu", "win")]

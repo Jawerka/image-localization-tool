@@ -10,6 +10,7 @@
 Запуск:
     python scripts/build-runtime-manifest.py
     python scripts/build-runtime-manifest.py --no-bundled
+    python scripts/build-runtime-manifest.py --packs a.json --packs b.json --no-bundled
 """
 
 from __future__ import annotations
@@ -75,7 +76,7 @@ def merge_entries(base: list[dict], overlay: list[dict]) -> list[dict]:
 
 
 def load_packs(path: Path) -> list[dict]:
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    data = json.loads(Path(path).read_text(encoding="utf-8-sig"))
     if not isinstance(data, list):
         raise SystemExit(f"Ожидался список записей: {path}")
     return [item for item in data if isinstance(item, dict)]
@@ -83,7 +84,12 @@ def load_packs(path: Path) -> list[dict]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Манифест рантайма релиза")
-    parser.add_argument("--packs", default="dist/packs/packs.json")
+    parser.add_argument(
+        "--packs",
+        action="append",
+        default=None,
+        help="сводка паков; можно указать несколько (поздние перекрывают ранние)",
+    )
     parser.add_argument("--out", default="", help="по умолчанию dist/ilt-runtime-manifest-<ver>.json")
     parser.add_argument("--bundled", default="src/app/runtime_manifest.json")
     parser.add_argument("--no-bundled", action="store_true", help="не трогать встроенную копию")
@@ -91,10 +97,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     version = read_app_version(ROOT)
-    packs_path = Path(args.packs)
-    if not packs_path.is_absolute():
-        packs_path = ROOT / packs_path
-    manifest = build_manifest(version, load_packs(packs_path), args.url_base)
+    entries: list[dict] = []
+    for packs_arg in args.packs or ["dist/packs/packs.json"]:
+        packs_path = Path(packs_arg)
+        if not packs_path.is_absolute():
+            packs_path = ROOT / packs_path
+        entries = merge_entries(entries, load_packs(packs_path))
+    manifest = build_manifest(version, entries, args.url_base)
 
     out_path = Path(args.out) if args.out else Path("dist") / f"ilt-runtime-manifest-{version}.json"
     if not out_path.is_absolute():
