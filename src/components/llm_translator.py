@@ -524,6 +524,9 @@ class ArgosBlockTranslator:
                 logger.warning(f"Argos {source}->{target_lang}: {exc}")
                 self.warnings.append(f"Нет офлайн-пары {source}→{target_lang}")
                 continue
+            error = getattr(self.service, "last_error", "")
+            if error and error not in self.warnings:
+                self.warnings.append(error)
             for region, text in zip(items, translated):
                 if region.translation_locked:
                     continue

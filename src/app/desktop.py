@@ -17,7 +17,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from http.client import HTTPConnection
 from pathlib import Path
 
@@ -67,6 +67,7 @@ class LaunchArgs:
     remote: bool = False
     api: bool = False
     parent_pid: int | None = None
+    deploy: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -106,6 +107,13 @@ def parse_args(argv: list[str]) -> LaunchArgs:
         action="store_true",
         help="Слушать удалённый LAN API (с --headless — только он)",
     )
+    parser.add_argument(
+        "--deploy",
+        nargs="+",
+        choices=["cpu", "cuda", "argos", "models", "all"],
+        default=None,
+        help="Развернуть компоненты без окна: models, cpu, cuda, argos или all",
+    )
     parser.add_argument("paths", nargs="*", help="Файлы и папки страниц")
     # Флаг может стоять и после путей: page.png --browser folder.
     parsed = parser.parse_intermixed_args(list(argv))
@@ -116,6 +124,7 @@ def parse_args(argv: list[str]) -> LaunchArgs:
         remote=bool(parsed.remote),
         api=bool(parsed.api),
         parent_pid=parsed.parent_pid,
+        deploy=[str(item) for item in (parsed.deploy or [])],
     )
 
 
@@ -1287,6 +1296,10 @@ def launch(argv: list[str] | None = None) -> int:
     ``--headless`` не открывает окно. Удалённый API в этом режиме — только с ``--remote``.
     """
     args = parse_args(sys.argv[1:] if argv is None else argv)
+    if args.deploy:
+        from src.app.deploy import run as run_deploy
+
+        return run_deploy(args.deploy)
     if args.api:
         return run_api(args)
     if args.headless:

@@ -23,7 +23,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path, PurePosixPath
 from urllib.parse import parse_qs, unquote, urlparse
 
-from src.app import __version__, model_manager
+from src.app import __version__, model_manager, runtime
 from src.app.dialogs import DialogBridge
 from src.app.document import PageDocument, diff_plan
 from src.app.events import LLM_STATUS, WorkerEvent
@@ -186,6 +186,13 @@ class AppState:
         self._pump: threading.Thread | None = None
         self.queue_pending = False
         self._queue_restored = False
+        self._runtime_manager: runtime.Manager | None = None
+
+    def runtime_manager(self) -> runtime.Manager:
+        """Фоновая установка компонентов рантайма (лениво — тестам сервера не мешает)."""
+        if self._runtime_manager is None:
+            self._runtime_manager = runtime.Manager(self.fanout)
+        return self._runtime_manager
 
     def queue_path(self) -> Path:
         """JSON очереди рядом с проектами."""
@@ -582,6 +589,18 @@ def _api(state: AppState, method: str, path: str, body: dict, query: dict | None
         _need_method(method, "POST")
         _download_model(state, body)
         return _Result({"ok": True}, status=202)
+    if path == "/api/runtime":
+        _need_method(method, "GET")
+        payload = runtime.status(state.settings.device)
+        payload["download"] = state.runtime_manager().current()
+        return _Result(payload)
+    if path == "/api/runtime/download":
+        _need_method(method, "POST")
+        result = _runtime_download(state, body)
+        return _Result(result, status=200 if result.get("installed") else 202)
+    if path == "/api/runtime/remove":
+        _need_method(method, "POST")
+        return _Result(_runtime_remove(state, body))
     if path == "/api/drop":
         _need_method(method, "POST")
         return _Result(_drop(state, body))
@@ -687,6 +706,7 @@ def _bootstrap(state: AppState) -> dict:
         "llm": llm_view,
         "device": state.settings.device,
         "models_ready": ready,
+        "runtime": runtime.summary(state.settings.device),
         "busy": any(page["status"] in ("queued", "running") for page in pages),
         "recent": _recent_view(state),
         "has_api_key": bool(get_api_key()),
@@ -1061,6 +1081,40 @@ def _download_model(state: AppState, body: dict) -> None:
         }))
 
     model_manager.download(kind, dest, progress)
+
+
+def _runtime_download(state: AppState, body: dict) -> dict:
+    """Поставить установку пака в фон. Прогресс идёт событиями runtime.progress."""
+    pack_id = str(body.get("id") or "").strip()
+    if not pack_id:
+        raise ValueError("Нужен id компонента")
+    manager = state.runtime_manager()
+    if manager.busy():
+        raise _HttpError(409, "Другая загрузка уже идёт")
+    try:
+        pack = runtime.pack_by_id(pack_id)
+    except KeyError as exc:
+        raise _HttpError(400, "Неизвестный компонент") from exc
+    if runtime.is_installed(pack.id):
+        return {"ok": True, "id": pack.id, "installed": True}
+    result = manager.start(pack.id)
+    return {"ok": True, "id": pack.id, "state": result.get("state", "")}
+
+
+def _runtime_remove(state: AppState, body: dict) -> dict:
+    """Удалить установленный пак. Во время загрузки удаление запрещено."""
+    pack_id = str(body.get("id") or "").strip()
+    if not pack_id:
+        raise ValueError("Нужен id компонента")
+    manager = state.runtime_manager()
+    current = manager.current()
+    if manager.busy() and str(current.get("id") or "") == pack_id:
+        raise _HttpError(409, "Компонент ещё скачивается")
+    try:
+        runtime.remove(pack_id)
+    except ValueError as exc:
+        raise _HttpError(400, "Неизвестный компонент") from exc
+    return {"ok": True, "id": pack_id}
 
 
 def _dialog_files(state: AppState) -> dict:

@@ -12,6 +12,11 @@ class TranslatorService:
         self._translator = None
         self._initialized = False
         self._error: str | None = None
+
+    @property
+    def last_error(self) -> str:
+        """Текст последней ошибки инициализации или пустая строка."""
+        return self._error or ""
     
     def _init_translator(self, source_lang: str, target_lang: str) -> bool:
         """Ленивая инициализация переводчика.
@@ -58,7 +63,10 @@ class TranslatorService:
             return True
             
         except ImportError as e:
-            self._error = f"Argos Translate not installed: {e}"
+            self._error = (
+                "Нужен компонент «Argos» (Настройки → Компоненты) "
+                f"или сервер LLM: argostranslate не установлен ({e})"
+            )
             logger.error(self._error)
             return False
         except Exception as e:
@@ -206,7 +214,7 @@ class TranslatorService:
             True если библиотека доступна.
         """
         try:
-            import argostranslate.translate
+            import argostranslate.translate  # noqa: F401
             return True
         except ImportError as e:
             logger.error(f"Argos Translate not installed: {e}")

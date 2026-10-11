@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import cv2
@@ -16,14 +15,12 @@ from src.utils.paths import resolve_model
 def resolve_device(preference: str = "auto") -> str:
     """auto → cuda, если torch его видит, иначе cpu.
 
-    В frozen Windows-сборке auto → cpu: CUDA-инференс в onedir нестабилен,
-    а LaMa на CPU достаточна. Явный ``cuda`` в настройках по-прежнему пробует GPU
-    с фолбэком на CPU в ``_lama_after_failure``.
+    CUDA-пак ставится отдельным компонентом (cu128); после установки auto
+    выбирает GPU сам. Явный ``cuda``/``cpu`` в настройках главнее. При сбое
+    CUDA-инференса ``_lama_after_failure`` делает один retry на CPU.
     """
     if preference and preference != "auto":
         return preference
-    if getattr(sys, "frozen", False):
-        return "cpu"
     try:
         import torch
         if torch.cuda.is_available():

@@ -275,6 +275,8 @@ class ShellState extends ChangeNotifier {
         switch (frame.event) {
           case 'model.progress':
             secondary.applyModelProgress(payload);
+          case 'runtime.progress':
+            secondary.applyRuntimeProgress(payload);
           case 'job.finished':
             secondary.applyJobFinished(payload);
           case 'worker.failed':

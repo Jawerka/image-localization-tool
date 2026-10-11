@@ -109,6 +109,9 @@ def main(argv: list[str] | None = None) -> int:
     from src.utils.logger import logger
 
     logger.info("Запуск приложения")
+    from src.app import runtime
+
+    runtime.startup()
     from src.app.desktop import launch
 
     return launch(sys.argv[1:] if argv is None else argv)

@@ -607,6 +607,9 @@ class ProcessWorker:
 def worker_main(command_queue, event_queue, parent_pid: int) -> None:
     """Точка входа дочернего процесса. Два потока: пакет и правки."""
     _redirect_stdio()
+    from src.app import runtime
+
+    runtime.startup()
     from src.app.watchdog import start_parent_watch
 
     start_parent_watch(int(parent_pid or 0))

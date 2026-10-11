@@ -80,6 +80,79 @@ void main() {
     expect(ws.model('detector').present, isTrue);
   });
 
+  test('компоненты: статус, прогресс, скачивание и удаление', () async {
+    final sent = <_Sent>[];
+    final ws = _state((path) {
+      if (path == '/api/runtime') {
+        return {
+          'platform': 'win',
+          'packs': [
+            {
+              'id': 'torch-cu128',
+              'title': 'CUDA',
+              'kind': 'torch',
+              'size_bytes': 1000,
+              'state': 'available',
+              'recommended': true,
+            },
+            {
+              'id': 'argos',
+              'title': 'Argos',
+              'kind': 'argos',
+              'size_bytes': 500,
+              'state': 'installed',
+              'installed_bytes': 600,
+            },
+          ],
+          'hardware': {
+            'vendor': 'nvidia',
+            'name': 'RTX 5060',
+            'driver': 617,
+            'recommended': 'torch-cu128',
+            'reason': 'CUDA доступна',
+          },
+          'torch_ready': false,
+          'argos_ready': true,
+          'device_effective': 'cpu',
+        };
+      }
+      return {'ok': true};
+    }, sent);
+
+    await ws.refreshRuntime();
+    expect(ws.runtime.packs.length, 2);
+    expect(ws.runtime.pack('argos')!.installed, isTrue);
+    expect(ws.runtime.pack('torch-cu128')!.recommended, isTrue);
+    expect(ws.runtime.deviceEffective, 'cpu');
+    expect(ws.runtime.argosReady, isTrue);
+
+    ws.applyRuntimeProgress({
+      'id': 'torch-cu128',
+      'state': 'downloading',
+      'done': 250,
+      'total': 1000,
+    });
+    final downloading = ws.runtime.pack('torch-cu128')!;
+    expect(downloading.downloading, isTrue);
+    expect(downloading.percent, closeTo(0.25, 0.001));
+
+    ws.applyRuntimeProgress({
+      'id': 'torch-cu128',
+      'state': 'error',
+      'error': 'сеть',
+    });
+    expect(ws.runtime.pack('torch-cu128')!.failed, isTrue);
+
+    ws.startRuntimeDownload('torch-cu128');
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(sent.last.path, '/api/runtime/download');
+    expect(sent.last.body, contains('torch-cu128'));
+
+    await ws.removeRuntimePack('argos');
+    expect(sent.last.path, '/api/runtime/remove');
+    expect(ws.runtime.pack('argos')!.installed, isFalse);
+  });
+
   test('удалёнка: статус, код сопряжения, отзыв', () async {
     final sent = <_Sent>[];
     final ws = _state((path) {

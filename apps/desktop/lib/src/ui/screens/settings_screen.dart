@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../api/errors.dart';
+import '../../model/runtime_pack.dart';
 import '../../state/shell_state.dart';
 import '../platform.dart';
 import '../theme.dart';
@@ -60,6 +61,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ('layout', 'Вёрстка'),
     ('export', 'Экспорт'),
     ('models', 'Модели'),
+    ('components', 'Компоненты'),
     ('network', 'Сеть'),
     ('about', 'О программе'),
   ];
@@ -80,6 +82,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _baseline = Map<String, dynamic>.of(state.workspace.settings);
     _draft = Map<String, dynamic>.of(_baseline);
     unawaited(state.secondary.refreshModels());
+    unawaited(state.secondary.refreshRuntime());
     unawaited(state.secondary.refreshRemote());
   }
 
@@ -390,6 +393,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         return _export(context);
       case 'models':
         return _models(context);
+      case 'components':
+        return _components(context);
       case 'network':
         return _network(context);
       default:
@@ -838,6 +843,124 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ],
       ),
     ]);
+  }
+
+  Widget _components(BuildContext context) {
+    final secondary = state.secondary;
+    final palette = IltPalette.of(context);
+    final theme = Theme.of(context);
+    final runtime = secondary.runtime;
+    final busy = runtime.packs.any((pack) => pack.downloading);
+    return _card(context, [
+      const SectionHeader(
+        title: 'Компоненты',
+        lead: 'PyTorch ускоряет очистку на NVIDIA, Argos переводит офлайн. '
+            'Пакеты не входят в установщик и скачиваются отдельно.',
+      ),
+      if (runtime.reason.isNotEmpty)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: Text(
+            runtime.reason,
+            style: theme.textTheme.labelSmall?.copyWith(color: palette.textMuted),
+          ),
+        ),
+      if (runtime.packs.isEmpty)
+        Text(
+          'Список компонентов недоступен.',
+          style: theme.textTheme.labelSmall,
+        )
+      else
+        for (final pack in runtime.packs)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 190,
+                  child: Text(
+                    pack.title,
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: palette.textPrimary),
+                  ),
+                ),
+                Expanded(
+                  child: pack.downloading
+                      ? Row(
+                          children: [
+                            Expanded(
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(2),
+                                child: LinearProgressIndicator(
+                                  value: pack.percent,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              pack.percent == null
+                                  ? _bytes(pack.done)
+                                  : '${(pack.percent! * 100).round()} %',
+                              style: theme.textTheme.labelSmall,
+                            ),
+                          ],
+                        )
+                      : Text(
+                          pack.failed
+                              ? 'ошибка: ${pack.error}'
+                              : (pack.installed
+                                  ? 'Готово · ${_bytes(pack.installedBytes)}'
+                                  : 'не скачано · ${_bytes(pack.sizeBytes)}'),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: pack.installed
+                                ? palette.textSuccess
+                                : (pack.failed
+                                    ? palette.textError
+                                    : palette.textMuted),
+                          ),
+                        ),
+                ),
+                const SizedBox(width: 8),
+                if (!pack.installed && !pack.downloading)
+                  OutlinedButton(
+                    key: Key('component-download-${pack.id}'),
+                    onPressed: (busy || _torchConflict(pack) != null)
+                        ? null
+                        : () => secondary.startRuntimeDownload(pack.id),
+                    child: const Text('Скачать'),
+                  ),
+                if (pack.installed)
+                  OutlinedButton(
+                    key: Key('component-remove-${pack.id}'),
+                    onPressed: () => secondary.removeRuntimePack(pack.id),
+                    child: const Text('Удалить'),
+                  ),
+              ],
+            ),
+          ),
+      const SizedBox(height: 8),
+      Text(
+        runtime.torchReady
+            ? 'PyTorch подключён · устройство: ${runtime.deviceEffective}'
+            : 'PyTorch не подключён — очистка идёт через OpenCV.',
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: runtime.torchReady ? palette.textSuccess : palette.textMuted,
+        ),
+      ),
+    ]);
+  }
+
+  /// Название второго torch-пака, если он уже стоит или качается.
+  String? _torchConflict(RuntimePack pack) {
+    if (pack.kind != 'torch') return null;
+    final otherId = pack.id == 'torch-cpu' ? 'torch-cu128' : 'torch-cpu';
+    final other = state.secondary.runtime.pack(otherId);
+    if (other != null && (other.installed || other.downloading)) {
+      return other.title;
+    }
+    return null;
   }
 
   Widget _network(BuildContext context) {

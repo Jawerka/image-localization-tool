@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../api/errors.dart';
+import '../../model/runtime_pack.dart';
 import '../../state/shell_state.dart';
 import '../theme.dart';
 import '../widgets.dart';
@@ -18,7 +19,7 @@ class FirstRunScreen extends StatefulWidget {
 }
 
 class _FirstRunScreenState extends State<FirstRunScreen> {
-  static const steps = ['Тема', 'Модели', 'Сервер LLM', 'Языки'];
+  static const steps = ['Тема', 'Модели', 'Компоненты', 'Сервер LLM', 'Языки'];
 
   int _step = 0;
   late Map<String, dynamic> _draft;
@@ -41,6 +42,7 @@ class _FirstRunScreenState extends State<FirstRunScreen> {
       'llm_model': settings['llm_model'] ?? '',
     };
     unawaited(state.secondary.refreshModels());
+    unawaited(state.secondary.refreshRuntime());
   }
 
   void _set(String key, Object? value) {
@@ -195,7 +197,8 @@ class _FirstRunScreenState extends State<FirstRunScreen> {
                     child: switch (_step) {
                       0 => _themeStep(context),
                       1 => _modelsStep(context),
-                      2 => _llmStep(context),
+                      2 => _componentsStep(context),
+                      3 => _llmStep(context),
                       _ => _languagesStep(context),
                     },
                   ),
@@ -350,6 +353,144 @@ class _FirstRunScreenState extends State<FirstRunScreen> {
     ]);
   }
 
+  /// Конфликт torch-паков: cpu и cu128 не ставятся одновременно.
+  String? _torchConflict(RuntimePack pack) {
+    if (pack.kind != 'torch') return null;
+    final otherId = pack.id == 'torch-cpu' ? 'torch-cu128' : 'torch-cpu';
+    final other = state.secondary.runtime.pack(otherId);
+    if (other != null && (other.installed || other.downloading)) {
+      return 'сначала удалите «${other.title}» в настройках';
+    }
+    return null;
+  }
+
+  Widget _componentsStep(BuildContext context) {
+    final secondary = state.secondary;
+    final runtime = secondary.runtime;
+    final palette = IltPalette.of(context);
+    final theme = Theme.of(context);
+    return _card(context, [
+      const SectionHeader(
+        title: 'Компоненты',
+        lead: 'PyTorch ускоряет очистку (NVIDIA), Argos даёт офлайн-перевод. '
+            'Ставятся отдельно — можно пропустить и вернуться в настройках.',
+      ),
+      if (runtime.reason.isNotEmpty) ...[
+        Text(
+          runtime.reason,
+          style: theme.textTheme.labelSmall?.copyWith(color: palette.textMuted),
+        ),
+        const SizedBox(height: 8),
+      ],
+      if (runtime.packs.isEmpty)
+        Text(
+          'Список компонентов недоступен.',
+          style: theme.textTheme.labelSmall,
+        )
+      else
+        for (final pack in runtime.packs)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 210,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        pack.title,
+                        style: theme.textTheme.bodySmall
+                            ?.copyWith(color: palette.textPrimary),
+                      ),
+                      Text(
+                        '${_formatBytes(pack.sizeBytes)}'
+                        '${pack.recommended ? ' · рекомендовано' : ''}',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: pack.recommended
+                              ? palette.primary
+                              : palette.textMuted,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(child: _runtimeStatus(context, pack)),
+                const SizedBox(width: 8),
+                _runtimeAction(context, pack),
+              ],
+            ),
+          ),
+      const SizedBox(height: 6),
+      Text(
+        'Большие компоненты качаются в фоне — прогресс виден здесь и в настройках.',
+        style: theme.textTheme.labelSmall,
+      ),
+    ]);
+  }
+
+  Widget _runtimeStatus(BuildContext context, RuntimePack pack) {
+    final palette = IltPalette.of(context);
+    final theme = Theme.of(context);
+    if (pack.downloading) {
+      return Row(
+        children: [
+          Expanded(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(2),
+              child: LinearProgressIndicator(value: pack.percent),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            pack.percent == null
+                ? _formatBytes(pack.done)
+                : '${(pack.percent! * 100).round()} %',
+            style: theme.textTheme.labelSmall,
+          ),
+        ],
+      );
+    }
+    final text = pack.failed
+        ? 'ошибка: ${pack.error}'
+        : (pack.installed ? 'установлено' : 'не установлено');
+    return Text(
+      text,
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
+      style: theme.textTheme.labelSmall?.copyWith(
+        color: pack.installed
+            ? palette.textSuccess
+            : (pack.failed ? palette.textError : palette.textMuted),
+      ),
+    );
+  }
+
+  Widget _runtimeAction(BuildContext context, RuntimePack pack) {
+    final palette = IltPalette.of(context);
+    if (pack.installed) {
+      return Icon(Icons.check, size: 14, color: palette.textSuccess);
+    }
+    if (pack.downloading) return const SizedBox(width: 86);
+    final conflict = _torchConflict(pack);
+    if (conflict != null) {
+      final theme = Theme.of(context);
+      return SizedBox(
+        width: 200,
+        child: Text(
+          conflict,
+          textAlign: TextAlign.right,
+          style: theme.textTheme.labelSmall?.copyWith(color: palette.textMuted),
+        ),
+      );
+    }
+    return OutlinedButton(
+      key: Key('wizard-runtime-download-${pack.id}'),
+      onPressed: () => state.secondary.startRuntimeDownload(pack.id),
+      child: const Text('Скачать'),
+    );
+  }
+
   Widget _llmStep(BuildContext context) {
     final palette = IltPalette.of(context);
     final theme = Theme.of(context);
@@ -445,4 +586,15 @@ class _FirstRunScreenState extends State<FirstRunScreen> {
           ),
         ),
       ]);
+}
+
+String _formatBytes(int value) {
+  if (value >= 1024 * 1024 * 1024) {
+    return '${(value / (1024 * 1024 * 1024)).toStringAsFixed(2)} ГБ';
+  }
+  if (value >= 1024 * 1024) {
+    return '${(value / (1024 * 1024)).toStringAsFixed(0)} МБ';
+  }
+  if (value >= 1024) return '${(value / 1024).toStringAsFixed(0)} КБ';
+  return '$value Б';
 }

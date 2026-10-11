@@ -33,11 +33,18 @@ def install_root() -> Path:
 
 
 def models_dir(override: str | Path | None = None) -> Path:
-    """Каталог моделей: явный путь, models рядом с программой или в репозитории."""
+    """Каталог моделей: явный путь, models рядом с программой или в репозитории.
+
+    В сборке каталог ``models`` рядом с программой создаётся при первом
+    обращении: портативная раскладка и серверный деплой кладут модели туда.
+    """
     if override:
         return Path(override)
     installed = install_root() / "models"
     if installed.is_dir():
+        return installed
+    if getattr(sys, "frozen", False):
+        installed.mkdir(parents=True, exist_ok=True)
         return installed
     return project_root() / "models"
 

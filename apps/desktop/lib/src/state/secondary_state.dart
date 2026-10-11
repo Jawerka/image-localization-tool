@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../api/errors.dart';
 import '../api/ilt_api.dart';
+import '../model/runtime_pack.dart';
 
 /// Файл модели: наличие и текущая загрузка.
 class ModelEntry {
@@ -206,6 +207,7 @@ class SecondaryState extends ChangeNotifier {
   String? _errorText;
 
   final Map<String, ModelEntry> _models = {};
+  RuntimeView _runtime = const RuntimeView();
   RemoteView _remote = const RemoteView();
   List<GlossaryRow> _glossary = const [];
   bool _glossaryLoading = false;
@@ -217,6 +219,7 @@ class SecondaryState extends ChangeNotifier {
 
   IltApi? get api => _api;
   String? get errorText => _errorText;
+  RuntimeView get runtime => _runtime;
   RemoteView get remote => _remote;
   List<GlossaryRow> get glossary => _glossary;
   bool get glossaryLoading => _glossaryLoading;
@@ -237,6 +240,7 @@ class SecondaryState extends ChangeNotifier {
     _api = api;
     _errorText = null;
     _models.clear();
+    _runtime = const RuntimeView();
     _remote = const RemoteView();
     _glossary = const [];
     _lastExport = null;
@@ -248,6 +252,7 @@ class SecondaryState extends ChangeNotifier {
     _api = null;
     _errorText = null;
     _models.clear();
+    _runtime = const RuntimeView();
     _remote = const RemoteView();
     _glossary = const [];
     _glossaryLoading = false;
@@ -331,6 +336,66 @@ class SecondaryState extends ChangeNotifier {
         notifyListeners();
       }),
     );
+  }
+
+  // --- Компоненты рантайма (torch/Argos) ---
+
+  Future<void> refreshRuntime() => _guard((api) async {
+        _runtime = RuntimeView.fromJson(await api.getJson('/api/runtime'));
+      });
+
+  /// SSE `runtime.progress`: обновить строку пака без полного refresh.
+  void applyRuntimeProgress(Map<String, dynamic> data) {
+    final id = '${data['id'] ?? ''}';
+    if (id.isEmpty) return;
+    final state = '${data['state'] ?? ''}';
+    final done = (data['done'] as num?)?.toInt() ?? 0;
+    final total = (data['total'] as num?)?.toInt() ?? 0;
+    final error = '${data['error'] ?? ''}';
+    final updated = [
+      for (final pack in _runtime.packs)
+        if (pack.id == id)
+          pack.copyWith(state: state, done: done, total: total, error: error)
+        else
+          pack,
+    ];
+    _runtime = _runtime.copyWith(packs: updated);
+    notifyListeners();
+  }
+
+  /// Поставить установку пака в фон. Идёт один пак за раз.
+  void startRuntimeDownload(String id) {
+    final api = _api;
+    if (api == null) return;
+    _patchRuntimePack(id, (pack) => pack.copyWith(state: 'downloading', error: ''));
+    unawaited(
+      api.postJson('/api/runtime/download', {'id': id}).then((data) {
+        if (data['installed'] == true) {
+          _patchRuntimePack(id, (pack) => pack.copyWith(state: 'installed'));
+        }
+      }).catchError((Object error) {
+        _patchRuntimePack(id, (pack) => pack.copyWith(state: 'error', error: '$error'));
+      }),
+    );
+  }
+
+  Future<void> removeRuntimePack(String id) => _guard((api) async {
+        await api.postJson('/api/runtime/remove', {'id': id});
+        _patchRuntimePack(
+          id,
+          (pack) => pack.copyWith(state: 'available', done: 0, total: 0, error: ''),
+        );
+      });
+
+  void _patchRuntimePack(
+    String id,
+    RuntimePack Function(RuntimePack pack) patch,
+  ) {
+    final updated = [
+      for (final pack in _runtime.packs) if (pack.id == id) patch(pack) else pack,
+    ];
+    _runtime = _runtime.copyWith(packs: updated);
+    notifyListeners();
   }
 
   // --- Удалённый доступ ---
