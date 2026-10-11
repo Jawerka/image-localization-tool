@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>ILT v2 — Пустое окно</title>
+  <link rel="stylesheet" href="tokens-v2.css">
+  <link rel="stylesheet" href="shell-v2.css">
+  <link rel="stylesheet" href="components-v2.css">
+  <link rel="stylesheet" href="screen.css">
+  <script src="sprite.js"></script>
+</head>
+<body class="v2">
+  <a class="sr-only" href="index.html">К списку макетов</a>
+  <div class="app2">
+    <header class="appbar">
+      <div class="brand" title="Image Localization Tool">
+        <span class="brand__logo"><svg class="icon"><use href="#layers"></use></svg></span>
+      </div>
+      <div style="position:relative">
+        <button type="button" class="b2 b2--quiet" data-pop-btn="file-menu" aria-expanded="false">
+          <svg class="icon"><use href="#file"></use></svg>
+          Файл
+          <svg class="icon" style="width:12px;height:12px"><use href="#chevron"></use></svg>
+        </button>
+        <div class="pop" id="file-menu" hidden>
+          <button type="button" class="pop__item">Открыть файлы…<span class="kbd2">Ctrl+O</span></button>
+          <button type="button" class="pop__item">Открыть папку…<span class="kbd2">Ctrl+Shift+O</span></button>
+          <div class="pop__sep"></div>
+          <button type="button" class="pop__item">Загрузить проект…</button>
+          <div class="pop__sep"></div>
+          <button type="button" class="pop__item">Настройки…<span class="kbd2">Ctrl+,</span></button>
+          <button type="button" class="pop__item">Горячие клавиши…<span class="kbd2">F1</span></button>
+          <div class="pop__sep"></div>
+          <button type="button" class="pop__item">Выход</button>
+        </div>
+      </div>
+      <span class="appbar__sep"></span>
+      <span class="chip2 chip2--ghost mut2">Проект не открыт</span>
+      <div class="appbar__spacer"></div>
+      <button type="button" class="b2 b2--primary" disabled>
+        <svg class="icon"><use href="#translate"></use></svg>
+        Перевести
+      </button>
+      <button type="button" class="b2 b2--soft" disabled>
+        <svg class="icon"><use href="#export"></use></svg>
+        Экспорт
+      </button>
+      <button type="button" class="ibtn" title="Настройки (Ctrl+,)" aria-label="Настройки">
+        <svg class="icon"><use href="#settings"></use></svg>
+      </button>
+    </header>
+
+    <div class="main2">
+      <aside class="panel panel--left" aria-label="Страницы">
+        <div class="panel__head">
+          <span class="panel__title">Страницы</span>
+          <span class="panel__spacer"></span>
+        </div>
+        <div class="panel__body">
+          <div class="empty2">
+            <svg class="icon icon--32"><use href="#folder"></use></svg>
+            <span>Нет открытого проекта</span>
+          </div>
+        </div>
+        <div class="panel__foot">
+          <div class="row2 mut2">
+            <span>0 из 0 готово</span>
+            <span class="grow"></span>
+          </div>
+          <span class="bar"><span style="width:0"></span></span>
+        </div>
+      </aside>
+
+      <div class="stage2">
+        <div class="stage2__scroll" style="align-content:center">
+          <div class="col2" style="justify-items:center;gap:18px">
+            <div class="drop2">
+              <span class="drop2__icon"><svg class="icon icon--32"><use href="#folder"></use></svg></span>
+              <h1 class="drop2__title">Перетащите сюда главу</h1>
+              <p class="drop2__hint">Папка, архив cbz / cbr / zip или отдельные страницы. Исходный язык определится сам.</p>
+              <div class="row2" style="margin-top:6px">
+                <button type="button" class="b2 b2--primary">
+                  <svg class="icon"><use href="#file"></use></svg>
+                  Открыть файлы…
+                </button>
+                <button type="button" class="b2 b2--soft">
+                  <svg class="icon"><use href="#folder"></use></svg>
+                  Открыть папку…
+                </button>
+              </div>
+              <p class="drop2__hint" style="margin:2px 0 0">или <span class="kbd2">Ctrl+O</span></p>
+            </div>
+
+            <div class="recent2">
+              <div class="row2" style="padding:0 2px">
+                <span class="field2__label">Недавние проекты</span>
+                <span class="grow"></span>
+                <button type="button" class="b2 b2--quiet b2--sm">Очистить</button>
+              </div>
+              <button type="button" class="recent2__item">
+                <svg class="icon mut2"><use href="#folder"></use></svg>
+                <span>
+                  <span class="recent2__name">Ки́рби · глава 1</span><br>
+                  <span class="mut2" style="font-size:11px">8 из 12 готово</span>
+                </span>
+                <span class="recent2__meta">сегодня, 14:02</span>
+              </button>
+              <button type="button" class="recent2__item">
+                <svg class="icon mut2"><use href="#folder"></use></svg>
+                <span>
+                  <span class="recent2__name">Onepunch · том 4</span><br>
+                  <span class="mut2" style="font-size:11px">21 страница · готово</span>
+                </span>
+                <span class="recent2__meta">вчера, 21:47</span>
+              </button>
+              <button type="button" class="recent2__item">
+                <svg class="icon mut2"><use href="#file"></use></svg>
+                <span>
+                  <span class="recent2__name">chapter-07.cbz</span><br>
+                  <span class="mut2" style="font-size:11px">архив · 24 страницы</span>
+                </span>
+                <span class="recent2__meta">5 октября</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <aside class="panel panel--right" aria-label="Инспектор">
+        <div class="panel__head">
+          <span class="panel__title">Инспектор</span>
+        </div>
+        <div class="panel__body">
+          <div class="empty2" style="margin:auto">
+            <svg class="icon icon--32"><use href="#translate"></use></svg>
+            <span>Откройте главу — здесь появятся регионы<br>и их переводы</span>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <footer class="status2">
+      <span class="status2__msg"><svg class="icon"><use href="#info"></use></svg>Нет открытого проекта</span>
+      <span class="status2__spacer"></span>
+      <span class="chip2 chip2--ghost"><span class="chip2__dot"></span>LLM не проверен</span>
+      <span class="chip2 chip2--ghost"><svg class="icon" style="width:13px;height:13px"><use href="#gpu"></use></svg>CPU</span>
+      <span class="status2__hint"><svg class="icon" style="width:11px;height:11px"><use href="#keyboard"></use></svg>F1 — горячие клавиши</span>
+    </footer>
+  </div>
+  <script src="mock.js"></script>
+</body>
+</html>

@@ -1,7 +1,8 @@
 """Каталоги данных настольного приложения.
 
 Портативный режим: если рядом с программой есть каталог ``data``, настройки,
-проекты, кэш и лог лежат в нём. Иначе на Windows настройки — в ``%APPDATA%``,
+проекты, кэш и лог лежат в нём. Переменная ``ILT_DATA_DIR`` задаёт каталог
+явно (dev-сайдкар и Flutter-хост). Иначе на Windows настройки — в ``%APPDATA%``,
 а проекты, кэш и лог — в ``%LOCALAPPDATA%``. Каталоги создаются при записи,
 не при импорте.
 """
@@ -53,6 +54,9 @@ class AppPaths:
 
 def default_paths() -> AppPaths:
     """Корни по установке и переменным среды. Каталоги не создаёт."""
+    override = os.environ.get("ILT_DATA_DIR", "").strip()
+    if override:
+        return AppPaths(root=Path(override), portable=True)
     data = install_root() / "data"
     if data.is_dir():
         return AppPaths(root=data, portable=True)

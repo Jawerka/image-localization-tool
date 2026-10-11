@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>ILT v2 — Редактор</title>
+  <link rel="stylesheet" href="tokens-v2.css">
+  <link rel="stylesheet" href="shell-v2.css">
+  <link rel="stylesheet" href="components-v2.css">
+  <link rel="stylesheet" href="screen.css">
+  <script src="sprite.js"></script>
+</head>
+<body class="v2">
+  <a class="sr-only" href="index.html">К списку макетов</a>
+  <div class="app2">
+
+    <!-- App bar ------------------------------------------------------- -->
+    <header class="appbar">
+      <div class="brand" title="Image Localization Tool">
+        <span class="brand__logo"><svg class="icon"><use href="#layers"></use></svg></span>
+      </div>
+
+      <div style="position:relative">
+        <button type="button" class="b2 b2--quiet" data-pop-btn="file-menu" aria-expanded="false">
+          <svg class="icon"><use href="#file"></use></svg>
+          Файл
+          <svg class="icon" style="width:12px;height:12px"><use href="#chevron"></use></svg>
+        </button>
+        <div class="pop" id="file-menu" hidden>
+          <button type="button" class="pop__item">Открыть файлы…<span class="kbd2">Ctrl+O</span></button>
+          <button type="button" class="pop__item">Открыть папку…<span class="kbd2">Ctrl+Shift+O</span></button>
+          <div class="pop__sep"></div>
+          <button type="button" class="pop__item">Загрузить проект…</button>
+          <button type="button" class="pop__item">Сохранить проект<span class="kbd2">Ctrl+S</span></button>
+          <button type="button" class="pop__item">Сохранить как…</button>
+          <button type="button" class="pop__item">Закрыть проект</button>
+          <div class="pop__sep"></div>
+          <button type="button" class="pop__item">Экспорт…<span class="kbd2">Ctrl+E</span></button>
+          <button type="button" class="pop__item">Глоссарий…</button>
+          <div class="pop__sep"></div>
+          <button type="button" class="pop__item">Настройки…<span class="kbd2">Ctrl+,</span></button>
+          <button type="button" class="pop__item">Горячие клавиши…<span class="kbd2">F1</span></button>
+          <div class="pop__sep"></div>
+          <button type="button" class="pop__item">Выход</button>
+        </div>
+      </div>
+
+      <span class="appbar__sep"></span>
+
+      <button type="button" class="pname">
+        <svg class="icon mut2"><use href="#folder"></use></svg>
+        <span class="pname__title">Ки́рби · глава 1</span>
+        <span class="pname__meta">12 страниц</span>
+      </button>
+
+      <div style="position:relative">
+        <button type="button" class="chip2" data-pop-btn="lang-menu" aria-expanded="false" title="Языки перевода">
+          <svg class="icon" style="width:13px;height:13px"><use href="#globe"></use></svg>
+          <span class="tnum">EN</span>
+          <span class="mut2" style="font-size:11px">→</span>
+          <span class="tnum">RU</span>
+          <svg class="icon mut2" style="width:11px;height:11px"><use href="#chevron"></use></svg>
+        </button>
+        <div class="pop" id="lang-menu" hidden>
+          <div class="pop__title">Языки</div>
+          <div class="pop__form">
+            <label class="field2">
+              <span class="field2__label">Откуда</span>
+              <select class="sel2">
+                <option>Авто</option>
+                <option selected>en — English</option>
+                <option>ja — 日本語</option>
+              </select>
+            </label>
+            <label class="field2">
+              <span class="field2__label">Куда</span>
+              <select class="sel2">
+                <option selected>ru — Русский</option>
+                <option>en — English</option>
+                <option>uk — Українська</option>
+              </select>
+            </label>
+          </div>
+          <div class="pop__sep"></div>
+          <button type="button" class="pop__item">Глоссарий…<span class="kbd2">38 записей</span></button>
+        </div>
+      </div>
+
+      <div class="appbar__spacer"></div>
+
+      <div class="seg2" role="tablist" aria-label="Режим работы" data-tabs>
+        <button type="button" class="seg2__btn" role="tab" aria-selected="false" data-tab="review">
+          <svg class="icon" style="width:14px;height:14px"><use href="#eye"></use></svg>
+          Отбор
+        </button>
+        <button type="button" class="seg2__btn" role="tab" aria-selected="true" data-tab="retouch">
+          <svg class="icon" style="width:14px;height:14px"><use href="#brush"></use></svg>
+          Ретушь
+        </button>
+        <button type="button" class="seg2__btn" role="tab" aria-selected="false" data-tab="batch">
+          <svg class="icon" style="width:14px;height:14px"><use href="#play"></use></svg>
+          Прогон
+        </button>
+      </div>
+
+      <span class="appbar__sep"></span>
+
+      <span class="jobpill" role="status">
+        <span class="jobpill__ring" style="--p:45"></span>
+        Перевод · 45 %
+        <button type="button" class="ibtn ibtn--sm ibtn--danger jobpill__stop" title="Остановить очередь" aria-label="Остановить">
+          <svg class="icon" style="width:12px;height:12px"><use href="#stop"></use></svg>
+        </button>
+      </span>
+
+      <div class="split" style="position:relative">
+        <button type="button" class="b2 b2--primary split__main" title="Перевести страницу (Ctrl+Enter)">
+          <svg class="icon"><use href="#translate"></use></svg>
+          Перевести
+        </button>
+        <button type="button" class="b2 b2--primary split__caret" data-pop-btn="translate-menu" aria-expanded="false" title="Параметры перевода" aria-label="Параметры перевода">
+          <svg class="icon" style="width:12px;height:12px"><use href="#chevron"></use></svg>
+        </button>
+        <div class="pop pop--right" id="translate-menu" hidden>
+          <div class="pop__title">Область перевода</div>
+          <div class="seg2" style="margin:2px 7px 7px" data-radiogroup>
+            <button type="button" class="seg2__btn" role="radio" aria-checked="true">Страница<span class="kbd2" style="margin-left:6px">Ctrl+Enter</span></button>
+            <button type="button" class="seg2__btn" role="radio" aria-checked="false">Всё<span class="kbd2" style="margin-left:6px">Ctrl+Shift+Enter</span></button>
+          </div>
+          <div class="pop__sep"></div>
+          <button type="button" class="pop__item">
+            <svg class="icon mut2"><use href="#settings"></use></svg>
+            Настройки перевода…
+          </button>
+        </div>
+      </div>
+
+      <button type="button" class="b2 b2--soft" title="Экспорт (Ctrl+E)">
+        <svg class="icon"><use href="#export"></use></svg>
+        Экспорт
+      </button>
+
+      <button type="button" class="ibtn" title="Настройки (Ctrl+,)" aria-label="Настройки">
+        <svg class="icon"><use href="#settings"></use></svg>
+      </button>
+    </header>
+
+    <!-- Рабочая область ----------------------------------------------- -->
+    <div class="main2">
+
+      <!-- Страницы -->
+      <aside class="panel panel--left" aria-label="Страницы">
+        <div class="panel__head">
+          <span class="panel__title">Страницы</span>
+          <span class="chip2 chip2--mini chip2--ghost tnum">12</span>
+          <span class="panel__spacer"></span>
+          <button type="button" class="ibtn ibtn--sm" data-toggle-panel="pages-collapsed" title="Свернуть панель ( [ )" aria-label="Свернуть">
+            <svg class="icon"><use href="#panel-left"></use></svg>
+          </button>
+        </div>
+        <div style="padding:8px 10px 2px">
+          <label class="sr-only" for="page-search">Поиск по страницам</label>
+          <div style="position:relative">
+            <svg class="icon mut2" style="position:absolute;left:9px;top:7px;width:14px;height:14px"><use href="#search"></use></svg>
+            <input id="page-search" class="in2" style="padding-left:30px" type="search" placeholder="Поиск по имени…">
+          </div>
+        </div>
+        <div class="panel__scroll" role="listbox" aria-label="Страницы главы" aria-multiselectable="true">
+
+          <button type="button" class="prow" role="option" aria-selected="false">
+            <span class="prow__thumb"><img src="../../../test-img/test-1.jpg" alt=""><span class="prow__dot prow__dot--run"></span></span>
+            <span class="prow__body">
+              <span class="prow__line"><span class="prow__num">01</span><span class="prow__name">001.jpg</span></span>
+              <span class="prow__status prow__status--run"><svg class="icon" style="width:11px;height:11px"><use href="#play"></use></svg>Распознавание · 45 %</span>
+              <span class="bar"><span style="width:45%"></span></span>
+            </span>
+          </button>
+
+          <button type="button" class="prow" role="option" aria-selected="false">
+            <span class="prow__thumb"><img src="../../../test-img/test-2.png" alt=""><span class="prow__dot prow__dot--queue"></span></span>
+            <span class="prow__body">
+              <span class="prow__line"><span class="prow__num">02</span><span class="prow__name">002.jpg</span></span>
+              <span class="prow__status">В очереди</span>
+            </span>
+          </button>
+
+          <button type="button" class="prow" role="option" aria-selected="false">
+            <span class="prow__thumb"><img src="../../../test-img/test-3.jpg" alt=""><span class="prow__dot"></span></span>
+            <span class="prow__body">
+              <span class="prow__line"><span class="prow__num">03</span><span class="prow__name">003.jpg</span></span>
+              <span class="prow__status">Не начата</span>
+            </span>
+          </button>
+
+          <button type="button" class="prow" role="option" aria-selected="false">
+            <span class="prow__thumb"><img src="../../../test-img/test-2.png" alt=""><span class="prow__dot prow__dot--error"></span></span>
+            <span class="prow__body">
+              <span class="prow__line"><span class="prow__num">04</span><span class="prow__name">004.jpg</span></span>
+              <span class="prow__status prow__status--error"><svg class="icon" style="width:11px;height:11px"><use href="#error"></use></svg>Ошибка перевода</span>
+            </span>
+          </button>
+
+          <button type="button" class="prow" role="option" aria-selected="false">
+            <span class="prow__thumb"><img src="../../../test-img/test-3.jpg" alt=""><span class="prow__dot prow__dot--offline"></span></span>
+            <span class="prow__body">
+              <span class="prow__line"><span class="prow__num">05</span><span class="prow__name">005.jpg</span></span>
+              <span class="prow__status prow__status--offline">Офлайн · без LLM</span>
+            </span>
+          </button>
+
+          <button type="button" class="prow is-selected" role="option" aria-selected="true">
+            <span class="prow__thumb"><img src="../../../test-img/test-1.jpg" alt=""><span class="prow__dot prow__dot--edit"></span></span>
+            <span class="prow__body">
+              <span class="prow__line"><span class="prow__num">06</span><span class="prow__name">006.jpg</span></span>
+              <span class="prow__status">Есть правки · 3</span>
+            </span>
+          </button>
+
+          <button type="button" class="prow" role="option" aria-selected="false">
+            <span class="prow__thumb"><img src="../../../test-img/test-2.png" alt=""><span class="prow__dot prow__dot--done"></span></span>
+            <span class="prow__body">
+              <span class="prow__line"><span class="prow__num">07</span><span class="prow__name">007.jpg</span></span>
+              <span class="prow__status prow__status--done"><svg class="icon" style="width:11px;height:11px"><use href="#check"></use></svg>Готово</span>
+            </span>
+          </button>
+
+          <button type="button" class="prow" role="option" aria-selected="false">
+            <span class="prow__thumb"><img src="../../../test-img/test-3.jpg" alt=""><span class="prow__dot prow__dot--done"></span></span>
+            <span class="prow__body">
+              <span class="prow__line"><span class="prow__num">08</span><span class="prow__name">008.jpg</span></span>
+              <span class="prow__status prow__status--done"><svg class="icon" style="width:11px;height:11px"><use href="#check"></use></svg>Готово</span>
+            </span>
+          </button>
+        </div>
+        <div class="panel__foot">
+          <div class="row2">
+            <span class="mut2">8 из 12 готово</span>
+            <span class="grow"></span>
+            <span class="tnum mut2">67 %</span>
+          </div>
+          <span class="bar bar--ok"><span style="width:67%"></span></span>
+          <div class="row2">
+            <button type="button" class="b2 b2--soft b2--sm" title="К страницам с ошибками (N)">
+              <svg class="icon"><use href="#target"></use></svg>
+              1 проблема
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Канвас -->
+      <div class="stage2" id="stage">
+        <div class="stage2__scroll">
+          <div class="sheet" style="width:432px">
+            <img src="../../../test-img/test-1.jpg" alt="Страница 006" width="432">
+            <div class="curtain2">
+              <img src="../../../test-img/test-1.jpg" alt="">
+            </div>
+            <span class="curtain2__tag curtain2__tag--left">Оригинал</span>
+            <span class="curtain2__tag curtain2__tag--right">Результат</span>
+            <div class="curtain2__line"></div>
+            <div class="curtain2__grip" title="Потяните, чтобы сравнить">
+              <svg class="icon" style="width:12px;height:12px"><use href="#grip"></use></svg>
+            </div>
+
+            <div class="box2" style="left:30%;top:3%;width:24%;height:7%"><span class="box2__num">1</span></div>
+            <div class="box2 box2--skip" style="left:58%;top:2.4%;width:20%;height:10%">
+              <span class="box2__num">2</span>
+              <span class="box2__flag">Пропущен</span>
+            </div>
+            <div class="box2 box2--sel" style="left:12%;top:46%;width:34%;height:22%">
+              <span class="box2__num">3</span>
+              <span class="box2__handle box2__handle--nw"></span>
+              <span class="box2__handle box2__handle--n"></span>
+              <span class="box2__handle box2__handle--ne"></span>
+              <span class="box2__handle box2__handle--e"></span>
+              <span class="box2__handle box2__handle--se"></span>
+              <span class="box2__handle box2__handle--s"></span>
+              <span class="box2__handle box2__handle--sw"></span>
+              <span class="box2__handle box2__handle--w"></span>
+              <span class="box2__rotate"></span>
+            </div>
+            <div class="box2 box2--overflow" style="left:55%;top:76%;width:36%;height:18%">
+              <span class="box2__num">4</span>
+              <span class="box2__flag" style="color:var(--text-warning)">
+                <svg class="icon" style="width:10px;height:10px"><use href="#warning"></use></svg>
+                Не влез
+              </span>
+            </div>
+            <div class="box2 box2--sfx" style="left:12%;top:83%;width:22%;height:9%">
+              <span class="box2__num">5</span>
+              <span class="box2__flag" style="color:var(--danger)">Звук</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Верхние чипы и пилюля правок -->
+        <div class="stage2__marks">
+          <span class="chip2"><svg class="icon" style="width:13px;height:13px"><use href="#file"></use></svg>06 · 006.jpg</span>
+          <span class="chip2 chip2--ghost">Регионов: 5</span>
+          <span class="chip2 chip2--warn"><svg class="icon" style="width:12px;height:12px"><use href="#warning"></use></svg>1 не влезает</span>
+        </div>
+
+        <div class="donepill" style="position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:15">
+          <button type="button" class="donepill__grip" title="Перетащите, чтобы отодвинуть" aria-label="Переместить">
+            <svg class="icon" style="width:14px;height:14px"><use href="#grip"></use></svg>
+          </button>
+          <span class="donepill__text">3 правки · не применены</span>
+          <button type="button" class="donepill__apply" title="Применить и перевёрстка">Готово</button>
+        </div>
+
+        <button type="button" class="navarrow navarrow--prev" aria-label="Предыдущая страница" title="Предыдущая (PgUp)">
+          <svg class="icon icon--left"><use href="#chevron"></use></svg>
+        </button>
+        <button type="button" class="navarrow navarrow--next" aria-label="Следующая страница" title="Следующая (PgDn)">
+          <svg class="icon icon--right"><use href="#chevron"></use></svg>
+        </button>
+
+        <!-- Плавающий док -->
+        <div class="dock">
+          <div class="seg2" style="border:0;background:transparent;padding:0" data-radiogroup aria-label="Вид">
+            <button type="button" class="ibtn" role="radio" aria-checked="false" title="Оригинал (1)">
+              <svg class="icon"><use href="#original"></use></svg>
+            </button>
+            <button type="button" class="ibtn" role="radio" aria-checked="false" title="Результат (2)">
+              <svg class="icon"><use href="#translate"></use></svg>
+            </button>
+            <button type="button" class="ibtn" role="radio" aria-checked="true" title="Сравнение (3)">
+              <svg class="icon"><use href="#compare"></use></svg>
+            </button>
+          </div>
+          <span class="dock__sep"></span>
+          <button type="button" class="ibtn" aria-pressed="true" title="Слой рамок (L)">
+            <svg class="icon"><use href="#layers"></use></svg>
+          </button>
+          <button type="button" class="ibtn" aria-pressed="true" title="Слой маски (M)">
+            <svg class="icon"><use href="#mask"></use></svg>
+          </button>
+          <span class="dock__sep"></span>
+          <div data-radiogroup aria-label="Инструмент" style="display:flex;gap:2px">
+            <button type="button" class="ibtn" role="radio" aria-checked="false" title="Выбор (V)">
+              <svg class="icon"><use href="#select"></use></svg>
+            </button>
+            <button type="button" class="ibtn" role="radio" aria-checked="false" title="Регион (R)">
+              <svg class="icon"><use href="#region"></use></svg>
+            </button>
+            <button type="button" class="ibtn" role="radio" aria-checked="true" title="Кисть: ЛКМ — рисовать, ПКМ — ластик (B)">
+              <svg class="icon"><use href="#brush"></use></svg>
+            </button>
+            <button type="button" class="ibtn" role="radio" aria-checked="false" title="Лассо (P)">
+              <svg class="icon"><use href="#polyline"></use></svg>
+            </button>
+            <button type="button" class="ibtn" role="radio" aria-checked="false" title="Рука (H)">
+              <svg class="icon"><use href="#hand"></use></svg>
+            </button>
+          </div>
+          <span class="dock__sep"></span>
+          <div style="position:relative">
+            <button type="button" class="ibtn dock__size" data-pop-btn="brush-pop" aria-expanded="false" title="Толщина кисти ( [ / ] )">
+              <svg class="icon"><use href="#brush"></use></svg>
+              <span class="tnum" style="font-size:12px">12</span>
+            </button>
+            <div class="pop pop--up" id="brush-pop" hidden style="min-width:230px">
+              <div class="pop__form">
+                <div class="row2">
+                  <span class="field2__label grow">Толщина кисти</span>
+                  <span class="tnum" style="font-weight:600">12 px</span>
+                </div>
+                <input class="range2" type="range" min="1" max="64" value="12">
+                <p class="mut2" style="margin:0;font-size:11px">ЛКМ — рисовать, ПКМ — стирать. Колесо над ползунком меняет шаг.</p>
+              </div>
+            </div>
+          </div>
+          <span class="dock__sep"></span>
+          <button type="button" class="ibtn" title="Отменить (Ctrl+Z)">
+            <svg class="icon"><use href="#undo"></use></svg>
+          </button>
+          <button type="button" class="ibtn" title="Повторить (Ctrl+Y)" disabled>
+            <svg class="icon"><use href="#redo"></use></svg>
+          </button>
+          <span class="dock__sep"></span>
+          <div class="dock__zoom">
+            <button type="button" class="ibtn" title="Уменьшить" aria-label="Уменьшить">
+              <svg class="icon"><use href="#minus"></use></svg>
+            </button>
+            <button type="button" class="dock__zoomvalue" title="Вписать в окно (Ctrl+0)">Вписать</button>
+            <button type="button" class="ibtn" title="По ширине поля" aria-label="По ширине">
+              <svg class="icon"><use href="#fit-width"></use></svg>
+            </button>
+            <button type="button" class="ibtn" title="Увеличить" aria-label="Увеличить">
+              <svg class="icon"><use href="#add"></use></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Инспектор -->
+      <aside class="panel panel--right" aria-label="Инспектор">
+        <div class="panel__head">
+          <span class="panel__title">Инспектор</span>
+          <span class="panel__spacer"></span>
+          <button type="button" class="ibtn ibtn--sm" title="Предыдущий регион" aria-label="Предыдущий регион">
+            <svg class="icon icon--left"><use href="#chevron"></use></svg>
+          </button>
+          <span class="tnum mut2" style="font-size:11.5px">3 / 7</span>
+          <button type="button" class="ibtn ibtn--sm" title="Следующий регион" aria-label="Следующий регион">
+            <svg class="icon icon--right"><use href="#chevron"></use></svg>
+          </button>
+          <button type="button" class="ibtn ibtn--sm" data-toggle-panel="inspector-collapsed" title="Свернуть панель ( ] )" aria-label="Свернуть">
+            <svg class="icon"><use href="#panel-right"></use></svg>
+          </button>
+        </div>
+
+        <div class="seg2 seg2--full" style="margin:8px 10px 0;justify-content:stretch" data-tabs role="tablist" aria-label="Инспектор">
+          <button type="button" class="seg2__btn grow" role="tab" style="justify-content:center" aria-selected="true" data-tab="text">Текст</button>
+          <button type="button" class="seg2__btn grow" role="tab" style="justify-content:center" aria-selected="false" data-tab="page">Страница</button>
+        </div>
+
+        <div class="panel__body" data-tabpanel="text" style="padding-top:0">
+          <div style="display:flex;gap:6px;padding:8px 10px 0">
+            <button type="button" class="b2 b2--soft b2--sm b2--tall grow" style="justify-content:center">
+              <svg class="icon"><use href="#add"></use></svg>
+              Добавить регион
+            </button>
+            <button type="button" class="b2 b2--soft b2--sm" title="Следующая проблема (N)">
+              <svg class="icon"><use href="#target"></use></svg>
+            </button>
+          </div>
+          <div class="panel__scroll">
+
+            <article class="rcard">
+              <div class="rcard__head">
+                <span class="rcard__num">1</span>
+                <span class="rcard__title">IT'S KIRBY'S STOMACH.</span>
+                <span class="chip2 chip2--mini chip2--ok">Готово</span>
+              </div>
+              <p class="rcard__preview">ЭТО ЖЕ ЖЕЛУДОК КИРБИ. · диалог · Поппи</p>
+            </article>
+
+            <article class="rcard rcard--skip">
+              <div class="rcard__head">
+                <span class="rcard__num">2</span>
+                <span class="rcard__title">GROWL GROWL GROWL</span>
+                <span class="chip2 chip2--mini chip2--ghost">Пропущен</span>
+              </div>
+              <p class="rcard__preview">Звук, не переводится</p>
+            </article>
+
+            <article class="rcard is-selected">
+              <div class="rcard__head">
+                <span class="rcard__num">3</span>
+                <span class="rcard__title">I'M HUNGRYYY.</span>
+                <span class="chip2 chip2--mini chip2--ghost">диалог</span>
+                <button type="button" class="ibtn ibtn--sm" title="Свернуть" aria-label="Свернуть">
+                  <svg class="icon icon--up" style="width:12px;height:12px"><use href="#chevron"></use></svg>
+                </button>
+              </div>
+
+              <label class="field2">
+                <span class="field2__label">Перевод</span>
+                <textarea class="ta2" lang="ru">Я ГОЛОДЕН!</textarea>
+                <span class="field2__meta">
+                  <span>9 / 48</span>
+                  <span class="chip2 chip2--mini chip2--ok"><svg class="icon" style="width:10px;height:10px"><use href="#check"></use></svg>Автосохранено</span>
+                </span>
+              </label>
+
+              <details class="sect">
+                <summary>
+                  <svg class="icon sect__chev"><use href="#chevron"></use></svg>
+                  Оригинал
+                </summary>
+                <div class="sect__body">
+                  <textarea class="ta2" lang="en" readonly>I'M HUNGRYYY.</textarea>
+                </div>
+              </details>
+
+              <div class="rcard__grid">
+                <label class="field2">
+                  <span class="field2__label">Тип</span>
+                  <select class="sel2">
+                    <option selected>диалог</option>
+                    <option>мысль</option>
+                    <option>звук</option>
+                    <option>надпись</option>
+                  </select>
+                </label>
+                <label class="field2">
+                  <span class="field2__label">Говорящий</span>
+                  <input class="in2" type="text" value="Кирби">
+                </label>
+              </div>
+
+              <div class="rcard__acts">
+                <button type="button" class="b2 b2--soft b2--sm">
+                  <svg class="icon"><use href="#refresh"></use></svg>
+                  Перевести заново
+                </button>
+                <span class="spacer"></span>
+                <button type="button" class="ibtn ibtn--sm" title="Сократить текст" aria-label="Сократить">
+                  <svg class="icon"><use href="#compress"></use></svg>
+                </button>
+                <button type="button" class="ibtn ibtn--sm" title="Не переводить" aria-label="Не переводить">
+                  <svg class="icon"><use href="#ban"></use></svg>
+                </button>
+                <button type="button" class="ibtn ibtn--sm" title="Копировать стиль (Ctrl+Shift+C)" aria-label="Копировать стиль">
+                  <svg class="icon"><use href="#copy"></use></svg>
+                </button>
+                <button type="button" class="ibtn ibtn--sm ibtn--danger" title="Удалить регион (Del)" aria-label="Удалить">
+                  <svg class="icon"><use href="#delete"></use></svg>
+                </button>
+              </div>
+
+              <details class="sect" open>
+                <summary>
+                  <svg class="icon sect__chev"><use href="#chevron"></use></svg>
+                  Стиль
+                </summary>
+                <div class="sect__body">
+                  <label class="field2">
+                    <span class="field2__label">Шрифт</span>
+                    <select class="sel2">
+                      <option selected>Heroika</option>
+                      <option>FirstTimeWriting</option>
+                      <option>Unsightly</option>
+                      <option>OperationNapalm</option>
+                    </select>
+                  </label>
+                  <p class="fontsample" style="font-family:Heroika, sans-serif;font-size:20px">Я голоден!</p>
+                  <div class="rcard__grid">
+                    <label class="field2">
+                      <span class="field2__label">Кегль</span>
+                      <input class="in2 in2--num" type="number" value="18" min="8">
+                    </label>
+                    <label class="field2">
+                      <span class="field2__label">Ореол, доля</span>
+                      <input class="in2 in2--num" type="number" value="0.08" step="0.01" min="0">
+                    </label>
+                  </div>
+                  <div class="row2">
+                    <label class="choice2 grow"><input type="checkbox" checked>ПРОПИСНЫЕ</label>
+                    <span class="mut2" style="font-size:11px">Цвет</span>
+                    <button type="button" class="swatch" aria-pressed="true" style="background:#111" title="Чёрный"></button>
+                    <button type="button" class="swatch" aria-pressed="false" style="background:#fff" title="Белый"></button>
+                    <button type="button" class="swatch" aria-pressed="false" style="background:#f0c674" title="Жёлтый"></button>
+                    <button type="button" class="swatch" aria-pressed="false" style="background:#c62828" title="Красный"></button>
+                  </div>
+                </div>
+              </details>
+
+              <details class="sect">
+                <summary>
+                  <svg class="icon sect__chev"><use href="#chevron"></use></svg>
+                  Геометрия
+                </summary>
+                <div class="sect__body">
+                  <div class="rcard__grid">
+                    <label class="field2">
+                      <span class="field2__label">Поворот, °</span>
+                      <input class="in2 in2--num" type="number" value="0" step="1">
+                    </label>
+                    <label class="field2">
+                      <span class="field2__label">Искривление</span>
+                      <select class="sel2">
+                        <option selected>Нет</option>
+                        <option>Дуга вверх</option>
+                        <option>Дуга вниз</option>
+                        <option>Волна</option>
+                      </select>
+                    </label>
+                  </div>
+                  <p class="mut2" style="margin:0;font-size:11px">Стрелки — сдвиг на 1 px, Shift — на 10, Alt — размер. Лассо в доке задаёт форму.</p>
+                </div>
+              </details>
+            </article>
+
+            <article class="rcard rcard--overflow">
+              <div class="rcard__head">
+                <span class="rcard__num">4</span>
+                <span class="rcard__title">SHOOT! KNOWING KIRBY…</span>
+                <span class="chip2 chip2--mini chip2--warn"><svg class="icon" style="width:10px;height:10px"><use href="#warning"></use></svg>Не влез</span>
+              </div>
+              <p class="rcard__preview">ЧЁРТ! ЗНАЯ КИРБИ, ОН УЖЕ МОГ ВСЁ СЪЕСТЬ БЕЗ НАС!</p>
+              <div class="rcard__acts">
+                <button type="button" class="b2 b2--soft b2--sm">
+                  <svg class="icon"><use href="#compress"></use></svg>
+                  Сократить
+                </button>
+                <button type="button" class="b2 b2--soft b2--sm">Разбить на 2</button>
+              </div>
+            </article>
+
+            <article class="rcard rcard--sfx">
+              <div class="rcard__head">
+                <span class="rcard__num">5</span>
+                <span class="rcard__title">GRRRRR</span>
+                <span class="chip2 chip2--mini chip2--bad">Звук · заменить</span>
+              </div>
+              <p class="rcard__preview">Р-Р-Р-Р · подобран стиль: Unsightly</p>
+            </article>
+
+          </div>
+        </div>
+
+        <div class="panel__body" data-tabpanel="page" hidden>
+          <div class="panel__scroll">
+            <dl class="kv2">
+              <dt>Источник</dt><dd>004.jpg</dd>
+              <dt>Размер</dt><dd>742 × 1063</dd>
+              <dt>OCR</dt><dd>VLM · 2,1 с</dd>
+              <dt>Перевод</dt><dd>LLM · 6,4 с</dd>
+              <dt>Очистка</dt><dd>LaMa · 1,2 с</dd>
+              <dt>Вёрстка</dt><dd>0,4 с</dd>
+            </dl>
+            <div class="banner2" style="margin-top:8px">
+              <svg class="icon"><use href="#warning"></use></svg>
+              <span class="banner2__text">Регион 4: текст не влез после сокращения. Уменьшите кегль или разбейте на два блока.</span>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <!-- Статусбар ------------------------------------------------------ -->
+    <footer class="status2">
+      <span class="status2__msg">
+        <svg class="icon" style="color:var(--text-primary)"><use href="#brush"></use></svg>
+        3 правки не применены · страница 6
+      </span>
+      <span class="status2__spacer"></span>
+      <span class="chip2 chip2--ghost"><span class="chip2__dot chip2__dot--ok"></span>LLM · qwen2-vl</span>
+      <span class="chip2 chip2--ghost"><svg class="icon" style="width:13px;height:13px"><use href="#gpu"></use></svg>RTX 3060</span>
+      <span class="chip2 chip2--ghost tnum">742 × 1063</span>
+      <span class="status2__hint"><svg class="icon" style="width:11px;height:11px"><use href="#keyboard"></use></svg>Ctrl+K — команды</span>
+    </footer>
+  </div>
+  <script src="mock.js"></script>
+</body>
+</html>

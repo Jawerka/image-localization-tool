@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>ILT v2 — Доступ по сети</title>
+  <link rel="stylesheet" href="tokens-v2.css">
+  <link rel="stylesheet" href="shell-v2.css">
+  <link rel="stylesheet" href="components-v2.css">
+  <link rel="stylesheet" href="screen.css">
+  <script src="sprite.js"></script>
+</head>
+<body class="v2">
+  <div class="screen2">
+    <header class="screen2__bar">
+      <span class="brand__logo" style="width:24px;height:24px"><svg class="icon"><use href="#globe"></use></svg></span>
+      <h1 class="screen2__title">Доступ по сети</h1>
+      <span class="mut2" style="font-size:11.5px">страницы открываются в браузере соседнего устройства</span>
+      <span class="grow"></span>
+      <button type="button" class="ibtn" aria-label="Закрыть"><svg class="icon"><use href="#close"></use></svg></button>
+    </header>
+
+    <div class="screen2__body" style="overflow:auto">
+      <div class="setbody">
+        <div class="setcard" style="max-width:620px">
+
+          <div class="group2">
+            <label class="sw2">
+              <input type="checkbox" checked>
+              <span class="sw2__track"></span>
+              <span>Разрешить доступ в локальной сети</span>
+            </label>
+            <div class="row2">
+              <span class="chip2 chip2--mini chip2--ok"><span class="chip2__dot chip2__dot--ok"></span>слушает 192.168.88.42:8741</span>
+              <span class="grow"></span>
+              <button type="button" class="b2 b2--quiet b2--sm"><svg class="icon"><use href="#copy"></use></svg>Скопировать адрес</button>
+            </div>
+            <div class="rcard__grid">
+              <label class="field2"><span class="field2__label">Адрес</span><input class="in2" type="text" value="0.0.0.0"></label>
+              <label class="field2"><span class="field2__label">Порт</span><input class="in2 in2--num" type="number" value="8741"></label>
+            </div>
+          </div>
+
+          <div class="group2">
+            <span class="group2__title">Код сопряжения</span>
+            <div class="paircode">
+              <span class="paircode__value tnum">482 913</span>
+              <span class="mut2" style="font-size:11.5px">Показан тому, кто открывает адрес — один раз на устройство</span>
+              <button type="button" class="b2 b2--soft b2--sm"><svg class="icon"><use href="#refresh"></use></svg>Новый код</button>
+            </div>
+          </div>
+
+          <div class="group2">
+            <span class="group2__title">Подключённые устройства</span>
+            <div class="devicerow">
+              <svg class="icon mut2"><use href="#gpu"></use></svg>
+              <span style="min-width:0">
+                <span style="font-weight:600">iPad · Safari</span><br>
+                <span class="mut2" style="font-size:11px">192.168.88.77 · активен сейчас</span>
+              </span>
+              <span class="grow"></span>
+              <button type="button" class="b2 b2--soft b2--sm">Отозвать</button>
+            </div>
+            <div class="devicerow">
+              <svg class="icon mut2"><use href="#gpu"></use></svg>
+              <span style="min-width:0">
+                <span style="font-weight:600">Телефон · Chrome</span><br>
+                <span class="mut2" style="font-size:11px">192.168.88.91 · последний раз 2 ч назад</span>
+              </span>
+              <span class="grow"></span>
+              <button type="button" class="b2 b2--soft b2--sm">Отозвать</button>
+            </div>
+          </div>
+
+          <div class="banner2">
+            <svg class="icon"><use href="#warning"></use></svg>
+            <span class="banner2__text">Брандмауэр Windows может блокировать порт, пока для программы не разрешены входящие подключения в частной сети. Передача идёт по обычному HTTP без шифрования — не публикуйте адрес за пределами квартиры или офиса.</span>
+          </div>
+
+          <div class="group2">
+            <span class="group2__title">Что видит устройство</span>
+            <dl class="kv2">
+              <dt>Редактор и просмотр</dt><dd>да</dd>
+              <dt>Перевод страниц</dt><dd>да</dd>
+              <dt>Экспорт на диск сервера</dt><dd>нет</dd>
+              <dt>Доступ к настройкам</dt><dd>нет</dd>
+            </dl>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <footer class="screen2__foot">
+      <span class="mut2" style="font-size:11px">Отключение доступа разрывает активные сессии сразу.</span>
+      <span class="grow"></span>
+      <button type="button" class="b2 b2--primary">Готово</button>
+    </footer>
+  </div>
+  <script src="mock.js"></script>
+</body>
+</html>

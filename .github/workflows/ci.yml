@@ -48,3 +48,31 @@ jobs:
 
       - name: Run JS unit tests
         run: npm run test:js
+
+  flutter:
+    name: Flutter analyze & test
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Целевой pin хоста — Flutter >= 3.47.7 stable;
+      # CI берёт текущий stable (сборка exe требует VS 2022 Desktop C++).
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Run tests
+        run: flutter test

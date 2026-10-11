@@ -1,7 +1,8 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  PyInstaller onedir, models beside the exe, smoke check, optional Inno Setup installer.
+  Flutter host + PyInstaller sidecar, staged dist layout, smoke check,
+  optional Inno Setup installer.
 
 .EXAMPLE
   .\scripts\build-windows.ps1
@@ -12,6 +13,7 @@
 param(
     [string] $OutputDir = "",
     [switch] $SkipPyInstaller,
+    [switch] $SkipFlutter,
     [switch] $SkipInno,
     [switch] $SkipModels
 )
@@ -55,6 +57,18 @@ function Get-AppVersion {
         throw "Version from src/app/__init__.py is not a dotted number: $version"
     }
     return $version
+}
+
+function Resolve-Flutter {
+    $onPath = Get-Command flutter -ErrorAction SilentlyContinue
+    if ($onPath) {
+        return $onPath.Source
+    }
+    $local = Join-Path $env:LOCALAPPDATA 'flutter\bin\flutter.bat'
+    if (Test-Path -LiteralPath $local) {
+        return $local
+    }
+    throw "flutter not found. Add Flutter to PATH or install the SDK to %LOCALAPPDATA%\flutter."
 }
 
 function Find-Iscc {
@@ -101,7 +115,30 @@ $version = Get-AppVersion -Python $Python
 Write-Host "==> Version $version"
 
 $DistDir = Join-Path $RepoRoot 'dist\ImageLocalizationTool'
+$SidecarBuildDir = Join-Path $RepoRoot 'dist\ilt_sidecar'
+$FlutterReleaseDir = Join-Path $RepoRoot 'apps\desktop\build\windows\x64\runner\Release'
 $Spec = Join-Path $RepoRoot 'ImageLocalizationTool.spec'
+
+# Layout: {dist}/desktop = Flutter host, {dist}/sidecar = PyInstaller bundle,
+# web/ and fonts/ at the dist root (models optional, copied below).
+
+if (-not $SkipFlutter) {
+    $Flutter = Resolve-Flutter
+    Push-Location (Join-Path $RepoRoot 'apps\desktop')
+    try {
+        Invoke-Checked {
+            & $Flutter build windows --release --build-name=$version --build-number=1
+        } 'flutter build windows --release'
+    } finally {
+        Pop-Location
+    }
+    $flutterExe = Join-Path $FlutterReleaseDir 'ImageLocalizationTool.exe'
+    if (-not (Test-Path -LiteralPath $flutterExe)) {
+        throw "Flutter host exe not found: $flutterExe"
+    }
+} else {
+    Write-Host "Skipping Flutter build (-SkipFlutter)."
+}
 
 if (-not $SkipPyInstaller) {
     & $Python -c "import PyInstaller"
@@ -111,32 +148,72 @@ if (-not $SkipPyInstaller) {
     Invoke-Checked {
         & $Python -m PyInstaller $Spec --clean --noconfirm
     } 'PyInstaller ImageLocalizationTool.spec'
-    $builtExe = Join-Path $DistDir 'ImageLocalizationTool.exe'
+    $builtExe = Join-Path $SidecarBuildDir 'ImageLocalizationTool.exe'
     if (-not (Test-Path -LiteralPath $builtExe)) {
-        throw "Onedir exe not found: $builtExe"
+        throw "Sidecar exe not found: $builtExe"
     }
 } else {
     Write-Host "Skipping PyInstaller (-SkipPyInstaller)."
 }
 
-# The spec stages web/ and fonts from COLLECT. Repeat after PyInstaller so the
-# onedir root is complete even if that hook timing changes. models stay out of _internal.
-if (Test-Path -LiteralPath $DistDir) {
-    $stage = 'import sys; from pathlib import Path; root = Path(sys.argv[1]); dist = Path(sys.argv[2]); sys.path.insert(0, str(root)); from scripts.smoke_dist import stage_runtime_files; stage_runtime_files(dist, root)'
-    Write-Host "==> Stage web and fonts"
-    & $Python -c $stage $RepoRoot $DistDir
-    if ($LASTEXITCODE -ne 0) {
-        throw "Staging web and fonts failed with exit code $LASTEXITCODE"
+if (-not (Test-Path -LiteralPath $DistDir)) {
+    New-Item -ItemType Directory -Path $DistDir -Force | Out-Null
+}
+
+# Remove files of the pre-cutover layout (root exe + _internal) so they can
+# neither ship nor be picked up by the installer.
+$staleExe = Join-Path $DistDir 'ImageLocalizationTool.exe'
+if (Test-Path -LiteralPath $staleExe) {
+    Write-Host "==> Remove stale root exe"
+    Remove-Item -LiteralPath $staleExe -Force
+}
+$staleInternal = Join-Path $DistDir '_internal'
+if (Test-Path -LiteralPath $staleInternal) {
+    Write-Host "==> Remove stale root _internal"
+    Remove-Item -LiteralPath $staleInternal -Recurse -Force
+}
+
+$hostDir = Join-Path $DistDir 'desktop'
+if (Test-Path -LiteralPath $FlutterReleaseDir) {
+    if (Test-Path -LiteralPath $hostDir) {
+        Remove-Item -LiteralPath $hostDir -Recurse -Force
     }
-    if ($SkipModels) {
-        $modelsDest = Join-Path $DistDir 'models'
-        if (Test-Path -LiteralPath $modelsDest) {
-            Write-Host "==> Remove models from dist"
-            Remove-Item -LiteralPath $modelsDest -Recurse -Force
-        }
-    } else {
-        Copy-ModelsBesideExe -DistDir $DistDir
+    Write-Host "==> Stage desktop from $FlutterReleaseDir"
+    New-Item -ItemType Directory -Path $hostDir -Force | Out-Null
+    Copy-Item -Path (Join-Path $FlutterReleaseDir '*') -Destination $hostDir -Recurse -Force
+} elseif (-not (Test-Path -LiteralPath (Join-Path $hostDir 'ImageLocalizationTool.exe'))) {
+    throw "No Flutter build found: $FlutterReleaseDir. Run without -SkipFlutter."
+}
+
+$sidecarDir = Join-Path $DistDir 'sidecar'
+if (Test-Path -LiteralPath $SidecarBuildDir) {
+    if (Test-Path -LiteralPath $sidecarDir) {
+        Remove-Item -LiteralPath $sidecarDir -Recurse -Force
     }
+    Write-Host "==> Stage sidecar from $SidecarBuildDir"
+    New-Item -ItemType Directory -Path $sidecarDir -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $SidecarBuildDir 'ImageLocalizationTool.exe') -Destination $sidecarDir -Force
+    Copy-Item -LiteralPath (Join-Path $SidecarBuildDir '_internal') -Destination $sidecarDir -Recurse -Force
+} elseif (-not (Test-Path -LiteralPath (Join-Path $sidecarDir 'ImageLocalizationTool.exe'))) {
+    throw "No sidecar build found: $SidecarBuildDir. Run without -SkipPyInstaller."
+}
+
+# The spec stages web/ and fonts from COLLECT. Repeat for the dist root so the
+# layout is complete even if that hook timing changes. models stay outside _internal.
+$stage = 'import sys; from pathlib import Path; root = Path(sys.argv[1]); dist = Path(sys.argv[2]); sys.path.insert(0, str(root)); from scripts.smoke_dist import stage_runtime_files; stage_runtime_files(dist, root)'
+Write-Host "==> Stage web and fonts"
+& $Python -c $stage $RepoRoot $DistDir
+if ($LASTEXITCODE -ne 0) {
+    throw "Staging web and fonts failed with exit code $LASTEXITCODE"
+}
+if ($SkipModels) {
+    $modelsDest = Join-Path $DistDir 'models'
+    if (Test-Path -LiteralPath $modelsDest) {
+        Write-Host "==> Remove models from dist"
+        Remove-Item -LiteralPath $modelsDest -Recurse -Force
+    }
+} else {
+    Copy-ModelsBesideExe -DistDir $DistDir
 }
 
 $smoke = Join-Path $RepoRoot 'scripts\smoke_dist.py'
@@ -182,5 +259,5 @@ if ($SkipInno) {
 
 Write-Host ""
 Write-Host "Windows build:" -ForegroundColor Green
-Write-Host "  $(Join-Path $DistDir 'ImageLocalizationTool.exe')"
+Write-Host "  $(Join-Path $DistDir 'desktop\ImageLocalizationTool.exe')"
 Write-Host "  $DistDir"

@@ -6,6 +6,7 @@ from pathlib import Path
 from src.utils.paths import (
     bundle_root,
     get_output_path,
+    install_root,
     project_root,
     resolve_model,
 )
@@ -26,3 +27,12 @@ class TestPaths:
         model = tmp_path / "detector.onnx"
         model.write_bytes(b"x")
         assert resolve_model("detector.onnx", override=tmp_path) == model
+
+    def test_install_root_honors_env_override(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("ILT_INSTALL_ROOT", str(tmp_path))
+        assert install_root() == tmp_path
+
+    def test_install_root_defaults_to_project(self, monkeypatch):
+        monkeypatch.delenv("ILT_INSTALL_ROOT", raising=False)
+        monkeypatch.delattr(sys, "frozen", raising=False)
+        assert install_root() == project_root()

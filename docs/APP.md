@@ -4,6 +4,8 @@
 
 Точка входа — `python -m src.app` (`src/app/__main__.py` → `src/app/desktop.py`). Команда `python src\main.py` по-прежнему гоняет пайплайн из консоли, без этого окна.
 
+Собранное приложение (026 cutover) — Flutter-хост: он запускает замороженный сайдкар `sidecar\ImageLocalizationTool.exe --api` и не использует pywebview. Разделы ниже про `python -m src.app` описывают запуск из исходников и остаются совместимыми.
+
 ## Запуск и режимы
 
 ```powershell

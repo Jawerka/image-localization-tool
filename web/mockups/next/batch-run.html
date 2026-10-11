@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>ILT v2 — Пакетный прогон</title>
+  <link rel="stylesheet" href="tokens-v2.css">
+  <link rel="stylesheet" href="shell-v2.css">
+  <link rel="stylesheet" href="components-v2.css">
+  <link rel="stylesheet" href="screen.css">
+  <script src="sprite.js"></script>
+</head>
+<body class="v2">
+  <a class="sr-only" href="index.html">К списку макетов</a>
+  <div class="app2">
+    <header class="appbar">
+      <div class="brand" title="Image Localization Tool">
+        <span class="brand__logo"><svg class="icon"><use href="#layers"></use></svg></span>
+      </div>
+      <div style="position:relative">
+        <button type="button" class="b2 b2--quiet" data-pop-btn="file-menu" aria-expanded="false">
+          <svg class="icon"><use href="#file"></use></svg>
+          Файл
+          <svg class="icon" style="width:12px;height:12px"><use href="#chevron"></use></svg>
+        </button>
+        <div class="pop" id="file-menu" hidden>
+          <button type="button" class="pop__item">Открыть файлы…<span class="kbd2">Ctrl+O</span></button>
+          <button type="button" class="pop__item">Сохранить проект<span class="kbd2">Ctrl+S</span></button>
+          <div class="pop__sep"></div>
+          <button type="button" class="pop__item">Настройки…<span class="kbd2">Ctrl+,</span></button>
+          <button type="button" class="pop__item">Выход</button>
+        </div>
+      </div>
+      <span class="appbar__sep"></span>
+      <button type="button" class="pname">
+        <svg class="icon mut2"><use href="#folder"></use></svg>
+        <span class="pname__title">Ки́рби · глава 1</span>
+        <span class="pname__meta">12 страниц</span>
+      </button>
+      <div class="appbar__spacer"></div>
+      <span class="jobpill" role="status">
+        <span class="jobpill__ring" style="--p:62"></span>
+        Пауза
+        <button type="button" class="ibtn ibtn--sm" title="Продолжить" aria-label="Продолжить">
+          <svg class="icon" style="width:12px;height:12px"><use href="#play"></use></svg>
+        </button>
+        <button type="button" class="ibtn ibtn--sm ibtn--danger jobpill__stop" title="Остановить" aria-label="Стоп">
+          <svg class="icon" style="width:12px;height:12px"><use href="#stop"></use></svg>
+        </button>
+      </span>
+      <button type="button" class="b2 b2--primary">
+        <svg class="icon"><use href="#play"></use></svg>
+        Продолжить
+      </button>
+      <button type="button" class="ibtn" title="Настройки (Ctrl+,)" aria-label="Настройки">
+        <svg class="icon"><use href="#settings"></use></svg>
+      </button>
+    </header>
+
+    <div class="main2">
+      <aside class="panel panel--left" aria-label="Прогон">
+        <div class="panel__head">
+          <span class="panel__title">Глава</span>
+          <span class="panel__spacer"></span>
+          <button type="button" class="ibtn ibtn--sm" data-toggle-panel="pages-collapsed" title="Свернуть панель" aria-label="Свернуть">
+            <svg class="icon"><use href="#panel-left"></use></svg>
+          </button>
+        </div>
+        <div class="seg2 seg2--full" style="margin:8px 10px 2px" data-tabs role="tablist" aria-label="Раздел">
+          <button type="button" class="seg2__btn grow" role="tab" style="justify-content:center" aria-selected="false" data-tab="pages">Страницы</button>
+          <button type="button" class="seg2__btn grow" role="tab" style="justify-content:center" aria-selected="true" data-tab="run">Прогон</button>
+        </div>
+
+        <div class="panel__body" data-tabpanel="run">
+          <div class="panel__scroll" style="gap:4px;display:flex;flex-direction:column">
+            <div class="group2" style="gap:9px">
+              <div class="row2">
+                <span style="font-weight:600">Пауза после 7 из 12</span>
+                <span class="grow"></span>
+                <span class="chip2 chip2--mini chip2--warn">Пауза</span>
+              </div>
+              <span class="bar"><span style="width:62%"></span></span>
+              <div class="row2 mut2" style="justify-content:space-between;font-size:11px">
+                <span>прошло 03:21</span>
+                <span>осталось ≈ 00:42</span>
+              </div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap">
+                <span class="chip2 chip2--mini"><span class="chip2__dot chip2__dot--ok"></span>готово 5</span>
+                <span class="chip2 chip2--mini"><span class="chip2__dot chip2__dot--bad"></span>ошибки 1</span>
+                <span class="chip2 chip2--mini"><span class="chip2__dot chip2__dot--warn"></span>без LLM 1</span>
+              </div>
+            </div>
+
+            <div class="field2__label" style="padding:8px 2px 2px">Главы</div>
+
+            <div class="row2" style="padding:8px 9px;border:1px solid var(--v2-line);border-radius:8px;background:var(--v2-surface-2)">
+              <span style="min-width:0">
+                <span style="font-weight:600">Глава 1 · Ки́рби</span><br>
+                <span class="mut2" style="font-size:11px">5 из 12 · ошибок 1</span>
+              </span>
+              <span class="grow"></span>
+              <span class="chip2 chip2--mini chip2--bad">1</span>
+            </div>
+            <div class="row2" style="padding:8px 9px;border:1px solid var(--v2-line);border-radius:8px">
+              <span style="min-width:0">
+                <span style="font-weight:600">Глава 2 · Мета Найт</span><br>
+                <span class="mut2" style="font-size:11px">0 из 14 · не начата</span>
+              </span>
+              <span class="grow"></span>
+              <span class="chip2 chip2--mini chip2--ghost">в очереди</span>
+            </div>
+
+            <div class="field2__label" style="padding:12px 2px 2px">Фильтр проблем</div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              <button type="button" class="b2 b2--soft b2--sm">Все</button>
+              <button type="button" class="b2 b2--primary b2--sm">Ошибки</button>
+              <button type="button" class="b2 b2--soft b2--sm">Не влезает текст</button>
+              <button type="button" class="b2 b2--soft b2--sm">Без перевода</button>
+            </div>
+
+            <div class="field2__label" style="padding:12px 2px 2px">Очередь</div>
+            <button type="button" class="prow" role="option" aria-selected="false">
+              <span class="prow__thumb" style="width:34px;height:46px"><img src="../../../test-img/test-3.jpg" alt=""><span class="prow__dot prow__dot--error"></span></span>
+              <span class="prow__body">
+                <span class="prow__line"><span class="prow__num">07</span><span class="prow__name">007.jpg</span></span>
+                <span class="prow__status prow__status--error">LLM не ответил за 300 с</span>
+              </span>
+              <span class="b2 b2--soft b2--sm" style="pointer-events:none">Повторить</span>
+            </button>
+            <button type="button" class="prow" role="option" aria-selected="false">
+              <span class="prow__thumb" style="width:34px;height:46px"><img src="../../../test-img/test-1.jpg" alt=""><span class="prow__dot prow__dot--offline"></span></span>
+              <span class="prow__body">
+                <span class="prow__line"><span class="prow__num">09</span><span class="prow__name">009.jpg</span></span>
+                <span class="prow__status prow__status--offline">Переведено Argos (офлайн)</span>
+              </span>
+            </button>
+          </div>
+        </div>
+
+        <div class="panel__body" data-tabpanel="pages" hidden>
+          <div class="panel__scroll">
+            <button type="button" class="prow" role="option" aria-selected="false">
+              <span class="prow__thumb"><img src="../../../test-img/test-1.jpg" alt=""><span class="prow__dot prow__dot--done"></span></span>
+              <span class="prow__body">
+                <span class="prow__line"><span class="prow__num">01</span><span class="prow__name">001.jpg</span></span>
+                <span class="prow__status prow__status--done">Готово</span>
+              </span>
+            </button>
+            <button type="button" class="prow is-selected" role="option" aria-selected="true">
+              <span class="prow__thumb"><img src="../../../test-img/test-2.png" alt=""><span class="prow__dot prow__dot--run"></span></span>
+              <span class="prow__body">
+                <span class="prow__line"><span class="prow__num">04</span><span class="prow__name">004.jpg</span></span>
+                <span class="prow__status prow__status--run">Очистка · 78 %</span>
+                <span class="bar"><span style="width:78%"></span></span>
+              </span>
+            </button>
+            <button type="button" class="prow" role="option" aria-selected="false">
+              <span class="prow__thumb"><img src="../../../test-img/test-3.jpg" alt=""><span class="prow__dot prow__dot--error"></span></span>
+              <span class="prow__body">
+                <span class="prow__line"><span class="prow__num">07</span><span class="prow__name">007.jpg</span></span>
+                <span class="prow__status prow__status--error">Ошибка LLM</span>
+              </span>
+            </button>
+          </div>
+        </div>
+
+        <div class="panel__foot">
+          <div class="row2">
+            <button type="button" class="b2 b2--primary grow">
+              <svg class="icon"><use href="#play"></use></svg>
+              Продолжить
+            </button>
+            <button type="button" class="b2 b2--danger" title="Остановить после текущей страницы">
+              <svg class="icon"><use href="#stop"></use></svg>
+              Стоп
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      <div class="stage2">
+        <div class="stage2__scroll">
+          <div class="sheet" style="width:432px">
+            <img src="../../../test-img/test-2.png" alt="Страница 004" width="432">
+            <div class="box2" style="left:30%;top:3%;width:24%;height:7%"><span class="box2__num">1</span></div>
+            <div class="box2 box2--sel" style="left:12%;top:46%;width:34%;height:22%"><span class="box2__num">2</span></div>
+            <div class="box2 box2--overflow" style="left:55%;top:76%;width:36%;height:18%">
+              <span class="box2__num">3</span>
+              <span class="box2__flag" style="color:var(--text-warning)">
+                <svg class="icon" style="width:10px;height:10px"><use href="#warning"></use></svg>Не влез
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div class="stage2__marks">
+          <span class="chip2"><svg class="icon" style="width:13px;height:13px"><use href="#file"></use></svg>04 · 004.jpg</span>
+          <span class="chip2 chip2--ghost">Прогон приостановлен</span>
+        </div>
+
+        <div class="stagepill">
+          <span class="jobpill__ring" style="--p:62"></span>
+          7 из 12
+          <span class="stagepill__bar"><span style="width:62%"></span></span>
+          <span class="tnum mut2">осталось ≈ 00:42</span>
+        </div>
+
+        <div class="dock">
+          <div class="dock__zoom">
+            <button type="button" class="ibtn" title="Уменьшить" aria-label="Уменьшить">
+              <svg class="icon"><use href="#minus"></use></svg>
+            </button>
+            <button type="button" class="dock__zoomvalue">Вписать</button>
+            <button type="button" class="ibtn" title="По ширине поля" aria-label="По ширине">
+              <svg class="icon"><use href="#fit-width"></use></svg>
+            </button>
+            <button type="button" class="ibtn" title="Увеличить" aria-label="Увеличить">
+              <svg class="icon"><use href="#add"></use></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <aside class="panel panel--right" aria-label="Отчёт">
+        <div class="panel__head">
+          <span class="panel__title">Отчёт прогона</span>
+          <span class="panel__spacer"></span>
+          <button type="button" class="ibtn ibtn--sm" data-toggle-panel="inspector-collapsed" title="Свернуть панель" aria-label="Свернуть">
+            <svg class="icon"><use href="#panel-right"></use></svg>
+          </button>
+        </div>
+        <div class="panel__scroll">
+          <dl class="kv2">
+            <dt>Всего страниц</dt><dd>12</dd>
+            <dt>Готово</dt><dd>5</dd>
+            <dt>Ошибки</dt><dd>1</dd>
+            <dt>Офлайн-перевод</dt><dd>1</dd>
+            <dt>Среднее время</dt><dd>6,1 с</dd>
+            <dt>Осталось</dt><dd>≈ 42 с</dd>
+          </dl>
+
+          <div class="banner2" style="margin-top:4px">
+            <svg class="icon"><use href="#warning"></use></svg>
+            <span class="banner2__text">
+              <strong>007.jpg:</strong> LLM не ответил за 300 с. Модель перезапускалась.
+              <span class="row2" style="margin-top:6px">
+                <button type="button" class="b2 b2--soft b2--sm">Повторить</button>
+                <button type="button" class="b2 b2--soft b2--sm">Открыть лог</button>
+              </span>
+            </span>
+          </div>
+
+          <div class="group2" style="margin-top:4px">
+            <span class="group2__title">Чек-лист после прогона</span>
+            <label class="choice2"><input type="checkbox" checked>Проверить страницы «Не влез»</label>
+            <label class="choice2"><input type="checkbox">Просмотреть заменённые звуки</label>
+            <label class="choice2"><input type="checkbox">Экспорт в translated/</label>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <footer class="status2">
+      <span class="status2__msg"><svg class="icon" style="color:var(--text-warning)"><use href="#pause"></use></svg>Прогон на паузе · 7 из 12</span>
+      <span class="status2__spacer"></span>
+      <span class="chip2 chip2--ghost tnum"><svg class="icon" style="width:12px;height:12px"><use href="#clock"></use></svg>03:21</span>
+      <span class="chip2 chip2--ghost"><span class="chip2__dot chip2__dot--ok"></span>LLM · qwen2-vl</span>
+      <span class="chip2 chip2--ghost"><svg class="icon" style="width:13px;height:13px"><use href="#gpu"></use></svg>RTX 3060</span>
+      <span class="status2__hint"><svg class="icon" style="width:11px;height:11px"><use href="#keyboard"></use></svg>Ctrl+Enter — продолжить</span>
+    </footer>
+  </div>
+  <script src="mock.js"></script>
+</body>
+</html>

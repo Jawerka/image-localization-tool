@@ -53,6 +53,7 @@ _HEADLESS_IDLE = (
 )
 HEADLESS_LOCAL_PORT = 8766
 SESSION_TOKEN_NAME = "session.token"
+API_READY_NAME = "api.json"
 _LINE_LIMIT = 1024 * 1024
 
 
@@ -64,6 +65,8 @@ class LaunchArgs:
     paths: list[str]
     headless: bool = False
     remote: bool = False
+    api: bool = False
+    parent_pid: int | None = None
 
 
 @dataclass(frozen=True)
@@ -75,7 +78,7 @@ class InstanceInfo:
 
 
 def parse_args(argv: list[str]) -> LaunchArgs:
-    """Пути, ``--browser``, ``--headless`` и ``--remote``."""
+    """Пути, ``--browser``, ``--headless``, ``--api`` и ``--remote``."""
     parser = argparse.ArgumentParser(prog="python -m src.app")
     parser.add_argument(
         "--browser",
@@ -86,6 +89,17 @@ def parse_args(argv: list[str]) -> LaunchArgs:
         "--headless",
         action="store_true",
         help="Без окна WebView и без локального интерфейса",
+    )
+    parser.add_argument(
+        "--api",
+        action="store_true",
+        help="Локальный HTTP API без окна (sidecar для Flutter); не пишет instance.json",
+    )
+    parser.add_argument(
+        "--parent-pid",
+        type=int,
+        default=None,
+        help="С --api: завершиться, если процесс-родитель исчез",
     )
     parser.add_argument(
         "--remote",
@@ -100,6 +114,8 @@ def parse_args(argv: list[str]) -> LaunchArgs:
         paths=[str(item) for item in parsed.paths],
         headless=bool(parsed.headless),
         remote=bool(parsed.remote),
+        api=bool(parsed.api),
+        parent_pid=parsed.parent_pid,
     )
 
 
@@ -704,6 +720,51 @@ def _write_session_token(token: str) -> Path:
     return path
 
 
+def _write_api_ready(port: int, token: str) -> Path:
+    """Машиночитаемый handshake для Flutter sidecar (port + token)."""
+    path = data_root() / API_READY_NAME
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"port": int(port), "token": str(token or "")}
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+    return path
+
+
+def _parent_alive(pid: int) -> bool:
+    """True, если процесс с ``pid`` ещё существует (Windows / POSIX)."""
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        try:
+            import ctypes
+
+            kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+            handle = kernel32.OpenProcess(0x1000, False, int(pid))  # PROCESS_QUERY_LIMITED_INFORMATION
+            if not handle:
+                return False
+            try:
+                exit_code = ctypes.c_ulong()
+                if kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)) == 0:
+                    return False
+                return int(exit_code.value) == 259  # STILL_ACTIVE
+            finally:
+                kernel32.CloseHandle(handle)
+        except Exception:
+            return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
 def _payload_remote_id(job) -> str:
     payload = job.get("payload") if isinstance(job, dict) else getattr(job, "payload", None)
     if not isinstance(payload, dict):
@@ -1128,6 +1189,50 @@ class DesktopApp:
             logger.exception("Сокет сервера не закрылся")
 
 
+def run_api(args: LaunchArgs) -> int:
+    """Локальный HTTP без окна и без instance.json — sidecar для Flutter.
+
+    Пишет ``api.json`` (port+token) и ``session.token``. Не поднимает LAN,
+    пока явно не передан ``--remote``.
+    """
+    root = data_root()
+    root.mkdir(parents=True, exist_ok=True)
+    state, httpd = _build_server(DialogBridge())
+    for warning in state.settings_warnings:
+        logger.warning("%s", warning)
+    app = DesktopApp(state, httpd, endpoint=None)
+    # Зеркало оконного режима: слушатель поднимается, если включён в настройках.
+    app.start_remote(force=args.remote)
+    ready = _write_api_ready(int(state.port), state.token)
+    _write_session_token(state.token)
+    line = json.dumps(
+        {"port": int(state.port), "token": state.token, "api_json": str(ready)},
+        ensure_ascii=False,
+    )
+    try:
+        print(line, flush=True)
+    except Exception:
+        logger.exception("Не удалось напечатать api handshake в stdout")
+    logger.info("API sidecar http://127.0.0.1:%s (%s)", state.port, ready)
+    app._start_http_thread()
+    parent_pid = args.parent_pid
+    try:
+        while not app._stopped:
+            if parent_pid is not None and not _parent_alive(parent_pid):
+                logger.info("Родитель pid=%s завершился — останавливаем sidecar", parent_pid)
+                break
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        logger.info("Остановка API sidecar")
+    finally:
+        app.shutdown()
+        try:
+            ready.unlink(missing_ok=True)
+        except OSError:
+            pass
+    return 0
+
+
 def run_headless(args: LaunchArgs) -> int:
     """Без окна. С ``--remote`` — LAN API и пайплайн, локальный UI только на 127.0.0.1.
 
@@ -1178,9 +1283,12 @@ def run_headless(args: LaunchArgs) -> int:
 def launch(argv: list[str] | None = None) -> int:
     """Первый экземпляр держит сервер. Второй отдаёт пути и выходит.
 
+    ``--api`` — sidecar HTTP без окна/instance.json.
     ``--headless`` не открывает окно. Удалённый API в этом режиме — только с ``--remote``.
     """
     args = parse_args(sys.argv[1:] if argv is None else argv)
+    if args.api:
+        return run_api(args)
     if args.headless:
         return run_headless(args)
     root = data_root()

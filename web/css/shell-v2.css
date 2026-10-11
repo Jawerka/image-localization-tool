@@ -1,0 +1,126 @@
+/* Оболочка v2 поверх живого UI: док, сцена, схлопывание панелей. */
+
+.toolbar {
+  background: var(--surface-1);
+  border-bottom-color: var(--line);
+}
+
+.workspace {
+  transition: grid-template-columns var(--dur) var(--ease);
+}
+
+body.is-pages-collapsed .workspace {
+  grid-template-columns: 0 minmax(0, 1fr) var(--inspector-w);
+}
+
+body.is-inspector-collapsed .workspace {
+  grid-template-columns: var(--pages-w) minmax(0, 1fr) 0;
+}
+
+body.is-pages-collapsed.is-inspector-collapsed .workspace {
+  grid-template-columns: 0 minmax(0, 1fr) 0;
+}
+
+body.is-pages-collapsed .pages {
+  overflow: hidden;
+  border-right-width: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+body.is-inspector-collapsed .inspector {
+  overflow: hidden;
+  border-left-width: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.pages,
+.inspector {
+  transition: opacity var(--dur) var(--ease);
+  background: var(--surface-1);
+}
+
+.pages__head,
+.inspector .tabs {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  justify-content: space-between;
+}
+
+.panel-toggle {
+  flex-shrink: 0;
+}
+
+.viewer {
+  position: relative;
+  background: var(--bg-scene);
+  background-image: radial-gradient(circle at 1px 1px, var(--line-soft) 1px, transparent 0);
+  background-size: calc(16px * var(--ui-scale)) calc(16px * var(--ui-scale));
+}
+
+.viewer:has([data-role="empty"]:not([hidden])) .viewer__bar.dock {
+  display: none;
+}
+
+.viewer__bar.dock {
+  position: absolute;
+  left: 50%;
+  bottom: calc(16px * var(--ui-scale));
+  transform: translateX(-50%);
+  z-index: 6;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--space-xs);
+  max-width: calc(100% - 24px * var(--ui-scale));
+  padding: calc(6px * var(--ui-scale)) calc(10px * var(--ui-scale));
+  border: 1px solid var(--line);
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--surface-3) 92%, transparent);
+  box-shadow: var(--shadow-dock);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line);
+}
+
+.viewer__bar.dock .btn,
+.viewer__bar.dock .zoom__value {
+  border-radius: var(--radius-full);
+}
+
+.dock__sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 2px 2px;
+  background: var(--line);
+  flex-shrink: 0;
+}
+
+.dock__pop {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px * var(--ui-scale));
+  transform: translateX(-50%);
+  min-width: calc(180px * var(--ui-scale));
+  padding: var(--space-sm);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-3);
+  box-shadow: var(--shadow-sheet);
+  z-index: 7;
+}
+
+.dock__pop[hidden] {
+  display: none !important;
+}
+
+.frame {
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-sheet);
+  border-color: var(--line);
+}
+
+.stage-host {
+  position: relative;
+}

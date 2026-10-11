@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="css/components.css">
   <link rel="stylesheet" href="css/main.css">
   <link rel="stylesheet" href="css/editor.css">
+  <link rel="stylesheet" href="css/shell-v2.css">
   <link rel="stylesheet" href="css/settings.css">
   <link rel="stylesheet" href="css/dialogs.css">
   <link rel="stylesheet" href="css/app.css">
@@ -90,7 +91,12 @@
 
     <div class="workspace">
       <nav class="pages" aria-label="Страницы">
-        <div class="pages__head">Страницы</div>
+        <div class="pages__head">
+          <span>Страницы</span>
+          <button type="button" class="btn btn-ghost btn-icon panel-toggle" data-role="toggle-pages" data-toggle-panel="is-pages-collapsed" aria-label="Скрыть список страниц" title="Скрыть список страниц">
+            <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#panel-left"></use></svg>
+          </button>
+        </div>
         <details class="batch-fold" data-role="batch-fold" hidden>
           <summary>Прогон</summary>
           <div data-role="batch-root"></div>
@@ -110,71 +116,6 @@
       </nav>
 
       <main class="viewer" id="viewer" data-role="viewer">
-        <div class="viewer__bar">
-          <div class="segmented" role="radiogroup" aria-label="Вид" data-role="view-group">
-            <button type="button" class="btn" role="radio" data-role="view-original" data-value="original" data-view-control aria-checked="true" disabled>
-              <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#original"></use></svg>
-              Оригинал
-            </button>
-            <button type="button" class="btn" role="radio" data-role="view-result" data-value="result" data-view-control aria-checked="false" tabindex="-1" disabled>
-              <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#translate"></use></svg>
-              Результат
-            </button>
-            <button type="button" class="btn" role="radio" data-role="view-compare" data-value="compare" data-view-control aria-checked="false" tabindex="-1" disabled>
-              <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#compare"></use></svg>
-              Сравнение
-            </button>
-          </div>
-          <div role="group" aria-label="Слои">
-            <button type="button" class="btn btn-ghost" data-role="layer-boxes" data-view-control aria-pressed="false" disabled>
-              <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#layers"></use></svg>
-              Рамки
-            </button>
-            <button type="button" class="btn btn-ghost" data-role="layer-mask" data-view-control aria-pressed="false" disabled>
-              <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#mask"></use></svg>
-              Маска
-            </button>
-          </div>
-          <div role="radiogroup" aria-label="Инструмент" data-role="tool-group">
-            <button type="button" class="btn btn-ghost" role="radio" data-role="tool-select" data-value="select" data-view-control aria-checked="false" tabindex="-1" disabled>
-              <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#select"></use></svg>
-              Выбор
-            </button>
-            <button type="button" class="btn btn-ghost" role="radio" data-role="tool-region" data-value="region" data-view-control aria-checked="false" tabindex="-1" disabled>
-              <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#region"></use></svg>
-              Регион
-            </button>
-            <button type="button" class="btn btn-ghost" role="radio" data-role="tool-brush" data-value="brush" data-view-control aria-checked="true" tabindex="0" disabled title="Кисть: ЛКМ — рисовать, ПКМ — ластик (B)">
-              <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#brush"></use></svg>
-              Кисть
-            </button>
-            <button type="button" class="btn btn-ghost" role="radio" data-role="tool-polyline" data-value="polyline" data-view-control aria-checked="false" tabindex="-1" disabled title="Лассо: ЛКМ — добавить, ПКМ — вычесть (P)">
-              <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#polyline"></use></svg>
-              Лассо
-            </button>
-            <button type="button" class="btn btn-ghost" role="radio" data-role="tool-hand" data-value="hand" data-view-control aria-checked="false" tabindex="-1" disabled title="Рука (H)">
-              <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#hand"></use></svg>
-              Рука
-            </button>
-          </div>
-          <label class="brush-size" for="brush-size" data-role="brush-size-label" title="Толщина кисти" hidden>Толщина
-            <input id="brush-size" data-role="brush-size" data-view-control type="range" min="1" max="64" value="12" title="Толщина кисти" disabled>
-            <span data-role="brush-size-value">12</span>
-          </label>
-          <div class="zoom" data-role="zoom">
-            <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#zoom"></use></svg>
-            <button type="button" class="btn btn-ghost btn-icon" data-role="zoom-out" data-view-control aria-label="Уменьшить" disabled>−</button>
-            <button type="button" class="zoom__value" data-role="zoom-value" data-view-control title="Вписать в окно" disabled>Вписать</button>
-            <button type="button" class="btn btn-ghost" data-role="zoom-fit-width" data-view-control title="Масштаб по ширине поля" disabled>По ширине</button>
-            <button type="button" class="btn btn-ghost btn-icon" data-role="zoom-in" data-view-control aria-label="Увеличить" disabled>+</button>
-          </div>
-          <button type="button" class="btn btn-ghost btn-icon" data-role="undo" aria-label="Отменить" title="Отменить (Ctrl+Z)" disabled>
-            <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#undo"></use></svg>
-          </button>
-          <button type="button" class="btn btn-ghost btn-icon" data-role="redo" aria-label="Повторить" title="Повторить (Ctrl+Y)" disabled>
-            <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#redo"></use></svg>
-          </button>
-        </div>
         <div class="drop-wrap" data-role="empty">
           <div class="drop" data-role="empty-drop">
             <svg class="icon icon--lg" aria-hidden="true"><use href="icons/icons.svg#folder"></use></svg>
@@ -233,6 +174,90 @@
             <svg class="icon icon--right" aria-hidden="true"><use href="icons/icons.svg#chevron"></use></svg>
           </button>
         </div>
+        <div class="viewer__bar dock" data-role="tool-dock">
+          <div class="segmented" role="radiogroup" aria-label="Вид" data-role="view-group">
+            <button type="button" class="btn" role="radio" data-role="view-original" data-value="original" data-view-control aria-checked="true" disabled>
+              <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#original"></use></svg>
+              Оригинал
+            </button>
+            <button type="button" class="btn" role="radio" data-role="view-result" data-value="result" data-view-control aria-checked="false" tabindex="-1" disabled>
+              <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#translate"></use></svg>
+              Результат
+            </button>
+            <button type="button" class="btn" role="radio" data-role="view-compare" data-value="compare" data-view-control aria-checked="false" tabindex="-1" disabled>
+              <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#compare"></use></svg>
+              Сравнение
+            </button>
+          </div>
+          <span class="dock__sep" aria-hidden="true"></span>
+          <div role="group" aria-label="Слои">
+            <button type="button" class="btn btn-ghost" data-role="layer-boxes" data-view-control aria-pressed="false" disabled>
+              <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#layers"></use></svg>
+              Рамки
+            </button>
+            <button type="button" class="btn btn-ghost" data-role="layer-mask" data-view-control aria-pressed="false" disabled>
+              <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#mask"></use></svg>
+              Маска
+            </button>
+          </div>
+          <span class="dock__sep" aria-hidden="true"></span>
+          <div role="radiogroup" aria-label="Инструмент" data-role="tool-group">
+            <button type="button" class="btn btn-ghost" role="radio" data-role="tool-select" data-value="select" data-view-control aria-checked="false" tabindex="-1" disabled>
+              <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#select"></use></svg>
+              Выбор
+            </button>
+            <button type="button" class="btn btn-ghost" role="radio" data-role="tool-region" data-value="region" data-view-control aria-checked="false" tabindex="-1" disabled>
+              <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#region"></use></svg>
+              Регион
+            </button>
+            <button type="button" class="btn btn-ghost" role="radio" data-role="tool-brush" data-value="brush" data-view-control aria-checked="true" tabindex="0" disabled title="Кисть: ЛКМ — рисовать, ПКМ — ластик (B)">
+              <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#brush"></use></svg>
+              Кисть
+            </button>
+            <button type="button" class="btn btn-ghost" role="radio" data-role="tool-polyline" data-value="polyline" data-view-control aria-checked="false" tabindex="-1" disabled title="Лассо: ЛКМ — добавить, ПКМ — вычесть (P)">
+              <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#polyline"></use></svg>
+              Лассо
+            </button>
+            <button type="button" class="btn btn-ghost" role="radio" data-role="tool-hand" data-value="hand" data-view-control aria-checked="false" tabindex="-1" disabled title="Рука (H)">
+              <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#hand"></use></svg>
+              Рука
+            </button>
+          </div>
+          <span class="dock__sep" aria-hidden="true"></span>
+          <div style="position:relative">
+            <button type="button" class="btn btn-ghost" data-role="brush-size-toggle" data-view-control data-pop-btn="brush-size-pop" aria-expanded="false" title="Толщина кисти" disabled>
+              <span data-role="brush-size-value">12</span>
+            </button>
+            <div class="dock__pop" id="brush-size-pop" hidden>
+              <label class="brush-size" for="brush-size" data-role="brush-size-label" title="Толщина кисти">Толщина
+                <input id="brush-size" data-role="brush-size" data-view-control type="range" min="1" max="64" value="12" title="Толщина кисти" disabled>
+              </label>
+            </div>
+          </div>
+          <span class="dock__sep" aria-hidden="true"></span>
+          <button type="button" class="btn btn-ghost btn-icon" data-role="undo" aria-label="Отменить" title="Отменить (Ctrl+Z)" disabled>
+            <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#undo"></use></svg>
+          </button>
+          <button type="button" class="btn btn-ghost btn-icon" data-role="redo" aria-label="Повторить" title="Повторить (Ctrl+Y)" disabled>
+            <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#redo"></use></svg>
+          </button>
+          <span class="dock__sep" aria-hidden="true"></span>
+          <div class="zoom" data-role="zoom">
+            <button type="button" class="btn btn-ghost btn-icon" data-role="zoom-out" data-view-control aria-label="Уменьшить" disabled>−</button>
+            <button type="button" class="zoom__value" data-role="zoom-value" data-view-control title="Вписать в окно" disabled>Вписать</button>
+            <button type="button" class="btn btn-ghost btn-icon" data-role="zoom-fit-width" data-view-control title="Масштаб по ширине поля" aria-label="По ширине" disabled>
+              <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#fit-width"></use></svg>
+            </button>
+            <button type="button" class="btn btn-ghost btn-icon" data-role="zoom-in" data-view-control aria-label="Увеличить" disabled>+</button>
+          </div>
+          <span class="dock__sep" aria-hidden="true"></span>
+          <button type="button" class="btn btn-ghost btn-icon panel-toggle" data-role="toggle-pages" data-toggle-panel="is-pages-collapsed" aria-label="Список страниц" title="Список страниц">
+            <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#panel-left"></use></svg>
+          </button>
+          <button type="button" class="btn btn-ghost btn-icon panel-toggle" data-role="toggle-inspector" data-toggle-panel="is-inspector-collapsed" aria-label="Инспектор" title="Инспектор">
+            <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#panel-right"></use></svg>
+          </button>
+        </div>
         <ol class="steps" data-role="steps" aria-label="Шаги обработки" hidden></ol>
       </main>
 
@@ -240,6 +265,9 @@
         <div class="tabs" role="tablist" aria-label="Инспектор">
           <button type="button" class="btn" role="tab" id="tab-text" data-tab="text" aria-selected="true" aria-controls="panel-text">Текст</button>
           <button type="button" class="btn" role="tab" id="tab-page" data-tab="page" aria-selected="false" aria-controls="panel-page" tabindex="-1">Страница</button>
+          <button type="button" class="btn btn-ghost btn-icon panel-toggle" data-role="toggle-inspector" data-toggle-panel="is-inspector-collapsed" aria-label="Скрыть инспектор" title="Скрыть инспектор">
+            <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#panel-right"></use></svg>
+          </button>
         </div>
         <div class="inspector__panel" id="panel-text" role="tabpanel" data-role="inspector-text" data-tabpanel="text" aria-labelledby="tab-text">
           <div class="inspector__bar" data-role="inspector-bar" hidden>

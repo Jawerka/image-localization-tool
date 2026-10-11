@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>ILT v2 — Состояния и токены</title>
+  <link rel="stylesheet" href="tokens-v2.css">
+  <link rel="stylesheet" href="shell-v2.css">
+  <link rel="stylesheet" href="components-v2.css">
+  <link rel="stylesheet" href="screen.css">
+  <script src="sprite.js"></script>
+</head>
+<body class="v2 is-scroll">
+  <div class="screen2" style="min-height:100%">
+    <header class="screen2__bar">
+      <span class="brand__logo" style="width:24px;height:24px"><svg class="icon"><use href="#palette"></use></svg></span>
+      <h1 class="screen2__title">Состояния и токены</h1>
+      <span class="mut2" style="font-size:11.5px">справочная страница дизайн-системы v2</span>
+      <span class="grow"></span>
+      <a class="b2 b2--soft b2--sm" href="index.html">К хабу</a>
+    </header>
+
+    <div class="doc" style="flex:1">
+
+      <section>
+        <h2>Кнопки</h2>
+        <div class="doc__grid">
+          <button type="button" class="b2 b2--primary">Основная</button>
+          <button type="button" class="b2 b2--soft">Вторичная</button>
+          <button type="button" class="b2 b2--quiet">Тихая</button>
+          <button type="button" class="b2 b2--danger">Опасная</button>
+          <button type="button" class="b2 b2--primary" disabled>Недоступна</button>
+          <button type="button" class="b2 b2--soft" disabled>Недоступна</button>
+          <button type="button" class="b2 b2--primary b2--sm">Малая</button>
+          <button type="button" class="ibtn" title="Иконочная"><svg class="icon"><use href="#settings"></use></svg></button>
+          <button type="button" class="ibtn" aria-pressed="true" title="Нажата"><svg class="icon"><use href="#layers"></use></svg></button>
+          <button type="button" class="ibtn ibtn--danger" title="Удалить"><svg class="icon"><use href="#delete"></use></svg></button>
+          <span class="split">
+            <button type="button" class="b2 b2--primary split__main">Сплит</button>
+            <button type="button" class="b2 b2--primary split__caret" aria-label="Ещё"><svg class="icon" style="width:12px;height:12px"><use href="#chevron"></use></svg></button>
+          </span>
+          <span class="seg2" data-radiogroup>
+            <button type="button" class="seg2__btn" role="radio" aria-checked="true">Вкл</button>
+            <button type="button" class="seg2__btn" role="radio" aria-checked="false">Выкл</button>
+          </span>
+        </div>
+        <h3>Фокус</h3>
+        <div class="doc__grid">
+          <button type="button" class="b2 b2--soft" style="outline:2px solid var(--v2-focus);outline-offset:2px">Кольцо фокуса: 2 px, отступ 2 px</button>
+          <span class="mut2" style="font-size:12px">Контраст кольца ≥ 3:1 к соседним поверхностям; никогда не совпадает с обычной рамкой.</span>
+        </div>
+      </section>
+
+      <section>
+        <h2>Поля ввода</h2>
+        <div class="doc__grid" style="align-items:flex-start">
+          <label class="field2" style="width:220px">
+            <span class="field2__label">Обычное</span>
+            <input class="in2" type="text" value="Текст">
+          </label>
+          <label class="field2" style="width:220px">
+            <span class="field2__label">Фокус</span>
+            <input class="in2" type="text" value="Редактирование" style="border-color:var(--v2-focus);box-shadow:0 0 0 3px color-mix(in srgb, var(--v2-focus) 25%, transparent)">
+          </label>
+          <label class="field2" style="width:220px">
+            <span class="field2__label">Подсказка</span>
+            <input class="in2" type="text" placeholder="пусто">
+          </label>
+          <label class="field2" style="width:220px">
+            <span class="field2__label">Число</span>
+            <input class="in2 in2--num" type="number" value="18">
+          </label>
+          <label class="field2" style="width:220px">
+            <span class="field2__label">Список</span>
+            <select class="sel2"><option>диалог</option><option>звук</option></select>
+          </label>
+        </div>
+        <div class="doc__grid" style="align-items:flex-start">
+          <label class="field2" style="width:320px">
+            <span class="field2__label">Многострочное</span>
+            <textarea class="ta2">Я ГОЛОДЕН!</textarea>
+          </label>
+          <div class="field2" style="width:240px">
+            <span class="field2__label">Слайдер</span>
+            <input class="range2" type="range" min="0" max="100" value="45">
+          </div>
+          <label class="sw2"><input type="checkbox" checked><span class="sw2__track"></span><span>Включено</span></label>
+          <label class="sw2"><input type="checkbox"><span class="sw2__track"></span><span>Выключено</span></label>
+          <label class="choice2"><input type="checkbox" checked>Флажок</label>
+          <label class="choice2"><input type="radio" name="doc-r" checked>Радио</label>
+        </div>
+        <h3>Радио-карточки (диалоги)</h3>
+        <div class="dialog2__slots" style="max-width:720px">
+          <label class="rcard-choice">
+            <input type="radio" name="doc-card" checked>
+            <span class="rcard-choice__title">Выбрано</span>
+            <span class="rcard-choice__hint">подсказка</span>
+          </label>
+          <label class="rcard-choice">
+            <input type="radio" name="doc-card">
+            <span class="rcard-choice__title">Обычное</span>
+            <span class="rcard-choice__hint">подсказка</span>
+          </label>
+        </div>
+      </section>
+
+      <section>
+        <h2>Чипы, пилюли, статусы</h2>
+        <div class="doc__grid">
+          <span class="chip2"><span class="chip2__dot chip2__dot--ok"></span>Онлайн</span>
+          <span class="chip2 chip2--warn"><span class="chip2__dot chip2__dot--warn"></span>Офлайн-перевод</span>
+          <span class="chip2 chip2--bad"><span class="chip2__dot chip2__dot--bad"></span>Ошибка</span>
+          <span class="chip2 chip2--ghost">Черновик</span>
+          <span class="chip2 chip2--mini chip2--ghost tnum">12</span>
+          <span class="chip2 chip2--mini chip2--ok">Готово</span>
+          <span class="chip2 chip2--mini chip2--warn">Не влез</span>
+          <span class="chip2 chip2--mini chip2--bad">Звук</span>
+        </div>
+        <div class="doc__grid">
+          <span class="jobpill"><span class="jobpill__ring" style="--p:62"></span>Перевод · 62 %
+            <button type="button" class="ibtn ibtn--sm" title="Пауза"><svg class="icon" style="width:12px;height:12px"><use href="#pause"></use></svg></button>
+            <button type="button" class="ibtn ibtn--sm ibtn--danger jobpill__stop" title="Стоп"><svg class="icon" style="width:12px;height:12px"><use href="#stop"></use></svg></button>
+          </span>
+          <span class="stagepill"><span class="jobpill__ring" style="--p:45"></span>Очистка<span class="stagepill__bar"><span style="width:45%"></span></span><span class="tnum mut2">ETA 00:42</span></span>
+          <span class="donepill">
+            <button type="button" class="donepill__grip" aria-label="Переместить"><svg class="icon" style="width:14px;height:14px"><use href="#grip"></use></svg></button>
+            <span class="donepill__text">3 правки · не применены</span>
+            <button type="button" class="donepill__apply">Готово</button>
+          </span>
+        </div>
+        <div class="doc__grid">
+          <span class="kbd2">Ctrl</span><span class="kbd2">Shift</span><span class="kbd2">Enter</span>
+          <span class="bar" style="width:160px"><span style="width:62%"></span></span>
+          <span class="bar bar--ok" style="width:160px"><span style="width:80%"></span></span>
+        </div>
+      </section>
+
+      <section>
+        <h2>Меню и поповеры</h2>
+        <div class="doc__grid" style="align-items:flex-start;gap:24px">
+          <div style="position:relative;min-height:270px">
+            <button type="button" class="b2 b2--soft" data-pop-btn="doc-pop">Файл ▾</button>
+            <div class="pop" id="doc-pop" hidden>
+              <button type="button" class="pop__item">Открыть файлы…<span class="kbd2">Ctrl+O</span></button>
+              <button type="button" class="pop__item">Сохранить проект<span class="kbd2">Ctrl+S</span></button>
+              <div class="pop__sep"></div>
+              <button type="button" class="pop__item">Экспорт…<span class="kbd2">Ctrl+E</span></button>
+              <button type="button" class="pop__item" disabled>Закрыть проект</button>
+            </div>
+          </div>
+          <div style="position:relative;min-height:270px">
+            <button type="button" class="b2 b2--soft" data-pop-btn="doc-pop2">Поповер с формой ▾</button>
+            <div class="pop pop--wide" id="doc-pop2" hidden>
+              <div class="pop__title">Область перевода</div>
+              <div class="seg2" style="margin:2px 7px 7px" data-radiogroup>
+                <button type="button" class="seg2__btn" role="radio" aria-checked="true">Страница</button>
+                <button type="button" class="seg2__btn" role="radio" aria-checked="false">Всё</button>
+              </div>
+              <div class="pop__sep"></div>
+              <div class="pop__form">
+                <label class="field2"><span class="field2__label">Язык</span>
+                  <select class="sel2"><option selected>ru — Русский</option><option>en — English</option></select>
+                </label>
+              </div>
+            </div>
+          </div>
+          <span class="mut2" style="font-size:12px;max-width:280px">Меню закрывается по Esc и клику вне; стрелки — навигация (в живом UI). Тень только у поповеров, у панелей — нет.</span>
+        </div>
+      </section>
+
+      <section>
+        <h2>Строки страниц</h2>
+        <div class="doc__grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr))">
+          <div style="padding:8px">
+            <button type="button" class="prow" role="option" aria-selected="false">
+              <span class="prow__thumb"><img src="../../../test-img/test-1.jpg" alt=""><span class="prow__dot prow__dot--run"></span></span>
+              <span class="prow__body">
+                <span class="prow__line"><span class="prow__num">01</span><span class="prow__name">001.jpg</span></span>
+                <span class="prow__status prow__status--run">Распознавание · 45 %</span>
+                <span class="bar"><span style="width:45%"></span></span>
+              </span>
+            </button>
+          </div>
+          <div style="padding:8px">
+            <button type="button" class="prow is-selected" role="option" aria-selected="true">
+              <span class="prow__thumb"><img src="../../../test-img/test-1.jpg" alt=""><span class="prow__dot prow__dot--edit"></span></span>
+              <span class="prow__body">
+                <span class="prow__line"><span class="prow__num">06</span><span class="prow__name">006.jpg</span></span>
+                <span class="prow__status">Есть правки · 3</span>
+              </span>
+              <span class="prow__menu"><svg class="icon"><use href="#more-h"></use></svg></span>
+            </button>
+          </div>
+          <div style="padding:8px">
+            <button type="button" class="prow" role="option" aria-selected="false">
+              <span class="prow__thumb"><img src="../../../test-img/test-1.jpg" alt=""><span class="prow__dot prow__dot--error"></span></span>
+              <span class="prow__body">
+                <span class="prow__line"><span class="prow__num">07</span><span class="prow__name">007.jpg</span></span>
+                <span class="prow__status prow__status--error">Ошибка перевода</span>
+              </span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Карточки регионов</h2>
+        <div class="doc__grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));align-items:start">
+          <article class="rcard">
+            <div class="rcard__head">
+              <span class="rcard__num">1</span>
+              <span class="rcard__title">IT'S KIRBY'S STOMACH.</span>
+              <span class="chip2 chip2--mini chip2--ok">Готово</span>
+            </div>
+            <p class="rcard__preview">ЭТО ЖЕ ЖЕЛУДОК КИРБИ. · диалог · Поппи</p>
+          </article>
+          <article class="rcard is-selected">
+            <div class="rcard__head">
+              <span class="rcard__num">3</span>
+              <span class="rcard__title">Выбранный</span>
+              <span class="chip2 chip2--mini chip2--ghost">диалог</span>
+            </div>
+            <label class="field2">
+              <span class="field2__label">Перевод</span>
+              <textarea class="ta2">Я ГОЛОДЕН!</textarea>
+            </label>
+          </article>
+          <article class="rcard rcard--skip">
+            <div class="rcard__head">
+              <span class="rcard__num">2</span>
+              <span class="rcard__title">GROWL GROWL</span>
+              <span class="chip2 chip2--mini chip2--ghost">Пропущен</span>
+            </div>
+            <p class="rcard__preview">Звук, не переводится</p>
+          </article>
+          <article class="rcard rcard--overflow">
+            <div class="rcard__head">
+              <span class="rcard__num">4</span>
+              <span class="rcard__title">SHOOT! KNOWING KIRBY…</span>
+              <span class="chip2 chip2--mini chip2--warn"><svg class="icon" style="width:10px;height:10px"><use href="#warning"></use></svg>Не влез</span>
+            </div>
+            <div class="rcard__acts">
+              <button type="button" class="b2 b2--soft b2--sm"><svg class="icon"><use href="#compress"></use></svg>Сократить</button>
+              <button type="button" class="b2 b2--soft b2--sm">Разбить на 2</button>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <h2>Рамки на канвасе</h2>
+        <div class="doc__grid" style="background:var(--v2-bg-scene)">
+          <div style="position:relative;width:340px;height:200px;background:#fff;border-radius:6px">
+            <div class="box2" style="left:8%;top:8%;width:36%;height:22%"><span class="box2__num">1</span></div>
+            <div class="box2 box2--skip" style="left:52%;top:8%;width:36%;height:22%"><span class="box2__num">2</span><span class="box2__flag">Пропущен</span></div>
+            <div class="box2 box2--sel" style="left:8%;top:40%;width:40%;height:26%">
+              <span class="box2__num">3</span>
+              <span class="box2__handle box2__handle--nw"></span><span class="box2__handle box2__handle--ne"></span>
+              <span class="box2__handle box2__handle--se"></span><span class="box2__handle box2__handle--sw"></span>
+              <span class="box2__rotate"></span>
+            </div>
+            <div class="box2 box2--overflow" style="left:56%;top:40%;width:36%;height:26%"><span class="box2__num">4</span><span class="box2__flag" style="color:var(--text-warning)">Не влез</span></div>
+            <div class="box2 box2--sfx" style="left:8%;top:76%;width:36%;height:16%"><span class="box2__num">5</span><span class="box2__flag" style="color:var(--danger)">Звук</span></div>
+          </div>
+          <span class="mut2" style="font-size:12px;max-width:260px">Обычная · пропущенная · выбранная (ручки 8×8) · переполнение · звук. Номера — 18 px, читаются на любом фоне благодаря обводке.</span>
+        </div>
+      </section>
+
+      <section>
+        <h2>Док</h2>
+        <div class="doc__grid" style="position:relative;height:80px;place-items:center;background:var(--v2-bg-scene)">
+          <div class="dock" style="position:absolute">
+            <div class="seg2" style="border:0;background:transparent;padding:0" data-radiogroup>
+              <button type="button" class="ibtn" role="radio" aria-checked="false" title="Оригинал"><svg class="icon"><use href="#original"></use></svg></button>
+              <button type="button" class="ibtn" role="radio" aria-checked="false" title="Результат"><svg class="icon"><use href="#translate"></use></svg></button>
+              <button type="button" class="ibtn" role="radio" aria-checked="true" title="Сравнение"><svg class="icon"><use href="#compare"></use></svg></button>
+            </div>
+            <span class="dock__sep"></span>
+            <button type="button" class="ibtn" aria-pressed="true" title="Рамки"><svg class="icon"><use href="#layers"></use></svg></button>
+            <button type="button" class="ibtn" aria-pressed="false" title="Маска"><svg class="icon"><use href="#mask"></use></svg></button>
+            <span class="dock__sep"></span>
+            <button type="button" class="ibtn" title="Кисть"><svg class="icon"><use href="#brush"></use></svg></button>
+            <span class="dock__size" title="Толщина"><svg class="icon"><use href="#brush"></use></svg><span class="tnum" style="font-size:12px">12</span></span>
+            <span class="dock__sep"></span>
+            <button type="button" class="ibtn" title="Отменить"><svg class="icon"><use href="#undo"></use></svg></button>
+            <span class="dock__sep"></span>
+            <div class="dock__zoom">
+              <button type="button" class="ibtn" aria-label="Уменьшить"><svg class="icon"><use href="#minus"></use></svg></button>
+              <button type="button" class="dock__zoomvalue">Вписать</button>
+              <button type="button" class="ibtn" aria-label="Увеличить"><svg class="icon"><use href="#add"></use></svg></button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Токены</h2>
+        <h3>Поверхности</h3>
+        <div class="doc__table">
+          <div class="doc__row"><code>--v2-bg-app</code><span style="display:flex;align-items:center;gap:10px"><span style="width:22px;height:22px;border-radius:6px;background:var(--v2-bg-app);border:1px solid var(--v2-line)"></span>фон приложения</span></div>
+          <div class="doc__row"><code>--v2-bg-scene</code><span style="display:flex;align-items:center;gap:10px"><span style="width:22px;height:22px;border-radius:6px;background:var(--v2-bg-scene);border:1px solid var(--v2-line)"></span>сцена канваса + сетка точек 22 px</span></div>
+          <div class="doc__row"><code>--v2-surface-1</code><span style="display:flex;align-items:center;gap:10px"><span style="width:22px;height:22px;border-radius:6px;background:var(--v2-surface-1);border:1px solid var(--v2-line)"></span>бары и панели</span></div>
+          <div class="doc__row"><code>--v2-surface-2</code><span style="display:flex;align-items:center;gap:10px"><span style="width:22px;height:22px;border-radius:6px;background:var(--v2-surface-2);border:1px solid var(--v2-line)"></span>карточки, контролы, чипы</span></div>
+          <div class="doc__row"><code>--v2-surface-3</code><span style="display:flex;align-items:center;gap:10px"><span style="width:22px;height:22px;border-radius:6px;background:var(--v2-surface-3);border:1px solid var(--v2-line)"></span>поповеры, док, плавающее</span></div>
+        </div>
+        <h3>Радиусы, движение, тени</h3>
+        <div class="doc__table">
+          <div class="doc__row"><code>radius</code><span>4 (мелочи) · 6 (контролы) · 8 (поповеры) · 12 (док, диалоги) · pill</span></div>
+          <div class="doc__row"><code>motion</code><span>140 ms база · 200 ms слои · cubic-bezier(.2,.75,.25,1); reduced-motion выключает</span></div>
+          <div class="doc__row"><code>elevation</code><span>тени только у плавающих: sheet / popover / modal / dock</span></div>
+          <div class="doc__row"><code>states</code><span>hover 5,5 % · active 9,5 % · selected — primary 18/30 %. Никаких новых цветов</span></div>
+        </div>
+        <h3>Типографика</h3>
+        <div class="doc__table">
+          <div class="doc__row"><code>20 / 600</code><span style="font-size:20px;font-weight:600">Заголовок экрана</span></div>
+          <div class="doc__row"><code>15–16 / 600</code><span style="font-size:15px;font-weight:600">Заголовок диалога и секции</span></div>
+          <div class="doc__row"><code>13 / 400</code><span>Базовый текст интерфейса</span></div>
+          <div class="doc__row"><code>12 / 400</code><span style="font-size:12px">Подсказки, статусы</span></div>
+          <div class="doc__row"><code>11 / 600 caps</code><span style="font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--text-muted)">микро-заголовки панелей</span></div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Доступность</h2>
+        <ul class="doc__check">
+          <li><svg class="icon"><use href="#check"></use></svg>Контраст: текст ≥ 4,5:1, элементы управления ≥ 3:1 (проверено на ключевых парах палитры).</li>
+          <li><svg class="icon"><use href="#check"></use></svg>Цели клика ≥ 24×24 px (WCAG 2.5.8); кнопки 30–32 px, строки списка — 56 px.</li>
+          <li><svg class="icon"><use href="#check"></use></svg>Фокус-кольцо 2 px с отступом 2 px, отдельный токен — не путается с рамками.</li>
+          <li><svg class="icon"><use href="#check"></use></svg>Drag-действия имеют альтернативы: перестановка страниц — пункты «выше/ниже» в контекстном меню; шторка — стрелки при фокусе (WCAG 2.5.7).</li>
+          <li><svg class="icon"><use href="#check"></use></svg>Роли ARIA: listbox страниц, tablist инспектора, radiogroup дока, role=status у пилюль прогресса.</li>
+          <li><svg class="icon"><use href="#check"></use></svg>prefers-reduced-motion отключает переходы; forced-colors — нативный фокус.</li>
+          <li><svg class="icon"><use href="#check"></use></svg>Плавающие слои не перекрывают фокус: пилюля правок сдвигается, поповеры закрываются по Esc.</li>
+        </ul>
+      </section>
+
+    </div>
+  </div>
+  <script src="mock.js"></script>
+</body>
+</html>

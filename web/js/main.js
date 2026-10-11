@@ -75,6 +75,7 @@ import {
   visualStatus,
   whenSaved,
 } from "./state.js";
+import { initShellChrome } from "./shell_chrome.js";
 import {
   cancelPolylineDraft,
   applyEditorSession,
@@ -99,6 +100,7 @@ function icon(id) {
 }
 
 function start() {
+  initShellChrome();
   initPages(onPageCommand, { beforeLeavePage: resolveDeferredOrAbort });
   initViewer();
   initApplyChip({ onCommit: () => commitDeferredEdits() });

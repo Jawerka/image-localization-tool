@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>ILT v2 — Экспорт</title>
+  <link rel="stylesheet" href="tokens-v2.css">
+  <link rel="stylesheet" href="shell-v2.css">
+  <link rel="stylesheet" href="components-v2.css">
+  <link rel="stylesheet" href="screen.css">
+  <script src="sprite.js"></script>
+</head>
+<body class="v2">
+  <div class="app2">
+    <header class="appbar" aria-hidden="true">
+      <div class="brand"><span class="brand__logo"><svg class="icon"><use href="#layers"></use></svg></span></div>
+      <span class="pname"><span class="pname__title">Ки́рби · глава 1</span></span>
+      <span class="appbar__spacer"></span>
+      <span class="chip2 mut2">Экспорт…</span>
+    </header>
+    <div class="main2">
+      <div class="stage2">
+        <div class="stage2__scroll">
+          <div class="sheet" style="width:432px">
+            <img src="../../../test-img/test-1.jpg" alt="" width="432">
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="scrim">
+    <div class="dialog2" role="dialog" aria-modal="true" aria-labelledby="export-title">
+      <div class="dialog2__head">
+        <h2 id="export-title">Экспорт</h2>
+        <span class="grow"></span>
+        <button type="button" class="ibtn" title="Закрыть (Esc)" aria-label="Закрыть">
+          <svg class="icon"><use href="#close"></use></svg>
+        </button>
+      </div>
+      <p class="dialog2__lead">Готовые страницы сохраняются в подпапку рядом с оригиналами.</p>
+      <div class="dialog2__body">
+
+        <div class="field2">
+          <span class="field2__label">Какие страницы</span>
+          <div class="dialog2__slots">
+            <label class="rcard-choice">
+              <input type="radio" name="which2">
+              <span class="rcard-choice__title">Все</span>
+              <span class="rcard-choice__hint">12 страниц</span>
+            </label>
+            <label class="rcard-choice">
+              <input type="radio" name="which2" checked>
+              <span class="rcard-choice__title">Только готовые</span>
+              <span class="rcard-choice__hint">8 страниц</span>
+            </label>
+            <label class="rcard-choice">
+              <input type="radio" name="which2">
+              <span class="rcard-choice__title">Выбранные</span>
+              <span class="rcard-choice__hint">2 страницы</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="field2">
+          <span class="field2__label">Папка</span>
+          <div class="row2">
+            <input class="in2 grow" type="text" value="D:\Манга\Ки́рби\translated" readonly>
+            <button type="button" class="b2 b2--soft">
+              <svg class="icon"><use href="#folder"></use></svg>
+              Обзор…
+            </button>
+          </div>
+        </div>
+
+        <div class="rcard__grid" style="grid-template-columns:1fr 1.4fr">
+          <div class="field2">
+            <span class="field2__label">Формат</span>
+            <div class="seg2" data-radiogroup>
+              <button type="button" class="seg2__btn" role="radio" aria-checked="true">PNG</button>
+              <button type="button" class="seg2__btn" role="radio" aria-checked="false">JPG</button>
+            </div>
+          </div>
+          <div class="field2">
+            <span class="field2__label">Качество JPG</span>
+            <div class="row2" style="height:30px">
+              <input class="range2 grow" type="range" min="1" max="100" value="90" disabled>
+              <span class="tnum mut2">90</span>
+            </div>
+          </div>
+        </div>
+
+        <label class="field2">
+          <span class="field2__label">Совпадение имён</span>
+          <select class="sel2">
+            <option>Перезаписать</option>
+            <option selected>Добавить номер (имя-2.jpg)</option>
+            <option>Пропустить</option>
+          </select>
+        </label>
+
+        <label class="sw2">
+          <input type="checkbox" checked>
+          <span class="sw2__track"></span>
+          <span>Открыть папку после экспорта</span>
+        </label>
+
+        <div class="row2" style="padding:10px 12px;border:1px solid var(--v2-line);border-radius:8px;background:var(--v2-surface-2)">
+          <svg class="icon mut2"><use href="#info"></use></svg>
+          <span class="mut2" style="font-size:12px">8 страниц · PNG · ~24 МБ · конфликты: добавление номера</span>
+        </div>
+      </div>
+      <div class="dialog2__foot">
+        <span class="grow"></span>
+        <button type="button" class="b2 b2--soft">Отмена</button>
+        <button type="button" class="b2 b2--primary">
+          <svg class="icon"><use href="#export"></use></svg>
+          Экспорт 8 страниц
+        </button>
+      </div>
+    </div>
+  </div>
+  <script src="mock.js"></script>
+</body>
+</html>

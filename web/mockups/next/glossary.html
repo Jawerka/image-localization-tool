@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>ILT v2 — Глоссарий</title>
+  <link rel="stylesheet" href="tokens-v2.css">
+  <link rel="stylesheet" href="shell-v2.css">
+  <link rel="stylesheet" href="components-v2.css">
+  <link rel="stylesheet" href="screen.css">
+  <script src="sprite.js"></script>
+</head>
+<body class="v2">
+  <div class="screen2">
+    <header class="screen2__bar">
+      <span class="brand__logo" style="width:24px;height:24px"><svg class="icon"><use href="#type"></use></svg></span>
+      <h1 class="screen2__title">Глоссарий</h1>
+      <span class="chip2 chip2--mini chip2--ghost tnum">38 записей</span>
+      <span class="mut2" style="font-size:11.5px">единый для всей серии · подставляется в промпт LLM</span>
+      <span class="grow"></span>
+      <input class="in2" style="width:240px" type="search" placeholder="Поиск: имя, термин…">
+      <button type="button" class="ibtn" aria-label="Закрыть"><svg class="icon"><use href="#close"></use></svg></button>
+    </header>
+
+    <div class="screen2__body">
+      <div class="setbody" style="padding:0;display:flex;flex-direction:column">
+        <div style="flex:1;overflow:auto">
+          <table class="gloss2">
+            <thead>
+              <tr>
+                <th style="width:26%">Оригинал</th>
+                <th style="width:26%">Перевод</th>
+                <th style="width:14%">Род / тип</th>
+                <th>Заметка на серию</th>
+                <th style="width:90px"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Kirby</td>
+                <td>Кирби</td>
+                <td>м</td>
+                <td class="mut2">Главный герой, всегда «Кирби»</td>
+                <td><button type="button" class="ibtn ibtn--sm" aria-label="Изменить"><svg class="icon"><use href="#type"></use></svg></button><button type="button" class="ibtn ibtn--sm ibtn--danger" aria-label="Удалить"><svg class="icon"><use href="#delete"></use></svg></button></td>
+              </tr>
+              <tr>
+                <td>King Dedede</td>
+                <td>Король Дидиди</td>
+                <td>м</td>
+                <td class="mut2">Не переводить «king» как «король» в репликах врагов</td>
+                <td><button type="button" class="ibtn ibtn--sm" aria-label="Изменить"><svg class="icon"><use href="#type"></use></svg></button><button type="button" class="ibtn ibtn--sm ibtn--danger" aria-label="Удалить"><svg class="icon"><use href="#delete"></use></svg></button></td>
+              </tr>
+              <tr style="background:var(--v2-selected)">
+                <td><input class="in2" type="text" value="Meta Knight"></td>
+                <td><input class="in2" type="text" value="Мета Найт"></td>
+                <td>
+                  <select class="sel2">
+                    <option selected>м</option>
+                    <option>ж</option>
+                    <option>ср</option>
+                    <option>—</option>
+                  </select>
+                </td>
+                <td><input class="in2" type="text" value="Всегда с артиклем «сэр»? Нет — просто «Мета Найт»"></td>
+                <td>
+                  <button type="button" class="b2 b2--primary b2--sm">ОК</button>
+                </td>
+              </tr>
+              <tr>
+                <td>Warp Star</td>
+                <td>Варп-звезда</td>
+                <td>ж</td>
+                <td class="mut2">Транспорт, не «звезда деформации»</td>
+                <td><button type="button" class="ibtn ibtn--sm" aria-label="Изменить"><svg class="icon"><use href="#type"></use></svg></button><button type="button" class="ibtn ibtn--sm ibtn--danger" aria-label="Удалить"><svg class="icon"><use href="#delete"></use></svg></button></td>
+              </tr>
+              <tr>
+                <td>Maxim Tomato</td>
+                <td>Макси-помидор</td>
+                <td>м</td>
+                <td class="mut2">Восстанавливает здоровье, не «томат»</td>
+                <td><button type="button" class="ibtn ibtn--sm" aria-label="Изменить"><svg class="icon"><use href="#type"></use></svg></button><button type="button" class="ibtn ibtn--sm ibtn--danger" aria-label="Удалить"><svg class="icon"><use href="#delete"></use></svg></button></td>
+              </tr>
+              <tr>
+                <td>Popopo</td>
+                <td>Попопо</td>
+                <td>—</td>
+                <td class="mut2">Dream Land называть «Страна снов», не «Земля снов»</td>
+                <td><button type="button" class="ibtn ibtn--sm" aria-label="Изменить"><svg class="icon"><use href="#type"></use></svg></button><button type="button" class="ibtn ibtn--sm ibtn--danger" aria-label="Удалить"><svg class="icon"><use href="#delete"></use></svg></button></td>
+              </tr>
+              <tr>
+                <td>Waddle Dee</td>
+                <td>Вэддл Ди</td>
+                <td>м</td>
+                <td class="mut2">Множественное — «вэддлы», разговорно</td>
+                <td><button type="button" class="ibtn ibtn--sm" aria-label="Изменить"><svg class="icon"><use href="#type"></use></svg></button><button type="button" class="ibtn ibtn--sm ibtn--danger" aria-label="Удалить"><svg class="icon"><use href="#delete"></use></svg></button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="screen2__foot" style="border-top:1px solid var(--v2-line)">
+          <button type="button" class="b2 b2--soft b2--sm"><svg class="icon"><use href="#add"></use></svg>Добавить строку</button>
+          <span class="mut2" style="font-size:11px">Совпадения не зависят от регистра. Пустая заметка не отправляется в промпт.</span>
+          <span class="grow"></span>
+          <button type="button" class="b2 b2--soft b2--sm"><svg class="icon"><use href="#download"></use></svg>Импорт…</button>
+          <button type="button" class="b2 b2--soft b2--sm"><svg class="icon"><use href="#export"></use></svg>Экспорт…</button>
+          <button type="button" class="b2 b2--primary b2--sm">Готово</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="mock.js"></script>
+</body>
+</html>

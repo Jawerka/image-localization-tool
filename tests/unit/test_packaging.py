@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 from scripts.smoke_dist import (
+    EXE_NAME,
     dist_problems,
     drop_cuda_entries,
     expected_font_names,
@@ -126,6 +127,8 @@ def test_spec_does_not_exclude_torch():
 def test_spec_is_windowed_onedir_for_src_package():
     text = SPEC.read_text(encoding="utf-8")
     assert 'app_name = "ImageLocalizationTool"' in text
+    assert 'sidecar_name = "ilt_sidecar"' in text
+    assert "name=sidecar_name" in text
     assert 'project_dir / "src" / "app" / "__main__.py"' in text
     assert "pathex=[str(project_dir)]" in text
     assert "console=False" in text
@@ -143,15 +146,33 @@ def test_spec_is_windowed_onedir_for_src_package():
     assert all("models" not in segment for segment in datas_segments)
 
 
-def test_installer_is_per_user_and_installs_webview2():
+def test_installer_targets_flutter_host_without_webview2():
     text = ISS.read_text(encoding="utf-8")
     assert "PrivilegesRequired=lowest" in text
-    assert "WebView2" in text
-    assert "MicrosoftEdgeWebview2Setup.exe" in text
+    # Cutover: оболочка рендерится Flutter, WebView2 не нужен.
+    assert "WebView2" not in text
+    assert "MicrosoftEdgeWebview2Setup.exe" not in text
     assert "/DAppVersion" in text or "AppVersion" in text
     assert "#ifndef AppVersion" in text
-    assert "ImageLocalizationTool.exe" in text
+    assert "desktop\\ImageLocalizationTool.exe" in text
+    # Апгрейд поверх pywebview-раскладки: старый exe и _internal убираются.
+    assert "[InstallDelete]" in text
+    assert "{app}\\_internal" in text
     assert "{#DistDir}\\*" in text
+
+
+def _fake_dist(tmp_path: Path) -> Path:
+    """Минимальная раскладка cutover: desktop/ + sidecar/ + web/."""
+    dist = tmp_path / "ImageLocalizationTool"
+    host = dist / "desktop"
+    host.mkdir(parents=True)
+    (host / EXE_NAME).write_bytes(b"MZ")
+    (host / "flutter_windows.dll").write_bytes(b"MZ")
+    (host / "data" / "flutter_assets").mkdir(parents=True)
+    sidecar = dist / "sidecar"
+    (sidecar / "_internal").mkdir(parents=True)
+    (sidecar / EXE_NAME).write_bytes(b"MZ")
+    return dist
 
 
 def test_stage_puts_web_and_fonts_beside_exe_without_models(tmp_path):
@@ -168,10 +189,7 @@ def test_stage_puts_web_and_fonts_beside_exe_without_models(tmp_path):
     (source / "models").mkdir()
     (source / "models" / "big.bin").write_bytes(b"m")
 
-    dist = tmp_path / "ImageLocalizationTool"
-    dist.mkdir()
-    (dist / "_internal").mkdir()
-    (dist / "ImageLocalizationTool.exe").write_bytes(b"MZ")
+    dist = _fake_dist(tmp_path)
     stage_runtime_files(dist, source)
 
     assert (dist / "web" / "index.html").is_file()
@@ -189,9 +207,7 @@ def test_stage_puts_web_and_fonts_beside_exe_without_models(tmp_path):
 
 def test_dist_problems_require_shipped_fonts(tmp_path):
     names = expected_font_names()
-    dist = tmp_path / "ImageLocalizationTool"
-    (dist / "_internal").mkdir(parents=True)
-    (dist / "ImageLocalizationTool.exe").write_bytes(b"MZ")
+    dist = _fake_dist(tmp_path)
     web = dist / "web"
     web.mkdir()
     (web / "index.html").write_text("<html></html>", encoding="utf-8")
@@ -200,6 +216,16 @@ def test_dist_problems_require_shipped_fonts(tmp_path):
         assert any(name in item for name in names for item in problems)
     else:
         assert problems == []
+
+
+def test_dist_problems_flags_missing_layout_parts(tmp_path):
+    dist = tmp_path / "ImageLocalizationTool"
+    dist.mkdir()
+    problems = dist_problems(dist)
+    assert any("нет хоста" in item for item in problems)
+    assert any("нет сайдкара" in item for item in problems)
+    assert any("нет каталога _internal" in item for item in problems)
+    assert any("нет web/index.html" in item for item in problems)
 
 
 def test_missing_dist_exits_2_without_traceback(tmp_path):

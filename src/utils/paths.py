@@ -1,5 +1,6 @@
 """Утилиты для работы с путями."""
 
+import os
 import sys
 from pathlib import Path
 
@@ -18,7 +19,14 @@ def bundle_root() -> Path:
 
 
 def install_root() -> Path:
-    """Папка с exe в сборке или корень репозитория."""
+    """Папка с exe в сборке или корень репозитория.
+
+    ``ILT_INSTALL_ROOT`` задаёт корень явно: Flutter-хост ставит его сайдкару,
+    который лежит в ``sidecar\\``, а модели, шрифты и ``web`` — в корне установки.
+    """
+    override = os.environ.get("ILT_INSTALL_ROOT", "").strip()
+    if override:
+        return Path(override)
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
     return project_root()

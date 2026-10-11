@@ -41,9 +41,9 @@ if ($Build) {
     }
 }
 
-$builtExe = Join-Path $DistDir $ExeName
+$builtExe = Join-Path $DistDir "desktop\$ExeName"
 if (-not (Test-Path -LiteralPath $builtExe)) {
-    throw "Dist exe not found: $builtExe. Run with -Build or build first."
+    throw "Dist host exe not found: $builtExe. Run with -Build or build first."
 }
 
 if (-not (Test-Path -LiteralPath $Dest)) {
@@ -70,9 +70,13 @@ if ($code -ge 8) {
     throw "robocopy failed with exit code $code"
 }
 
-$destExe = Join-Path $Dest $ExeName
+$destExe = Join-Path $Dest 'desktop\ImageLocalizationTool.exe'
 if (-not (Test-Path -LiteralPath $destExe)) {
     throw "Deploy incomplete: missing $destExe"
+}
+$destSidecar = Join-Path $Dest 'sidecar\ImageLocalizationTool.exe'
+if (-not (Test-Path -LiteralPath $destSidecar)) {
+    throw "Deploy incomplete: missing $destSidecar"
 }
 $destWeb = Join-Path $Dest 'web'
 if (-not (Test-Path -LiteralPath $destWeb)) {

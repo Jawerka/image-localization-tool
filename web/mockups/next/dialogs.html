@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>ILT v2 — Диалоги</title>
+  <link rel="stylesheet" href="tokens-v2.css">
+  <link rel="stylesheet" href="shell-v2.css">
+  <link rel="stylesheet" href="components-v2.css">
+  <link rel="stylesheet" href="screen.css">
+  <script src="sprite.js"></script>
+</head>
+<body class="v2 is-scroll">
+  <div class="screen2" style="min-height:100%">
+    <header class="screen2__bar">
+      <span class="brand__logo" style="width:24px;height:24px"><svg class="icon"><use href="#info"></use></svg></span>
+      <h1 class="screen2__title">Диалоги и оверлеи</h1>
+      <span class="grow"></span>
+      <a class="b2 b2--soft b2--sm" href="index.html">К хабу</a>
+    </header>
+
+    <div class="gallery" style="flex:1">
+      <div class="gallery__row" style="grid-template-columns:1fr">
+
+        <span class="demo-label">Горячие клавиши · F1 — поиск и группы</span>
+        <div class="demo-box" style="width:100%;max-width:1020px;margin:0 auto">
+          <div class="dialog2 dialog2--wide" role="dialog" aria-labelledby="hotkeys-title">
+            <div class="dialog2__head">
+              <h2 id="hotkeys-title">Горячие клавиши</h2>
+              <span class="grow"></span>
+              <input class="in2" style="width:220px" type="search" placeholder="Поиск по действию…">
+              <button type="button" class="ibtn" aria-label="Закрыть"><svg class="icon"><use href="#close"></use></svg></button>
+            </div>
+            <div class="dialog2__body" style="gap:10px">
+              <div class="field2__label">Канвас</div>
+              <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px 18px">
+                <span class="row2" style="justify-content:space-between"><span class="mut2" style="font-size:12px">Масштаб</span><span class="row2" style="gap:4px"><span class="kbd2">Ctrl</span><span class="kbd2">колесо</span></span></span>
+                <span class="row2" style="justify-content:space-between"><span class="mut2" style="font-size:12px">Прокрутка</span><span class="row2" style="gap:4px"><span class="kbd2">Пробел</span><span class="kbd2">ЛКМ</span></span></span>
+                <span class="row2" style="justify-content:space-between"><span class="mut2" style="font-size:12px">Вписать</span><span class="kbd2">Ctrl+0</span></span>
+                <span class="row2" style="justify-content:space-between"><span class="mut2" style="font-size:12px">100 %</span><span class="kbd2">Ctrl+1</span></span>
+                <span class="row2" style="justify-content:space-between"><span class="mut2" style="font-size:12px">Кисть / ластик</span><span class="kbd2">B</span></span>
+                <span class="row2" style="justify-content:space-between"><span class="mut2" style="font-size:12px">Лассо</span><span class="kbd2">P</span></span>
+                <span class="row2" style="justify-content:space-between"><span class="mut2" style="font-size:12px">Перевод региона</span><span class="kbd2">Enter</span></span>
+                <span class="row2" style="justify-content:space-between"><span class="mut2" style="font-size:12px">Сдвиг рамки</span><span class="kbd2">↑↓←→</span></span>
+                <span class="row2" style="justify-content:space-between"><span class="mut2" style="font-size:12px">Проблемная страница</span><span class="kbd2">N</span></span>
+              </div>
+              <div class="field2__label">Файл и проект</div>
+              <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px 18px">
+                <span class="row2" style="justify-content:space-between"><span class="mut2" style="font-size:12px">Открыть файлы</span><span class="kbd2">Ctrl+O</span></span>
+                <span class="row2" style="justify-content:space-between"><span class="mut2" style="font-size:12px">Сохранить проект</span><span class="kbd2">Ctrl+S</span></span>
+                <span class="row2" style="justify-content:space-between"><span class="mut2" style="font-size:12px">Экспорт</span><span class="kbd2">Ctrl+E</span></span>
+                <span class="row2" style="justify-content:space-between"><span class="mut2" style="font-size:12px">Перевести страницу</span><span class="kbd2">Ctrl+Enter</span></span>
+                <span class="row2" style="justify-content:space-between"><span class="mut2" style="font-size:12px">Перевести всё</span><span class="kbd2">Ctrl+Shift+Enter</span></span>
+                <span class="row2" style="justify-content:space-between"><span class="mut2" style="font-size:12px">Быстрые команды</span><span class="kbd2">Ctrl+K</span></span>
+              </div>
+              <span class="mut2" style="font-size:11px">Однобуквенные клавиши не срабатывают в полях ввода и отключаются в настройках.</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="gallery__row">
+          <div>
+            <span class="demo-label">Подтверждение · закрытие во время прогона</span>
+            <div class="demo-box">
+              <div class="dialog2" role="dialog" aria-labelledby="confirm-title">
+                <div class="dialog2__head">
+                  <h2 id="confirm-title">Закрыть приложение?</h2>
+                </div>
+                <p class="dialog2__lead">Идёт обработка: страница 4 из 12. Незавершённые страницы останутся в очереди.</p>
+                <div class="dialog2__body">
+                  <div class="banner2">
+                    <svg class="icon"><use href="#warning"></use></svg>
+                    <span class="banner2__text">Прогон остановится на текущем шаге. Уже готовые страницы сохранятся.</span>
+                  </div>
+                  <label class="sw2">
+                    <input type="checkbox">
+                    <span class="sw2__track"></span>
+                    <span>Дождаться окончания и закрыть автоматически</span>
+                  </label>
+                </div>
+                <div class="dialog2__foot">
+                  <span class="grow"></span>
+                  <button type="button" class="b2 b2--soft">Отмена</button>
+                  <button type="button" class="b2 b2--soft">Свернуть в трей</button>
+                  <button type="button" class="b2 b2--danger">Выйти сейчас</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <span class="demo-label">Выбор модели · только vision-модели</span>
+            <div class="demo-box">
+              <div class="dialog2" role="dialog" aria-labelledby="model-title">
+                <div class="dialog2__head">
+                  <h2 id="model-title">Выбор модели</h2>
+                  <span class="grow"></span>
+                  <button type="button" class="ibtn" aria-label="Обновить"><svg class="icon"><use href="#refresh"></use></svg></button>
+                  <button type="button" class="ibtn" aria-label="Закрыть"><svg class="icon"><use href="#close"></use></svg></button>
+                </div>
+                <p class="dialog2__lead">Для распознавания страницы модель должна принимать картинки.</p>
+                <div class="dialog2__body">
+                  <label class="rcard-choice">
+                    <input type="radio" name="model2" checked>
+                    <span class="row2"><span class="rcard-choice__title">qwen2-vl-7b-instruct</span><span class="chip2 chip2--mini chip2--ok">vision</span></span>
+                    <span class="rcard-choice__hint">24,7 ГБ · 8192 контекст · быстрая на RTX 3060</span>
+                  </label>
+                  <label class="rcard-choice">
+                    <input type="radio" name="model2">
+                    <span class="row2"><span class="rcard-choice__title">llava-1.6-mistral-7b</span><span class="chip2 chip2--mini chip2--ok">vision</span></span>
+                    <span class="rcard-choice__hint">13,1 ГБ · хуже разметка CJK</span>
+                  </label>
+                  <label class="rcard-choice">
+                    <input type="radio" name="model2">
+                    <span class="row2"><span class="rcard-choice__title">deepseek-r1-8b</span><span class="chip2 chip2--mini chip2--warn">без картинок</span></span>
+                    <span class="rcard-choice__hint">9,1 ГБ · для перевода текста, не для OCR</span>
+                  </label>
+                </div>
+                <div class="dialog2__foot">
+                  <span class="grow"></span>
+                  <button type="button" class="b2 b2--soft">Отмена</button>
+                  <button type="button" class="b2 b2--primary">Выбрать</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <span class="demo-label">Ошибка воркера · предложение логов</span>
+            <div class="demo-box">
+              <div class="dialog2" role="dialog" aria-labelledby="worker-title">
+                <div class="dialog2__head">
+                  <h2 id="worker-title">Не удалось запустить обработку</h2>
+                </div>
+                <div class="dialog2__body">
+                  <div class="banner2" style="border-color:color-mix(in srgb, var(--danger) 45%, var(--v2-line));background:color-mix(in srgb, var(--danger) 10%, var(--v2-surface-1))">
+                    <svg class="icon" style="color:var(--text-error)"><use href="#error"></use></svg>
+                    <span class="banner2__text">Воркер перезапускался чаще трёх раз в минуту и остановлен. Причина: не найдена модель LaMa.</span>
+                  </div>
+                  <dl class="kv2">
+                    <dt>Последний запуск</dt><dd>сегодня, 14:32</dd>
+                    <dt>Лог</dt><dd>%LOCALAPPDATA%\ImageLocalizationTool\logs\app.log</dd>
+                  </dl>
+                </div>
+                <div class="dialog2__foot">
+                  <span class="grow"></span>
+                  <button type="button" class="b2 b2--soft">Перезапустить воркер</button>
+                  <button type="button" class="b2 b2--primary"><svg class="icon"><use href="#file"></use></svg>Открыть лог</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="mock.js"></script>
+</body>
+</html>

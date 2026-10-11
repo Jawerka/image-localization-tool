@@ -1,8 +1,9 @@
-"""Проверка каталога onedir и чтение версии приложения.
+"""Проверка раскладки dist и чтение версии приложения.
 
-Версия живёт только в ``src/app/__init__.py``. Её читают spec, скрипт сборки
-и эта проверка. Модели сюда не копируются: их кладёт ``scripts/build-windows.ps1``
-рядом с exe уже после PyInstaller.
+Раскладка cutover: ``desktop/`` — Flutter-хост, ``sidecar/`` — PyInstaller
+(``_internal``), ``web/`` и ``fonts/`` — в корне, ``models/`` — по опции.
+Версия живёт только в ``src/app/__init__.py``. Модели кладёт
+``scripts/build-windows.ps1`` в корень раскладки уже после сборки.
 
 Запуск:
     python scripts/smoke_dist.py
@@ -18,6 +19,8 @@ from pathlib import Path
 
 EXE_NAME = "ImageLocalizationTool.exe"
 DIST_DIR_NAME = "ImageLocalizationTool"
+HOST_DIR_NAME = "desktop"
+SIDECAR_DIR_NAME = "sidecar"
 _FONT_SUFFIXES = {".otf", ".ttf", ".ttc"}
 _SKIP_WEB_NAMES = {"mockups", "__pycache__"}
 _VERSION_RE = re.compile(
@@ -85,8 +88,8 @@ def drop_cuda_entries(entries):
 
 
 def torch_lib_problems(dist: Path) -> list[str]:
-    """Проверка обязательных DLL PyTorch в onedir."""
-    lib = Path(dist) / "_internal" / "torch" / "lib"
+    """Проверка обязательных DLL PyTorch в сайдкаре."""
+    lib = Path(dist) / SIDECAR_DIR_NAME / "_internal" / "torch" / "lib"
     if not lib.is_dir():
         return [f"нет каталога torch/lib: {lib}"]
     problems: list[str] = []
@@ -175,10 +178,18 @@ def dist_problems(dist: Path, source_root: Path | None = None) -> list[str]:
     root = Path(source_root) if source_root is not None else repo_root()
     dist = Path(dist)
     problems: list[str] = []
-    exe = dist / EXE_NAME
-    if not exe.is_file():
-        problems.append(f"нет exe: {exe}")
-    internal = dist / "_internal"
+    host_dir = dist / HOST_DIR_NAME
+    host_exe = host_dir / EXE_NAME
+    if not host_exe.is_file():
+        problems.append(f"нет хоста: {host_exe}")
+    if not (host_dir / "flutter_windows.dll").is_file():
+        problems.append(f"нет рантайма Flutter: {host_dir / 'flutter_windows.dll'}")
+    if not (host_dir / "data" / "flutter_assets").is_dir():
+        problems.append(f"нет ассетов Flutter: {host_dir / 'data' / 'flutter_assets'}")
+    sidecar_exe = dist / SIDECAR_DIR_NAME / EXE_NAME
+    if not sidecar_exe.is_file():
+        problems.append(f"нет сайдкара: {sidecar_exe}")
+    internal = dist / SIDECAR_DIR_NAME / "_internal"
     if not internal.is_dir():
         problems.append(f"нет каталога _internal: {internal}")
     index = dist / "web" / "index.html"

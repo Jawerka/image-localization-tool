@@ -28,7 +28,7 @@ flowchart LR
 ## Требования
 
 - Python **3.10–3.13** (на 3.14 возможны проблемы с `torch`).
-- Windows 10/11 для окна (нужен [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)).
+- Windows 10/11. Собранное приложение использует Flutter-хост; окно из исходников (`python -m src.app`) требует [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/).
 - Опционально: GPU с CUDA для LaMa и ускорения.
 - OpenAI-совместимый сервер с **vision**-моделью для OCR (VLM). Без него пайплайн уходит на RapidOCR + Argos.
 
@@ -114,6 +114,9 @@ python scripts\eval_pipeline.py --images path\to\pages
 
 ## Окно приложения
 
+Поставляемое приложение (026 cutover) — Flutter-хост, он сам запускает
+замороженный Python-сайдкар. Из исходников те же экраны поднимаются так:
+
 ```powershell
 python -m src.app
 python -m src.app --browser
@@ -158,7 +161,7 @@ python scripts\build-extension.py
 Версия задаётся в `src/app/__init__.py` (`__version__`).
 
 ```powershell
-# Нужны: venv с зависимостями, PyInstaller, Inno Setup 6 (для установщика)
+# Нужны: venv с зависимостями, PyInstaller, Flutter >= 3.47.7, Inno Setup 6 (для установщика)
 .\scripts\build-windows.ps1
 .\scripts\build-windows.ps1 -SkipInno
 .\scripts\build-windows.ps1 -SkipPyInstaller
@@ -166,8 +169,8 @@ python scripts\build-extension.py
 
 Результат:
 
-- `dist\ImageLocalizationTool\` — onedir: exe, `web\`, `fonts\`, рядом копируются `models\` если они есть.
-- Установщик: `dist\ImageLocalizationTool-<version>-windows-x64-setup.exe` (ставит WebView2 при необходимости).
+- `dist\ImageLocalizationTool\` — `desktop\` (Flutter-хост), `sidecar\` (Python), `web\`, `fonts\`, рядом копируются `models\` если они есть.
+- Установщик: `dist\ImageLocalizationTool-<version>-windows-x64-setup.exe`.
 
 Проверка каталога сборки: `python scripts\smoke_dist.py`.
 

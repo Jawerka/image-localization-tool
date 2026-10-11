@@ -57,6 +57,16 @@ def test_clamp_limits():
     assert settings.recent_projects == [str(index) for index in range(10)]
 
 
+def test_dock_position_normalizes():
+    assert AppSettings().dock_position == "bottom"
+    assert AppSettings(dock_position="top").dock_position == "top"
+    assert AppSettings(dock_position="TOP").dock_position == "top"
+    assert AppSettings(dock_position="side").dock_position == "bottom"
+    assert AppSettings(dock_position="top").to_dict()["dock_position"] == "top"
+    assert AppSettings.from_dict({"dock_position": "top"}).dock_position == "top"
+    assert AppSettings.from_dict({"dock_position": 3}).dock_position == "bottom"
+
+
 def test_missing_file_and_empty_llm_url(tmp_path):
     settings, warnings = AppSettings.load(tmp_path / "missing.json")
     assert warnings == []
@@ -195,6 +205,15 @@ def test_paths_override_does_not_create_directories(tmp_path):
         assert data_root() == root
         assert settings_path(split) == roaming / "settings.json"
     assert data_root() != root
+
+
+def test_data_dir_env_override(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.app.paths.install_root", lambda: tmp_path)
+    monkeypatch.setenv("ILT_DATA_DIR", str(tmp_path / "custom"))
+    assert is_portable() is True
+    assert data_root() == tmp_path / "custom"
+    assert settings_path() == tmp_path / "custom" / "settings.json"
+    assert not (tmp_path / "custom").exists()
 
 
 def test_portable_and_platform_fallbacks(tmp_path, monkeypatch):

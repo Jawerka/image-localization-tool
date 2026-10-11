@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>ILT v2 — Настройки</title>
+  <link rel="stylesheet" href="tokens-v2.css">
+  <link rel="stylesheet" href="shell-v2.css">
+  <link rel="stylesheet" href="components-v2.css">
+  <link rel="stylesheet" href="screen.css">
+  <script src="sprite.js"></script>
+</head>
+<body class="v2">
+  <div class="screen2">
+    <header class="screen2__bar">
+      <span class="brand__logo" style="width:24px;height:24px"><svg class="icon"><use href="#settings"></use></svg></span>
+      <h1 class="screen2__title">Настройки</h1>
+      <span class="mut2" style="font-size:11.5px">черновик · изменения видны сразу</span>
+      <span class="grow"></span>
+      <button type="button" class="ibtn" title="Закрыть (Esc)" aria-label="Закрыть">
+        <svg class="icon"><use href="#close"></use></svg>
+      </button>
+    </header>
+
+    <div class="screen2__body">
+      <nav class="setnav" role="tablist" aria-orientation="vertical" aria-label="Разделы настроек" data-tabs>
+        <button type="button" class="setnav__item" role="tab" aria-selected="true" data-tab="appearance">
+          <svg class="icon"><use href="#palette"></use></svg>Внешний вид
+        </button>
+        <button type="button" class="setnav__item" role="tab" aria-selected="false" data-tab="translation">
+          <svg class="icon"><use href="#translate"></use></svg>Перевод
+        </button>
+        <button type="button" class="setnav__item" role="tab" aria-selected="false" data-tab="llm">
+          <svg class="icon"><use href="#llm"></use></svg>Сервер LLM
+        </button>
+        <button type="button" class="setnav__item" role="tab" aria-selected="false" data-tab="processing">
+          <svg class="icon"><use href="#sliders"></use></svg>Обработка
+        </button>
+        <button type="button" class="setnav__item" role="tab" aria-selected="false" data-tab="typeset">
+          <svg class="icon"><use href="#type"></use></svg>Вёрстка
+        </button>
+        <button type="button" class="setnav__item" role="tab" aria-selected="false" data-tab="export">
+          <svg class="icon"><use href="#export"></use></svg>Экспорт
+        </button>
+        <button type="button" class="setnav__item" role="tab" aria-selected="false" data-tab="models">
+          <svg class="icon"><use href="#download"></use></svg>Модели
+        </button>
+        <button type="button" class="setnav__item" role="tab" aria-selected="false" data-tab="network">
+          <svg class="icon"><use href="#globe"></use></svg>Сеть
+        </button>
+        <button type="button" class="setnav__item" role="tab" aria-selected="false" data-tab="about">
+          <svg class="icon"><use href="#info"></use></svg>О программе
+        </button>
+      </nav>
+
+      <div class="setbody">
+        <div class="setcard" data-tabpanel="appearance">
+          <h2>Внешний вид</h2>
+          <p class="setcard__lead">Окно обновляется сразу, чтобы сравнить варианты до нажатия «ОК».</p>
+
+          <div class="group2">
+            <span class="group2__title">Тема</span>
+            <div class="dialog2__slots">
+              <label class="rcard-choice">
+                <input type="radio" name="theme2" checked>
+                <span class="rcard-choice__title">Тёмная</span>
+                <span class="rcard-choice__hint">Для работы вечером</span>
+              </label>
+              <label class="rcard-choice">
+                <input type="radio" name="theme2">
+                <span class="rcard-choice__title">Светлая</span>
+                <span class="rcard-choice__hint">Контраст днём</span>
+              </label>
+              <label class="rcard-choice">
+                <input type="radio" name="theme2">
+                <span class="rcard-choice__title">Как в системе</span>
+                <span class="rcard-choice__hint">Следует за Windows</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="group2">
+            <span class="group2__title">Масштаб интерфейса</span>
+            <div class="row2">
+              <input class="range2 grow" type="range" min="100" max="150" step="5" value="125">
+              <span class="tnum" style="width:44px;text-align:right;font-weight:600">125 %</span>
+            </div>
+            <span class="mut2" style="font-size:11px">От 100 до 150 %. Влияет на панели, канвас не масштабируется.</span>
+          </div>
+
+          <div class="group2">
+            <span class="group2__title">Клавиатура</span>
+            <label class="sw2">
+              <input type="checkbox" checked>
+              <span class="sw2__track"></span>
+              <span>Однобуквенные клавиши <span class="mut2">(V, R, B, P, H, M, L, 1–3)</span></span>
+            </label>
+            <label class="sw2">
+              <input type="checkbox">
+              <span class="sw2__track"></span>
+              <span>Ctrl+K — быстрые команды</span>
+            </label>
+          </div>
+
+          <div class="group2">
+            <span class="group2__title">Канвас</span>
+            <label class="sw2">
+              <input type="checkbox" checked>
+              <span class="sw2__track"></span>
+              <span>Показывать сетку точек на сцене</span>
+            </label>
+            <label class="sw2">
+              <input type="checkbox">
+              <span class="sw2__track"></span>
+              <span>Подписи кнопок в доке (для новых пользователей)</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="setcard" data-tabpanel="translation" hidden>
+          <h2>Перевод</h2>
+          <p class="setcard__lead">Куда переводить и как обращаться со звуками. Исходный язык определяется сам.</p>
+          <div class="group2">
+            <label class="field2">
+              <span class="field2__label">Язык перевода</span>
+              <select class="sel2">
+                <option selected>ru — Русский</option>
+                <option>en — English</option>
+                <option>uk — Українська</option>
+              </select>
+            </label>
+            <label class="field2">
+              <span class="field2__label">Порядок чтения</span>
+              <select class="sel2">
+                <option selected>Авто</option>
+                <option>Слева направо</option>
+                <option>Справа налево</option>
+              </select>
+            </label>
+          </div>
+          <div class="group2">
+            <span class="group2__title">Звуковые эффекты</span>
+            <label class="choice2"><input type="radio" name="sfx2" checked>Не трогать звуки</label>
+            <label class="choice2"><input type="radio" name="sfx2">Заменять текст в звуках</label>
+          </div>
+          <div class="group2">
+            <label class="field2">
+              <span class="field2__label">Глоссарий по умолчанию</span>
+              <input class="in2" type="text" value="" placeholder="путь к файлу (иначе — редактор внутри)">
+            </label>
+            <span class="mut2" style="font-size:11px">Имена серии правятся в разделе «Глоссарий». Здесь — запасной файл.</span>
+          </div>
+        </div>
+
+        <div class="setcard" data-tabpanel="llm" hidden>
+          <h2>Сервер LLM</h2>
+          <p class="setcard__lead">Свой OpenAI-совместимый сервер: LM Studio, llama.cpp или Ollama. Пусто — офлайн RapidOCR и Argos.</p>
+          <div class="group2">
+            <label class="field2">
+              <span class="field2__label">Адрес</span>
+              <input class="in2" type="url" value="http://127.0.0.1:1234/v1">
+            </label>
+            <label class="field2">
+              <span class="field2__label">Модель</span>
+              <div class="row2">
+                <input class="in2 grow" type="text" value="qwen2-vl-7b-instruct">
+                <button type="button" class="b2 b2--soft">Список…</button>
+              </div>
+            </label>
+            <label class="field2">
+              <span class="field2__label">Ключ API</span>
+              <div class="row2">
+                <input class="in2 grow" type="password" value="••••••••" readonly>
+                <button type="button" class="b2 b2--soft">Задать…</button>
+              </div>
+            </label>
+            <span class="mut2" style="font-size:11px"><svg class="icon" style="display:inline-block;vertical-align:-3px;width:13px;height:13px"><use href="#info"></use></svg> Хранится в диспетчере учётных данных Windows, не в JSON.</span>
+          </div>
+          <div class="row2">
+            <button type="button" class="b2 b2--soft">
+              <svg class="icon"><use href="#refresh"></use></svg>
+              Проверить
+            </button>
+            <span class="chip2 chip2--mini chip2--ok"><span class="chip2__dot chip2__dot--ok"></span>Модель принимает картинки</span>
+          </div>
+        </div>
+
+        <div class="setcard" data-tabpanel="processing" hidden>
+          <h2>Обработка</h2>
+          <p class="setcard__lead">Чем читать текст, переводить и зачищать баллон.</p>
+          <div class="group2">
+            <label class="field2"><span class="field2__label">Распознавание</span>
+              <select class="sel2"><option selected>VLM</option><option>RapidOCR</option></select>
+            </label>
+            <label class="field2"><span class="field2__label">Перевод</span>
+              <select class="sel2"><option selected>LLM</option><option>Argos</option></select>
+            </label>
+            <label class="field2"><span class="field2__label">Очистка</span>
+              <select class="sel2"><option selected>LaMa</option><option>Заливка (OpenCV)</option></select>
+            </label>
+            <label class="field2"><span class="field2__label">Устройство</span>
+              <select class="sel2"><option selected>Авто</option><option>GPU</option><option>CPU</option></select>
+            </label>
+            <label class="field2"><span class="field2__label">Порог детектора</span>
+              <input class="in2 in2--num" type="number" value="0.3" step="0.05" min="0.05" max="0.95">
+            </label>
+          </div>
+        </div>
+
+        <div class="setcard" data-tabpanel="typeset" hidden>
+          <h2>Вёрстка</h2>
+          <p class="setcard__lead">Кегль ищется между минимумом и максимумом, если у региона не задан свой.</p>
+          <div class="group2">
+            <div class="rcard__grid">
+              <label class="field2"><span class="field2__label">Минимальный кегль</span><input class="in2 in2--num" type="number" value="10"></label>
+              <label class="field2"><span class="field2__label">Максимальный кегль</span><input class="in2 in2--num" type="number" value="128"></label>
+            </div>
+            <label class="field2"><span class="field2__label">Ореол, доля кегля</span><input class="in2 in2--num" type="number" value="0.08" step="0.01"></label>
+            <label class="field2"><span class="field2__label">Запас от края баллона</span><input class="in2 in2--num" type="number" value="0.08" step="0.01"></label>
+            <label class="field2"><span class="field2__label">Шрифт по умолчанию</span>
+              <select class="sel2"><option selected>Heroika</option><option>FirstTimeWriting</option><option>Без замены</option></select>
+            </label>
+          </div>
+        </div>
+
+        <div class="setcard" data-tabpanel="export" hidden>
+          <h2>Экспорт</h2>
+          <p class="setcard__lead">Значения по умолчанию для диалога экспорта.</p>
+          <div class="group2">
+            <label class="field2"><span class="field2__label">Подпапка</span><input class="in2" type="text" value="translated"></label>
+            <div class="rcard__grid">
+              <label class="field2"><span class="field2__label">Формат</span>
+                <select class="sel2"><option selected>PNG</option><option>JPG</option></select>
+              </label>
+              <label class="field2"><span class="field2__label">Качество JPG</span><input class="in2 in2--num" type="number" value="90"></label>
+            </div>
+            <label class="field2"><span class="field2__label">Совпадение имён</span>
+              <select class="sel2"><option>Перезаписать</option><option>Добавить номер</option><option selected>Пропустить</option></select>
+            </label>
+          </div>
+        </div>
+
+        <div class="setcard" data-tabpanel="models" hidden>
+          <h2>Модели</h2>
+          <p class="setcard__lead">Файлы проверяются при запуске; недостающие скачиваются в папку models.</p>
+          <div class="col2">
+            <div class="modelrow">
+              <svg class="icon icon--20" style="color:var(--text-success)"><use href="#check"></use></svg>
+              <span><span class="modelrow__name">Детектор (RT-DETR)</span><br><span class="modelrow__meta">168 МБ · на диске</span></span>
+              <span class="grow"></span>
+              <span class="chip2 chip2--mini chip2--ok">Готово</span>
+            </div>
+            <div class="modelrow">
+              <svg class="icon icon--20" style="color:var(--text-success)"><use href="#check"></use></svg>
+              <span><span class="modelrow__name">LaMa (очистка)</span><br><span class="modelrow__meta">205 МБ · на диске</span></span>
+              <span class="grow"></span>
+              <span class="chip2 chip2--mini chip2--ok">Готово</span>
+            </div>
+            <div class="modelrow">
+              <svg class="icon icon--20 mut2"><use href="#download"></use></svg>
+              <span><span class="modelrow__name">Argos ru←en</span><br><span class="modelrow__meta">96 МБ · загрузка 45 %</span></span>
+              <span class="grow"></span>
+              <span class="bar" style="width:120px"><span style="width:45%"></span></span>
+            </div>
+          </div>
+          <div class="row2">
+            <button type="button" class="b2 b2--primary">Скачать недостающие</button>
+            <button type="button" class="b2 b2--soft">
+              <svg class="icon"><use href="#folder"></use></svg>Открыть папку моделей
+            </button>
+          </div>
+        </div>
+
+        <div class="setcard" data-tabpanel="network" hidden>
+          <h2>Доступ по сети</h2>
+          <p class="setcard__lead">Страницы открываются в браузере соседнего устройства в локальной сети.</p>
+          <div class="group2">
+            <label class="sw2">
+              <input type="checkbox" checked>
+              <span class="sw2__track"></span>
+              <span>Разрешить доступ в локальной сети</span>
+            </label>
+            <div class="rcard__grid">
+              <label class="field2"><span class="field2__label">Адрес</span><input class="in2" type="text" value="0.0.0.0"></label>
+              <label class="field2"><span class="field2__label">Порт</span><input class="in2 in2--num" type="number" value="8741"></label>
+            </div>
+            <span class="row2"><span class="chip2 chip2--mini chip2--ok"><span class="chip2__dot chip2__dot--ok"></span>слушает 192.168.88.42:8741</span></span>
+          </div>
+          <div class="banner2">
+            <svg class="icon"><use href="#warning"></use></svg>
+            <span class="banner2__text">Брандмауэр Windows может блокировать порт, пока для программы не разрешены входящие в частной сети. Передача — по HTTP без шифрования.</span>
+          </div>
+        </div>
+
+        <div class="setcard" data-tabpanel="about" hidden>
+          <h2>О программе</h2>
+          <p class="setcard__lead">Image Localization Tool, пайплайн v2.</p>
+          <div class="group2">
+            <dl class="kv2">
+              <dt>Версия</dt><dd>1.2.0</dd>
+              <dt>Настройки</dt><dd>%APPDATA%\ImageLocalizationTool\settings.json</dd>
+              <dt>Данные и лог</dt><dd>%LOCALAPPDATA%\ImageLocalizationTool\</dd>
+            </dl>
+          </div>
+          <div class="row2">
+            <button type="button" class="b2 b2--soft"><svg class="icon"><use href="#file"></use></svg>Открыть лог</button>
+            <button type="button" class="b2 b2--soft"><svg class="icon"><use href="#folder"></use></svg>Открыть папку данных</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <footer class="screen2__foot">
+      <button type="button" class="b2 b2--quiet">Сбросить к значениям по умолчанию</button>
+      <span class="spacer grow"></span>
+      <button type="button" class="b2 b2--soft">Применить</button>
+      <button type="button" class="b2 b2--soft">Отмена</button>
+      <button type="button" class="b2 b2--primary">ОК</button>
+    </footer>
+  </div>
+  <script src="mock.js"></script>
+</body>
+</html>

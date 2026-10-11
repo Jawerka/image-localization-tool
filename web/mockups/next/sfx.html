@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>ILT v2 — Звуки</title>
+  <link rel="stylesheet" href="tokens-v2.css">
+  <link rel="stylesheet" href="shell-v2.css">
+  <link rel="stylesheet" href="components-v2.css">
+  <link rel="stylesheet" href="screen.css">
+  <script src="sprite.js"></script>
+</head>
+<body class="v2">
+  <a class="sr-only" href="index.html">К списку макетов</a>
+  <div class="app2">
+    <header class="appbar">
+      <div class="brand"><span class="brand__logo"><svg class="icon"><use href="#layers"></use></svg></span></div>
+      <div style="position:relative">
+        <button type="button" class="b2 b2--quiet" data-pop-btn="file-menu" aria-expanded="false">
+          <svg class="icon"><use href="#file"></use></svg>Файл
+          <svg class="icon" style="width:12px;height:12px"><use href="#chevron"></use></svg>
+        </button>
+        <div class="pop" id="file-menu" hidden>
+          <button type="button" class="pop__item">Открыть файлы…<span class="kbd2">Ctrl+O</span></button>
+          <button type="button" class="pop__item">Экспорт…<span class="kbd2">Ctrl+E</span></button>
+        </div>
+      </div>
+      <span class="appbar__sep"></span>
+      <button type="button" class="pname">
+        <svg class="icon mut2"><use href="#folder"></use></svg>
+        <span class="pname__title">Ки́рби · глава 1</span>
+      </button>
+      <div class="appbar__spacer"></div>
+      <div style="position:relative">
+        <button type="button" class="chip2" data-pop-btn="sfx-menu" aria-expanded="false" title="Режим звуков">
+          <svg class="icon" style="width:13px;height:13px"><use href="#warning"></use></svg>
+          Звуки: <strong>заменять</strong>
+          <svg class="icon mut2" style="width:11px;height:11px"><use href="#chevron"></use></svg>
+        </button>
+        <div class="pop pop--right" id="sfx-menu" hidden>
+          <div class="pop__title">Звуковые эффекты</div>
+          <div class="pop__form">
+            <label class="choice2"><input type="radio" name="sfxmode">Не трогать — оставить как в оригинале</label>
+            <label class="choice2"><input type="radio" name="sfxmode" checked>Заменять — подобрать стиль и перевести</label>
+          </div>
+          <div class="pop__sep"></div>
+          <button type="button" class="pop__item"><svg class="icon mut2"><use href="#settings"></use></svg>Настроить порог уверенности…</button>
+        </div>
+      </div>
+      <button type="button" class="b2 b2--primary"><svg class="icon"><use href="#translate"></use></svg>Перевести</button>
+      <button type="button" class="b2 b2--soft"><svg class="icon"><use href="#export"></use></svg>Экспорт</button>
+      <button type="button" class="ibtn" aria-label="Настройки"><svg class="icon"><use href="#settings"></use></svg></button>
+    </header>
+
+    <div class="main2">
+      <aside class="panel panel--left" aria-label="Страницы">
+        <div class="panel__head">
+          <span class="panel__title">Страницы</span>
+          <span class="panel__spacer"></span>
+          <button type="button" class="ibtn ibtn--sm" data-toggle-panel="pages-collapsed" aria-label="Свернуть"><svg class="icon"><use href="#panel-left"></use></svg></button>
+        </div>
+        <div class="panel__scroll">
+          <button type="button" class="prow is-selected" role="option" aria-selected="true">
+            <span class="prow__thumb"><img src="../../../test-img/test-1.jpg" alt=""><span class="prow__dot prow__dot--edit"></span></span>
+            <span class="prow__body">
+              <span class="prow__line"><span class="prow__num">06</span><span class="prow__name">006.jpg</span></span>
+              <span class="prow__status">Есть правки · 2</span>
+            </span>
+          </button>
+          <button type="button" class="prow" role="option" aria-selected="false">
+            <span class="prow__thumb"><img src="../../../test-img/test-3.jpg" alt=""><span class="prow__dot prow__dot--offline"></span></span>
+            <span class="prow__body">
+              <span class="prow__line"><span class="prow__num">05</span><span class="prow__name">005.jpg</span></span>
+              <span class="prow__status prow__status--offline">Офлайн · без LLM</span>
+            </span>
+          </button>
+        </div>
+      </aside>
+
+      <div class="stage2">
+        <div class="stage2__scroll">
+          <div class="sheet" style="width:432px">
+            <img src="../../../test-img/test-1.jpg" alt="Страница 006" width="432">
+            <div class="box2 box2--sel box2--sfx" style="left:12%;top:80%;width:26%;height:11%">
+              <span class="box2__num">5</span>
+              <span class="box2__flag" style="color:var(--danger)">Звук · заменить</span>
+            </div>
+          </div>
+        </div>
+        <div class="stage2__marks">
+          <span class="chip2"><svg class="icon" style="width:13px;height:13px"><use href="#file"></use></svg>06 · 006.jpg</span>
+          <span class="chip2 chip2--bad"><span class="chip2__dot chip2__dot--bad"></span>Звук: GRRRRR</span>
+        </div>
+        <div class="dock">
+          <div class="seg2" style="border:0;background:transparent;padding:0" data-radiogroup aria-label="Вид">
+            <button type="button" class="ibtn" role="radio" aria-checked="false" title="Оригинал (1)"><svg class="icon"><use href="#original"></use></svg></button>
+            <button type="button" class="ibtn" role="radio" aria-checked="true" title="Результат (2)"><svg class="icon"><use href="#translate"></use></svg></button>
+            <button type="button" class="ibtn" role="radio" aria-checked="false" title="Сравнение (3)"><svg class="icon"><use href="#compare"></use></svg></button>
+          </div>
+          <span class="dock__sep"></span>
+          <button type="button" class="ibtn" aria-pressed="true" title="Слой рамок (L)"><svg class="icon"><use href="#layers"></use></svg></button>
+          <span class="dock__sep"></span>
+          <button type="button" class="ibtn" role="radio" aria-checked="true" title="Выбор (V)"><svg class="icon"><use href="#select"></use></svg></button>
+          <button type="button" class="ibtn" role="radio" aria-checked="false" title="Кисть (B)"><svg class="icon"><use href="#brush"></use></svg></button>
+          <span class="dock__sep"></span>
+          <button type="button" class="ibtn" title="Отменить (Ctrl+Z)"><svg class="icon"><use href="#undo"></use></svg></button>
+          <button type="button" class="ibtn" disabled title="Повторить (Ctrl+Y)"><svg class="icon"><use href="#redo"></use></svg></button>
+          <span class="dock__sep"></span>
+          <div class="dock__zoom">
+            <button type="button" class="ibtn" aria-label="Уменьшить"><svg class="icon"><use href="#minus"></use></svg></button>
+            <button type="button" class="dock__zoomvalue">Вписать</button>
+            <button type="button" class="ibtn" aria-label="Увеличить"><svg class="icon"><use href="#add"></use></svg></button>
+          </div>
+        </div>
+      </div>
+
+      <aside class="panel panel--right" aria-label="Инспектор">
+        <div class="panel__head">
+          <span class="panel__title">Звук · регион 5</span>
+          <span class="panel__spacer"></span>
+          <button type="button" class="ibtn ibtn--sm" data-toggle-panel="inspector-collapsed" aria-label="Свернуть"><svg class="icon"><use href="#panel-right"></use></svg></button>
+        </div>
+        <div class="panel__scroll">
+          <article class="rcard rcard--sfx is-selected">
+            <div class="rcard__head">
+              <span class="rcard__num">5</span>
+              <span class="rcard__title">GRRRRR</span>
+              <span class="chip2 chip2--mini chip2--bad">распознан как звук</span>
+            </div>
+            <p class="rcard__preview">Р-Р-Р-Р · уверенность детектора звука 91 %</p>
+
+            <label class="field2">
+              <span class="field2__label">Замена</span>
+              <textarea class="ta2" lang="ru">РРРРР!</textarea>
+              <span class="field2__meta">
+                <span>7 / 24</span>
+                <span class="chip2 chip2--mini chip2--ok"><svg class="icon" style="width:10px;height:10px"><use href="#check"></use></svg>Автосохранено</span>
+              </span>
+            </label>
+
+            <div class="group2" style="gap:8px;background:var(--v2-surface-1)">
+              <div class="row2">
+                <span class="group2__title grow">Подобранный стиль</span>
+                <span class="chip2 chip2--mini chip2--warn">черновик</span>
+              </div>
+              <div class="row2">
+                <span class="fontrow__sample" style="font-family:Unsightly, sans-serif;font-size:26px">РРРРР!</span>
+                <span class="grow"></span>
+              </div>
+              <dl class="kv2">
+                <dt>Шрифт</dt><dd>Unsightly</dd>
+                <dt>Наклон</dt><dd>−8°</dd>
+                <dt>Цвет</dt><dd>#111111</dd>
+              </dl>
+              <div class="row2">
+                <button type="button" class="b2 b2--primary b2--sm grow">
+                  <svg class="icon"><use href="#refresh"></use></svg>
+                  Подобрать заново
+                </button>
+                <button type="button" class="b2 b2--soft b2--sm" title="Выбрать рамку вручную">
+                  <svg class="icon"><use href="#region"></use></svg>
+                  Рамка
+                </button>
+              </div>
+            </div>
+
+            <div class="field2">
+              <span class="field2__label">Почему звук</span>
+              <div class="banner2" style="border-color:var(--v2-line);background:var(--v2-surface-1)">
+                <svg class="icon" style="color:var(--text-muted)"><use href="#info"></use></svg>
+                <span class="banner2__text">Крупный текст без баллона, 1–2 слова, высокая контрастность — типичный SFX. Если это реплика, переключите тип на «диалог».</span>
+              </div>
+            </div>
+
+            <div class="rcard__acts">
+              <label class="choice2"><input type="checkbox" checked>Переводить звуки на этой странице</label>
+            </div>
+          </article>
+
+          <div class="sect">
+            <div class="sect__body">
+              <div class="field2__label">Другие звуки страницы</div>
+              <button type="button" class="fontrow">
+                <span class="fontrow__sample" style="font-size:15px;font-family:OperationNapalm, sans-serif">ПОП</span>
+                <span class="chip2 chip2--mini chip2--ok">подобран</span>
+              </button>
+              <button type="button" class="fontrow">
+                <span class="fontrow__sample" style="font-size:15px;font-family:Unsightly, sans-serif">ШМЯК</span>
+                <span class="chip2 chip2--mini chip2--ghost">не трогать</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <footer class="status2">
+      <span class="status2__msg"><svg class="icon" style="color:var(--danger)"><use href="#warning"></use></svg>Звук 5: заменён, стиль в черновике</span>
+      <span class="status2__spacer"></span>
+      <span class="chip2 chip2--ghost"><span class="chip2__dot chip2__dot--ok"></span>LLM · qwen2-vl</span>
+      <span class="status2__hint">Ctrl+Z — отменить подбор</span>
+    </footer>
+  </div>
+  <script src="mock.js"></script>
+</body>
+</html>

@@ -106,7 +106,7 @@ export function init() {
   document.querySelector("[data-role='zoom-out']").addEventListener("click", () => stepZoom(-1));
   document.querySelector("[data-role='zoom-in']").addEventListener("click", () => stepZoom(1));
   document.querySelector("[data-role='zoom-value']").addEventListener("click", () => setZoom("fit"));
-  document.querySelector("[data-role='zoom-label']").addEventListener("click", () => setZoom("fit"));
+  document.querySelector("[data-role='zoom-label']")?.addEventListener("click", () => setZoom("fit"));
   document.querySelector("[data-role='zoom-fit-width']")?.addEventListener("click", () => setZoom("fit-width"));
   document.querySelector("[data-role='page-prev']").addEventListener("click", () => turnPage(-1));
   document.querySelector("[data-role='page-next']").addEventListener("click", () => turnPage(1));
@@ -300,9 +300,14 @@ function sync(state) {
   document.querySelector("[data-role='undo']").disabled = !state.undoCount;
   document.querySelector("[data-role='redo']").disabled = !state.redoCount;
   const range = document.querySelector("[data-role='brush-size']");
-  const brushLabel = document.querySelector("[data-role='brush-size-label']");
+  const brushToggle = document.querySelector("[data-role='brush-size-toggle']");
+  const brushPop = document.getElementById("brush-size-pop");
   const brushOn = BRUSH_SIZE_TOOLS.has(state.tool);
-  if (brushLabel) brushLabel.hidden = !brushOn;
+  if (brushToggle) brushToggle.hidden = !brushOn;
+  if (!brushOn && brushPop) {
+    brushPop.hidden = true;
+    if (brushToggle) brushToggle.setAttribute("aria-expanded", "false");
+  }
   if (state.tool !== "polyline" && polyDraft) {
     polyDraft = null;
     if (strokeLayer) strokeLayer.innerHTML = "";

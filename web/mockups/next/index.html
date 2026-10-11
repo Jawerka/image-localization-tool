@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>ILT v2 — Макеты</title>
+  <link rel="stylesheet" href="tokens-v2.css">
+  <link rel="stylesheet" href="shell-v2.css">
+  <link rel="stylesheet" href="components-v2.css">
+  <link rel="stylesheet" href="screen.css">
+  <script src="sprite.js"></script>
+</head>
+<body class="v2 is-scroll">
+  <div class="hub2">
+    <div class="hub2__head">
+      <div>
+        <h1 class="hub2__title">Image Localization Tool · v2</h1>
+        <p class="hub2__lead">Радикальный редизайн оболочки: схлопываемые панели, плавающий док инструментов, командная строка, слои и состояния. Статичные экраны без сборщика — открываются из проводника.</p>
+      </div>
+      <div class="hub2__controls">
+        <span class="seg2" data-radiogroup aria-label="Тема">
+          <button type="button" class="seg2__btn" role="radio" aria-checked="false" data-theme-set="dark">Тёмная</button>
+          <button type="button" class="seg2__btn" role="radio" aria-checked="false" data-theme-set="light">Светлая</button>
+          <button type="button" class="seg2__btn" role="radio" aria-checked="true" data-theme-set="system">Система</button>
+        </span>
+        <select class="sel2" style="width:110px" id="scale-select" aria-label="Масштаб">
+          <option value="100" selected>100 %</option>
+          <option value="110">110 %</option>
+          <option value="125">125 %</option>
+          <option value="150">150 %</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="doc__grid" style="background:var(--v2-surface-1)">
+      <span class="chip2 chip2--ghost"><svg class="icon" style="width:12px;height:12px"><use href="#eye"></use></svg>Канвас важнее хрома</span>
+      <span class="chip2 chip2--ghost"><svg class="icon" style="width:12px;height:12px"><use href="#layers"></use></svg>Слои: панели → карточки → поповеры</span>
+      <span class="chip2 chip2--ghost"><svg class="icon" style="width:12px;height:12px"><use href="#keyboard"></use></svg>Клавиатура — первый класс</span>
+      <span class="chip2 chip2--ghost"><svg class="icon" style="width:12px;height:12px"><use href="#palette"></use></svg>Палитра бренда без изменений</span>
+      <span class="grow"></span>
+      <a class="b2 b2--soft b2--sm" href="states.html">Справочник состояний и токенов</a>
+    </div>
+
+    <div class="hub2__grid">
+      <a class="hubcard" href="main-editor.html">
+        <span class="hubcard__top">
+          <svg class="icon icon--20" style="color:var(--primary)"><use href="#brush"></use></svg>
+          <span class="hubcard__title">Редактор</span>
+          <span class="grow"></span>
+          <span class="chip2 chip2--mini chip2--ghost">Флагман</span>
+        </span>
+        <span class="hubcard__desc">Плавающий док, шторка сравнения, ручки рамок, пилюля «Готово», секционный инспектор, пилюля задания.</span>
+      </a>
+
+      <a class="hubcard" href="main-empty.html">
+        <span class="hubcard__top">
+          <svg class="icon icon--20" style="color:var(--primary)"><use href="#folder"></use></svg>
+          <span class="hubcard__title">Пустое окно</span>
+        </span>
+        <span class="hubcard__desc">Зона перетаскивания, недавние проекты, пустые состояния панелей, подсказки клавиш.</span>
+      </a>
+
+      <a class="hubcard" href="main-batch.html">
+        <span class="hubcard__top">
+          <svg class="icon icon--20" style="color:var(--primary)"><use href="#play"></use></svg>
+          <span class="hubcard__title">Глава в работе</span>
+        </span>
+        <span class="hubcard__desc">Очередь со статусами, карточка прогона, заблокированный док, пилюля этапа на сцене.</span>
+      </a>
+
+      <a class="hubcard" href="batch-run.html">
+        <span class="hubcard__top">
+          <svg class="icon icon--20" style="color:var(--primary)"><use href="#clock"></use></svg>
+          <span class="hubcard__title">Пакетный прогон</span>
+        </span>
+        <span class="hubcard__desc">Пауза, ETA, фильтры проблем, главы, отчёт с действиями в инспекторе.</span>
+      </a>
+
+      <a class="hubcard" href="style.html">
+        <span class="hubcard__top">
+          <svg class="icon icon--20" style="color:var(--primary)"><use href="#palette"></use></svg>
+          <span class="hubcard__title">Стиль региона</span>
+        </span>
+        <span class="hubcard__desc">Список шрифтов с живым образцом, размер и ореол, искривление, стили проекта.</span>
+      </a>
+
+      <a class="hubcard" href="sfx.html">
+        <span class="hubcard__top">
+          <svg class="icon icon--20" style="color:var(--primary)"><use href="#warning"></use></svg>
+          <span class="hubcard__title">Звуки</span>
+        </span>
+        <span class="hubcard__desc">Режим «не трогать / заменять», подобранный стиль, объяснение «почему звук».</span>
+      </a>
+
+      <a class="hubcard" href="settings.html">
+        <span class="hubcard__top">
+          <svg class="icon icon--20" style="color:var(--primary)"><use href="#settings"></use></svg>
+          <span class="hubcard__title">Настройки</span>
+        </span>
+        <span class="hubcard__desc">Девять разделов, карточки тем, переключатели, черновик ОК / Применить / Отмена.</span>
+      </a>
+
+      <a class="hubcard" href="first-run.html">
+        <span class="hubcard__top">
+          <svg class="icon icon--20" style="color:var(--primary)"><use href="#download"></use></svg>
+          <span class="hubcard__title">Первый запуск</span>
+        </span>
+        <span class="hubcard__desc">Мастер из четырёх шагов, скачивание моделей с прогрессом.</span>
+      </a>
+
+      <a class="hubcard" href="export.html">
+        <span class="hubcard__top">
+          <svg class="icon icon--20" style="color:var(--primary)"><use href="#export"></use></svg>
+          <span class="hubcard__title">Экспорт</span>
+        </span>
+        <span class="hubcard__desc">Диалог с радио-карточками, резюме «8 страниц → translated», PNG/JPG.</span>
+      </a>
+
+      <a class="hubcard" href="dialogs.html">
+        <span class="hubcard__top">
+          <svg class="icon icon--20" style="color:var(--primary)"><use href="#info"></use></svg>
+          <span class="hubcard__title">Диалоги</span>
+        </span>
+        <span class="hubcard__desc">Хоткеи с поиском, подтверждение выхода, выбор vision-модели, ошибка воркера.</span>
+      </a>
+
+      <a class="hubcard" href="glossary.html">
+        <span class="hubcard__top">
+          <svg class="icon icon--20" style="color:var(--primary)"><use href="#type"></use></svg>
+          <span class="hubcard__title">Глоссарий</span>
+        </span>
+        <span class="hubcard__desc">Таблица серии с инлайн-редактированием, род, заметки, импорт/экспорт.</span>
+      </a>
+
+      <a class="hubcard" href="remote.html">
+        <span class="hubcard__top">
+          <svg class="icon icon--20" style="color:var(--primary)"><use href="#globe"></use></svg>
+          <span class="hubcard__title">Доступ по сети</span>
+        </span>
+        <span class="hubcard__desc">Код сопряжения, устройства с отзывом, предупреждение о HTTP.</span>
+      </a>
+    </div>
+
+    <p class="mut2" style="font-size:12px;margin:0">Тема пишется в localStorage и прокидывается в ссылки. Иконки встраиваются через <code style="font-family:var(--font-editor)">sprite.js</code> — на file:// внешние &lt;use&gt; блокируются браузером. Изображения — из test-img/.</p>
+  </div>
+
+  <script src="mock.js"></script>
+  <script>
+  (function () {
+    "use strict";
+    var key = "ilt-next-theme";
+    var scaleKey = "ilt-next-scale";
+
+    function currentTheme() {
+      return document.documentElement.getAttribute("data-theme") || "system";
+    }
+
+    function syncLinks(theme, scale) {
+      document.querySelectorAll("a[href]").forEach(function (link) {
+        var href = link.getAttribute("href");
+        if (!href || /^https?:/.test(href) || href.charAt(0) === "#") return;
+        var base = href.split("?")[0];
+        var q = [];
+        if (theme === "dark" || theme === "light") q.push("theme=" + theme);
+        if (scale && scale !== 100) q.push("scale=" + scale);
+        link.setAttribute("href", q.length ? base + "?" + q.join("&") : base);
+      });
+    }
+
+    function applyTheme(theme) {
+      if (theme === "dark" || theme === "light") {
+        document.documentElement.setAttribute("data-theme", theme);
+      } else {
+        document.documentElement.removeAttribute("data-theme");
+        theme = "system";
+      }
+      try { localStorage.setItem(key, theme); } catch (err) {}
+      document.querySelectorAll("[data-theme-set]").forEach(function (btn) {
+        btn.setAttribute("aria-checked", btn.getAttribute("data-theme-set") === theme ? "true" : "false");
+      });
+      syncLinks(theme, parseInt(document.getElementById("scale-select").value, 10));
+    }
+
+    document.querySelectorAll("[data-theme-set]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        applyTheme(btn.getAttribute("data-theme-set"));
+      });
+    });
+
+    document.getElementById("scale-select").addEventListener("change", function () {
+      var value = parseInt(this.value, 10) || 100;
+      try { localStorage.setItem(scaleKey, String(value)); } catch (err) {}
+      document.documentElement.style.zoom = value === 100 ? "" : String(value / 100);
+      syncLinks(currentTheme(), value);
+    });
+
+    var savedScale = 100;
+    try { savedScale = parseInt(localStorage.getItem(scaleKey) || "100", 10) || 100; } catch (err) {}
+    if (savedScale !== 100) {
+      document.documentElement.style.zoom = String(savedScale / 100);
+      document.getElementById("scale-select").value = String(savedScale);
+    }
+    applyTheme(currentTheme());
+  })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>ILT v2 — Первый запуск</title>
+  <link rel="stylesheet" href="tokens-v2.css">
+  <link rel="stylesheet" href="shell-v2.css">
+  <link rel="stylesheet" href="components-v2.css">
+  <link rel="stylesheet" href="screen.css">
+  <script src="sprite.js"></script>
+</head>
+<body class="v2">
+  <div class="screen2">
+    <header class="screen2__bar">
+      <span class="brand__logo" style="width:24px;height:24px"><svg class="icon"><use href="#layers"></use></svg></span>
+      <h1 class="screen2__title">Добро пожаловать</h1>
+      <span class="mut2" style="font-size:11.5px">настройка займёт минуту · всё можно изменить позже</span>
+      <span class="grow"></span>
+      <button type="button" class="b2 b2--quiet b2--sm">Пропустить всё</button>
+    </header>
+
+    <div class="screen2__body" style="justify-content:center;overflow:auto">
+      <div class="wiz2">
+        <div class="steps2" aria-label="Шаги мастера">
+          <span class="steps2__item is-done"><span class="steps2__num"><svg class="icon" style="width:12px;height:12px"><use href="#check"></use></svg></span>Тема</span>
+          <span class="steps2__line"></span>
+          <span class="steps2__item is-current" aria-current="step"><span class="steps2__num">2</span>Модели</span>
+          <span class="steps2__line"></span>
+          <span class="steps2__item"><span class="steps2__num">3</span>Сервер LLM</span>
+          <span class="steps2__line"></span>
+          <span class="steps2__item"><span class="steps2__num">4</span>Языки</span>
+        </div>
+
+        <div class="group2" style="padding:18px">
+          <h2 style="margin:0;font-size:16px">Модели</h2>
+          <p class="mut2" style="margin:0;font-size:12px">Без них не работает распознавание и очистка. Скачаются в папку models рядом с программой.</p>
+
+          <div class="col2" style="gap:8px">
+            <div class="modelrow">
+              <svg class="icon icon--20" style="color:var(--text-success)"><use href="#check"></use></svg>
+              <span><span class="modelrow__name">Детектор текста (RT-DETR)</span><br><span class="modelrow__meta">168 МБ · уже на диске</span></span>
+              <span class="grow"></span>
+              <span class="chip2 chip2--mini chip2--ok">Готово</span>
+            </div>
+            <div class="modelrow">
+              <svg class="icon icon--20 mut2"><use href="#download"></use></svg>
+              <span><span class="modelrow__name">LaMa · очистка баллонов</span><br><span class="modelrow__meta">205 МБ · загрузка 62 %</span></span>
+              <span class="grow"></span>
+              <span class="bar" style="width:140px"><span style="width:62%"></span></span>
+            </div>
+            <div class="modelrow">
+              <svg class="icon icon--20 mut2"><use href="#clock"></use></svg>
+              <span><span class="modelrow__name">Argos · офлайн-перевод</span><br><span class="modelrow__meta">96 МБ · в очереди</span></span>
+              <span class="grow"></span>
+              <span class="chip2 chip2--mini chip2--ghost">в очереди</span>
+            </div>
+          </div>
+
+          <div class="row2">
+            <button type="button" class="b2 b2--primary" disabled>
+              <svg class="icon"><use href="#download"></use></svg>
+              Скачивание · 62 %
+            </button>
+            <span class="mut2" style="font-size:11px">Можно закрыть окно, загрузка продолжится в фоне.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <footer class="screen2__foot">
+      <button type="button" class="b2 b2--soft">Назад</button>
+      <span class="grow"></span>
+      <span class="mut2" style="font-size:11px">Шаг 2 из 4</span>
+      <button type="button" class="b2 b2--primary">Далее</button>
+    </footer>
+  </div>
+  <script src="mock.js"></script>
+</body>
+</html>

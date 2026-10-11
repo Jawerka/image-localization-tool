@@ -20,6 +20,9 @@ wheels/
 .installed.cfg
 *.egg
 
+# Flutter host source (apps/desktop/lib) is not a Python lib artifact
+!apps/desktop/lib/
+
 # Virtual environment
 venv/
 ENV/

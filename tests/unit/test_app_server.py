@@ -556,6 +556,39 @@ def test_export_requires_dialog_directory(api: Api, tmp_path):
     assert jobs[0].payload["conflict"] == "overwrite"
 
 
+def test_dialog_directory_accepts_explicit_path(api: Api, tmp_path):
+    """Хост под --api выбирает папку сам и присылает path; сервер её помнит."""
+    chosen = tmp_path / "host-picked"
+    chosen.mkdir()
+    status, _, dialog = api.json("POST", "/api/dialog/directory", {"path": str(chosen)})
+    assert status == 200
+    assert dialog["cancelled"] is False
+    assert _same_path(dialog["path"], chosen)
+
+    payload, _image = _add_page(api, tmp_path)
+    page_id = payload["pages"][0]["id"]
+    status, _, exported = api.json(
+        "POST",
+        "/api/jobs/export",
+        {
+            "page_ids": [page_id],
+            "format": "png",
+            "jpeg_quality": 90,
+            "conflict": "rename",
+            "dest": str(chosen),
+        },
+    )
+    assert status == 200
+    jobs = [job for job in api.worker.calls if job.kind == "export"]
+    assert jobs and _same_path(jobs[-1].payload["dest"], chosen)
+
+    status, _, bad = api.json(
+        "POST", "/api/dialog/directory", {"path": str(tmp_path / "nope")}
+    )
+    assert status == 400
+    assert bad["error"]
+
+
 def test_secret_does_not_echo_or_clear_key(api: Api):
     status, _, raw = api.call("POST", "/api/settings/secret", {"api_key": "super-secret"})
     assert status == 200

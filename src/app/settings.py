@@ -25,6 +25,7 @@ _TRANSLATORS = ("llm", "argos")
 _INPAINTERS = ("lama", "opencv")
 _READING = ("auto", "ltr", "rtl")
 _SFX_MODES = ("skip", "replace")
+_DOCK_POSITIONS = ("top", "bottom")
 _EXPORT_FORMATS = ("png", "jpg")
 _EXPORT_CONFLICTS = ("rename", "overwrite", "skip")
 _BIND_HOST = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,253}[A-Za-z0-9])?$")
@@ -235,6 +236,7 @@ class AppSettings:
     export_conflict: str = "rename"
     models_dir: str = ""
     single_key_shortcuts: bool = True
+    dock_position: str = "bottom"  # top|bottom
     first_run_complete: bool = False
     window_x: int | None = None
     window_y: int | None = None
@@ -297,6 +299,7 @@ class AppSettings:
         self.export_conflict = _choice(self.export_conflict, _EXPORT_CONFLICTS, "rename")
         self.models_dir = _raw_text(self.models_dir, "")
         self.single_key_shortcuts = _as_bool(self.single_key_shortcuts, True)
+        self.dock_position = _choice(self.dock_position, _DOCK_POSITIONS, "bottom")
         self.first_run_complete = _as_bool(self.first_run_complete, False)
         self.window_x = _optional_int(self.window_x)
         self.window_y = _optional_int(self.window_y)
@@ -348,6 +351,7 @@ class AppSettings:
             "export_conflict": self.export_conflict,
             "models_dir": self.models_dir,
             "single_key_shortcuts": self.single_key_shortcuts,
+            "dock_position": self.dock_position,
             "first_run_complete": self.first_run_complete,
             "window_x": self.window_x,
             "window_y": self.window_y,

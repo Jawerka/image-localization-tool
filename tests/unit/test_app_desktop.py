@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import os
 import socket
+import subprocess
 import sys
 import threading
+import time
+from http.client import HTTPConnection
 from types import SimpleNamespace
 
 import pytest
@@ -14,6 +18,8 @@ from src.app.desktop import (
     TITLE,
     InstanceEndpoint,
     WebViewBridge,
+    _parent_alive,
+    _write_api_ready,
     closing_allowed,
     decide_role,
     focus_window,
@@ -23,6 +29,7 @@ from src.app.desktop import (
     parse_args,
     pid_alive,
     read_instance,
+    run_api,
     run_webview,
     window_kwargs,
     write_instance,
@@ -132,6 +139,165 @@ def test_parse_args_browser_and_paths():
     mixed = parse_args([r"D:\folder", "--browser", "b.jpg"])
     assert mixed.browser is True
     assert mixed.paths == [r"D:\folder", "b.jpg"]
+
+
+def test_parse_args_api_and_parent_pid():
+    api = parse_args(["--api", "--parent-pid", "4321"])
+    assert api.api is True
+    assert api.parent_pid == 4321
+    assert api.paths == []
+    assert api.headless is False
+    plain = parse_args([r"D:\page.png"])
+    assert plain.api is False
+    assert plain.parent_pid is None
+
+
+def test_parent_alive_detects_process():
+    assert _parent_alive(os.getpid()) is True
+    assert _parent_alive(_unused_pid()) is False
+    assert _parent_alive(0) is False
+    assert _parent_alive(-1) is False
+
+
+def test_write_api_ready_payload(tmp_path):
+    with using_paths(AppPaths(root=tmp_path, portable=True)):
+        path = _write_api_ready(4321, "tok-123")
+        assert path == tmp_path / "api.json"
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        assert payload == {"port": 4321, "token": "tok-123"}
+
+
+def _api_get(port: int, token: str | None) -> tuple[int, dict]:
+    headers = {"Cookie": f"ilt_session={token}"} if token else {}
+    conn = HTTPConnection("127.0.0.1", port, timeout=5)
+    try:
+        conn.request("GET", "/api/bootstrap", headers=headers)
+        response = conn.getresponse()
+        body = response.read()
+        return response.status, json.loads(body.decode("utf-8"))
+    finally:
+        conn.close()
+
+
+def test_launch_dispatches_api(monkeypatch):
+    import src.app.desktop as desktop
+
+    called: list = []
+
+    def fake_run_api(args):
+        called.append(args)
+        return 7
+
+    monkeypatch.setattr(desktop, "run_api", fake_run_api)
+    assert desktop.launch(["--api", "--parent-pid", "5"]) == 7
+    assert called and called[0].api is True
+    assert called[0].parent_pid == 5
+
+
+def test_run_api_handshake_cookie_and_parent_watch(tmp_path, monkeypatch):
+    import src.app.desktop as desktop
+
+    monkeypatch.setattr(desktop, "data_root", lambda: tmp_path)
+    monkeypatch.setattr(desktop, "settings_path", lambda: tmp_path / "settings.json")
+    parent = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+    done = threading.Event()
+    args = parse_args(["--api", "--parent-pid", str(parent.pid)])
+
+    def runner() -> None:
+        try:
+            run_api(args)
+        finally:
+            done.set()
+
+    thread = threading.Thread(target=runner, name="ilt-api-test", daemon=True)
+    thread.start()
+    try:
+        ready = tmp_path / "api.json"
+        info: dict | None = None
+        deadline = time.time() + 20
+        while time.time() < deadline:
+            try:
+                info = json.loads(ready.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                info = None
+            if info:
+                break
+            time.sleep(0.05)
+        assert info, "api.json не появился"
+        assert int(info.get("port") or 0) > 0
+        token = str(info.get("token") or "")
+        assert token
+        assert not (tmp_path / "instance.json").exists()
+
+        status, payload = _api_get(int(info["port"]), token)
+        assert status == 200
+        assert payload.get("settings") is not None
+        denied, _ = _api_get(int(info["port"]), None)
+        assert denied == 401
+        wrong, _ = _api_get(int(info["port"]), "not-the-token")
+        assert wrong == 401
+
+        parent.kill()
+        assert done.wait(15), "sidecar не завершился после смерти родителя"
+    finally:
+        if parent.poll() is None:
+            parent.kill()
+        parent.wait(timeout=10)
+    assert not ready.exists()
+
+
+def test_run_api_starts_remote_when_enabled_in_settings(tmp_path, monkeypatch):
+    """run_api — зеркало оконного режима: remote_enabled в настройках поднимает LAN."""
+    import src.app.desktop as desktop
+    import src.app.remote as remote_mod
+
+    calls: list = []
+
+    class StubRemote:
+        def __init__(self, settings, settings_path=None, store=None):
+            calls.append("init")
+
+        def start(self, bind, port):
+            calls.append(f"start:{bind}:{port}")
+            return 43210
+
+        def set_runner(self, runner):
+            calls.append("runner")
+
+        def shutdown(self):
+            calls.append("shutdown")
+
+    monkeypatch.setattr(remote_mod, "RemoteServer", StubRemote)
+    monkeypatch.setattr(desktop, "data_root", lambda: tmp_path)
+    monkeypatch.setattr(desktop, "settings_path", lambda: tmp_path / "settings.json")
+    (tmp_path / "settings.json").write_text(
+        json.dumps({"schema": 1, "remote_enabled": True}),
+        encoding="utf-8",
+    )
+    parent = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+    args = parse_args(["--api", "--parent-pid", str(parent.pid)])
+    done = threading.Event()
+
+    def runner() -> None:
+        try:
+            run_api(args)
+        finally:
+            done.set()
+
+    thread = threading.Thread(target=runner, name="ilt-api-remote-test", daemon=True)
+    thread.start()
+    try:
+        ready = tmp_path / "api.json"
+        deadline = time.time() + 20
+        while time.time() < deadline and not ready.exists():
+            time.sleep(0.05)
+        assert ready.exists(), "api.json не появился"
+        assert "init" in calls, "LAN-слушатель не поднялся при remote_enabled"
+        assert any(str(item).startswith("start:") for item in calls)
+    finally:
+        parent.kill()
+        assert done.wait(15), "sidecar не остановился"
+    assert "shutdown" in calls
 
 
 def test_null_stdout_import_does_not_crash(tmp_path, monkeypatch):

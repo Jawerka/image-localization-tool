@@ -6,10 +6,11 @@ PyInstaller onedir для Image Localization Tool.
 Запуск (его выполняет scripts/build-windows.ps1):
     venv\\Scripts\\python.exe -m PyInstaller ImageLocalizationTool.spec --clean --noconfirm
 
-Результат: dist/ImageLocalizationTool/ImageLocalizationTool.exe
-Рядом с exe, не в _internal: web/ без mockups и fonts/.
+Результат: dist/ilt_sidecar/ImageLocalizationTool.exe (сайдкар раскладки cutover).
+Рядом с exe, не в _internal: web/ без mockups и fonts/ (промежуточно; сборка
+укладывает их в корень dist/ImageLocalizationTool).
 Каталог models/ сюда не входит. Его копирует scripts/build-windows.ps1
-в dist/ImageLocalizationTool/models уже после сборки.
+в корень dist/ImageLocalizationTool/models уже после сборки.
 
 Нужен PyInstaller 6: собранные библиотеки лежат в _internal.
 torch не исключать: LaMa и Argos (stanza) без него не работают.
@@ -29,6 +30,9 @@ from scripts.smoke_dist import drop_cuda_entries, read_app_version, stage_runtim
 sys.setrecursionlimit(max(sys.getrecursionlimit(), 5000))
 
 app_name = "ImageLocalizationTool"
+# Имя каталога PyInstaller-сборки: сборка укладывает его в sidecar/ рядом
+# с Flutter-хостом (desktop/), чтобы one-dir бандлы не пересекались.
+sidecar_name = "ilt_sidecar"
 app_version = read_app_version(project_dir)
 
 # Модели RapidOCR лежат внутри установленного пакета, не в каталоге models/:
@@ -180,11 +184,15 @@ exe = EXE(
 
 
 class _StagedCollect(COLLECT):
-    """После сборки кладёт web и шрифты рядом с exe, не в _internal."""
+    """После сборки кладёт web и шрифты рядом с exe, не в _internal.
+
+    Каталог промежуточный: scripts/build-windows.ps1 переносит exe и _internal
+    в `dist/ImageLocalizationTool/sidecar`, а web и fonts — в корень раскладки.
+    """
 
     def assemble(self):
         super().assemble()
-        dist_root = Path(DISTPATH) / app_name
+        dist_root = Path(DISTPATH) / sidecar_name
         exe_path = dist_root / f"{app_name}.exe"
         if not exe_path.is_file():
             raise RuntimeError(f"Onedir exe is missing after COLLECT: {exe_path}")
@@ -197,7 +205,7 @@ coll = _StagedCollect(
     a.datas,
     strip=False,
     upx=False,
-    name=app_name,
+    name=sidecar_name,
 )
 if coll is None:
     raise RuntimeError("COLLECT was not created")

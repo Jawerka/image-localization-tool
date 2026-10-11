@@ -8,7 +8,7 @@
   background: var(--bg-primary);
 }
 
-.viewer__bar {
+.viewer__bar:not(.dock) {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -21,6 +21,11 @@
 
 .viewer__bar .btn {
   padding: 0 var(--space-sm);
+}
+
+.viewer__bar.dock .btn {
+  padding: 0 calc(8px * var(--ui-scale));
+  height: calc(28px * var(--ui-scale));
 }
 
 .brush-size {

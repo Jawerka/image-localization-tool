@@ -339,7 +339,10 @@ def _make_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
         protocol_version = "HTTP/1.1"
 
         def log_message(self, fmt: str, *args) -> None:
-            logger.debug("%s %s", self.address_string(), fmt % args)
+            # Пишем в общий лог приложения: у модульного логгера нет файла.
+            logging.getLogger("image_localization").debug(
+                "%s %s", self.address_string(), fmt % args
+            )
 
         def do_GET(self) -> None:  # noqa: N802
             self._dispatch()
@@ -549,7 +552,7 @@ def _api(state: AppState, method: str, path: str, body: dict, query: dict | None
         return _Result(_import_sources(state, body))
     if path == "/api/dialog/directory":
         _need_method(method, "POST")
-        return _Result(_dialog_directory(state))
+        return _Result(_dialog_directory(state, body))
     if path == "/api/dialog/files":
         _need_method(method, "POST")
         return _Result(_dialog_files(state))
@@ -902,7 +905,21 @@ def _cancel(state: AppState) -> dict:
     return {"ok": True, **_jobs_view(state)}
 
 
-def _dialog_directory(state: AppState) -> dict:
+def _dialog_directory(state: AppState, body: dict | None = None) -> dict:
+    """Папка экспорта: системный диалог или явный путь от хоста.
+
+    В ``--api`` режиме мост диалогов пуст, поэтому Flutter-хост выбирает
+    папку сам и присылает её в ``path``; сервер только запоминает её как
+    ``export_dir`` (как после системного диалога).
+    """
+    body = body or {}
+    explicit = str(body.get("path") or "").strip()
+    if explicit:
+        folder = Path(explicit)
+        if not folder.is_dir():
+            raise ValueError("Папка не найдена")
+        state.export_dir = folder
+        return {"path": str(folder), "cancelled": False}
     chosen = state.dialogs.pick_directory()
     if chosen is None:
         return {"path": None, "cancelled": True}
