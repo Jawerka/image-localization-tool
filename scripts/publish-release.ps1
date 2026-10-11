@@ -124,9 +124,10 @@ if ($Phase -eq 'Windows') {
 
     if ($ResetTag) {
         Write-Host "==> ResetTag $tag"
-        & gh release delete $tag --yes --cleanup-tag 2>$null
-        & git tag -d $tag 2>$null
-        & git push origin ":refs/tags/$tag" 2>$null
+        # stderr нативных команд гасим: иначе PS5.1 с EAP=Stop падает на пустом выводе.
+        & gh release delete $tag --yes --cleanup-tag 2>&1 | Out-Null
+        & git tag -d $tag 2>&1 | Out-Null
+        & git push origin ":refs/tags/$tag" 2>&1 | Out-Null
     }
     if ($PushTag) {
         Invoke-Checked { & git tag -f $tag } "git tag -f $tag"
