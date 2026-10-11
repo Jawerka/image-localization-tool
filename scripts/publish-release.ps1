@@ -8,20 +8,26 @@
     1. check local assets (setup, portable zip, server zip, packs, extensions);
     2. rebuild release runtime manifest from dist/packs/packs.json;
     3. write dist/SHA256SUMS-windows.txt;
-    4. with -ResetTag delete the old release/tag; with -PushTag push the fresh tag;
-    5. create a draft release and upload assets.
+    4. with -ResetTag delete the old release, its tag and assets;
+       with -PushTag push the fresh tag;
+    5. create a draft release and upload the missing assets one file at a time.
 
   Phase Final (after the Linux CI run):
     1. download packs-linux.json and SHA256SUMS-linux.txt from the release;
     2. merge pack records and rebuild the manifest (bundled copy untouched);
-    3. write the combined dist/SHA256SUMS.txt and upload it with the manifest;
+    3. write the combined dist/SHA256SUMS.txt, replace the release manifest
+       and upload the sums;
     4. with -Publish mark the release as published.
 
-  Phases are idempotent: uploads use --clobber.
+  Uploads are per file: an asset already on the release with the same sha256
+  digest is skipped, a differing one is only overwritten with -Replace
+  (--clobber deletes the existing asset before the new upload starts, so a
+  failed replacement loses it). Final rewrites the manifest on purpose: the
+  Windows phase uploads a Windows-only manifest first.
 
 .EXAMPLE
   .\scripts\publish-release.ps1 -DryRun
-  .\scripts\publish-release.ps1 -ResetTag -PushTag
+  .\scripts\publish-release.ps1 -PushTag
   .\scripts\publish-release.ps1 -Phase Final -Publish
 #>
 param(
@@ -29,6 +35,7 @@ param(
     [string] $Phase = 'Windows',
     [switch] $ResetTag,
     [switch] $PushTag,
+    [switch] $Replace,
     [switch] $Publish,
     [switch] $DryRun
 )
@@ -60,6 +67,56 @@ function Invoke-Quiet {
         return $LASTEXITCODE
     } finally {
         $ErrorActionPreference = $previous
+    }
+}
+
+function Get-ReleaseAssetMap {
+    # name -> sha256 digest; empty when the release does not exist yet.
+    param([string]$Tag)
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $raw = & gh release view $Tag --json assets 2>$null
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+    if ($LASTEXITCODE -ne 0 -or -not $raw) {
+        return @{}
+    }
+    $map = @{}
+    foreach ($asset in @((($raw -join "`n") | ConvertFrom-Json).assets)) {
+        if ($asset.name) {
+            $map[[string]$asset.name] = [string]$asset.digest
+        }
+    }
+    return $map
+}
+
+function Send-ReleaseAssets {
+    # Upload files one by one, skipping assets that are already present with
+    # the same digest. -Replace allows overwriting differing assets.
+    param(
+        [string]$Tag,
+        [string[]]$Paths,
+        [hashtable]$Existing,
+        [switch]$Replace
+    )
+    foreach ($path in $Paths) {
+        $name = Split-Path -Leaf $path
+        $localHash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLower()
+        if (-not $Existing.ContainsKey($name)) {
+            Invoke-Checked { & gh release upload $Tag $path } "gh release upload $name"
+            continue
+        }
+        if ($Existing[$name] -eq "sha256:$localHash") {
+            Write-Host "==> skip $name (already on the release)"
+            continue
+        }
+        if (-not $Replace) {
+            Write-Host "==> skip $name (release copy differs; pass -Replace to overwrite)"
+            continue
+        }
+        Invoke-Checked { & gh release upload $Tag $path --clobber } "gh release upload $name"
     }
 }
 
@@ -155,9 +212,8 @@ if ($Phase -eq 'Windows') {
             & gh release create $tag --draft --title $version --notes-file $notes
         } "gh release create $tag"
     }
-    Invoke-Checked {
-        & gh release upload $tag @assets --clobber
-    } "gh release upload $tag (Windows assets)"
+    $existing = Get-ReleaseAssetMap -Tag $tag
+    Send-ReleaseAssets -Tag $tag -Paths $assets -Existing $existing -Replace:$Replace
     Write-Host "Windows phase done: draft $tag" -ForegroundColor Green
     if (-not $Publish) {
         Write-Host 'Next: wait for the Linux CI, then run -Phase Final -Publish.'
@@ -211,9 +267,10 @@ if ($Phase -eq 'Final') {
         Write-Host "Dry run: manifest $manifest and sums are ready, gh untouched."
         return
     }
-    Invoke-Checked {
-        & gh release upload $tag $manifest $sumPath --clobber
-    } "gh release upload $tag (manifest + sums)"
+    # This phase rebuilds the manifest: the merged copy must replace the
+    # Windows-only one uploaded earlier, so the metadata allows --clobber.
+    $existing = Get-ReleaseAssetMap -Tag $tag
+    Send-ReleaseAssets -Tag $tag -Paths @($manifest, $sumPath) -Existing $existing -Replace
     if ($Publish) {
         Invoke-Checked {
             & gh release edit $tag --draft=false

@@ -69,6 +69,14 @@ else:
         if found:
             rapidocr_hidden = found
 
+def _has_module(name: str) -> bool:
+    """False, если модуля нет: find_spec падает вместе с импортом родителя."""
+    try:
+        return importlib.util.find_spec(name) is not None
+    except (ImportError, ValueError):
+        return False
+
+
 webview_hidden = []
 for _mod_name in (
     "webview",
@@ -76,7 +84,7 @@ for _mod_name in (
     "webview.platforms.winforms",
     "clr",
 ):
-    if importlib.util.find_spec(_mod_name) is not None:
+    if _has_module(_mod_name):
         webview_hidden.append(_mod_name)
 
 # stdlib.zip готовит scripts/build-windows.ps1 до запуска spec. Без него
