@@ -194,6 +194,10 @@ def test_launch_dispatches_api(monkeypatch):
     assert called[0].parent_pid == 5
 
 
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="сайдкар десктоп-хоста: завершение по смерти родителя — Windows-only",
+)
 def test_run_api_handshake_cookie_and_parent_watch(tmp_path, monkeypatch):
     import src.app.desktop as desktop
 
@@ -246,6 +250,10 @@ def test_run_api_handshake_cookie_and_parent_watch(tmp_path, monkeypatch):
     assert not ready.exists()
 
 
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="сайдкар десктоп-хоста: остановка по смерти родителя — Windows-only",
+)
 def test_run_api_starts_remote_when_enabled_in_settings(tmp_path, monkeypatch):
     """run_api — зеркало оконного режима: remote_enabled в настройках поднимает LAN."""
     import src.app.desktop as desktop
@@ -320,6 +328,10 @@ def test_null_stdout_import_does_not_crash(tmp_path, monkeypatch):
         _close_log_stream(sys.stderr)
 
 
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="MessageBoxW через ctypes.windll — Windows-only",
+)
 def test_missing_webview2_shows_message(monkeypatch):
     calls = []
 
@@ -422,6 +434,10 @@ def test_webview2_version_string():
     assert not _webview2_version_ok("")
 
 
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="SetForegroundWindow через ctypes.windll — Windows-only",
+)
 def test_focus_without_handle_does_not_raise(monkeypatch):
     calls = []
 

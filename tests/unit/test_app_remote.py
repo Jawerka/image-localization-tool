@@ -333,6 +333,15 @@ def test_headless_remote_binds_runner(tmp_path, monkeypatch, capsys):
         runners.append(runner)
         return real_set(self, runner)
 
+    # settings нормализует remote_port 0 → 1; на POSIX порт 1 привилегированный,
+    # поэтому слушаем эфемерный порт, сохраняя реальный bind.
+    real_start = RemoteServer.start
+
+    monkeypatch.setattr(
+        RemoteServer,
+        "start",
+        lambda self, host, port: real_start(self, host, 0),
+    )
     monkeypatch.setattr(RemoteServer, "set_runner", track_set)
     monkeypatch.setattr(RemoteServer, "wait", lambda self: None)
     monkeypatch.setattr(desktop_mod, "HEADLESS_LOCAL_PORT", 0)
