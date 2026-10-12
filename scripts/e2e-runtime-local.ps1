@@ -120,11 +120,17 @@ Invoke-Checked {
 
 # --- 2. канонические лок-сводки и сверка с репозиторием ----------------------
 Step '2. Канонические win-локи (dist\locks) и сверка locks\'
+# Колесо argostranslate уже собрано и залито на rc: не пересобираем, иначе
+# sha разойдётся с встроенным манифестом и опубликованным ассетом.
+$canonicalArgosWheel = Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'dist\locks') `
+    -Filter 'argostranslate-*.whl' -ErrorAction SilentlyContinue | Select-Object -First 1
 foreach ($pack in $packs) {
-    Invoke-Checked {
-        & $Python 'scripts\build_runtime_locks.py' --pack $pack --os win `
-            --out dist\locks --lock-dir $RepoLocks
-    } "build_runtime_locks.py $pack (canonical)"
+    $lockArgs = @('scripts\build_runtime_locks.py', '--pack', $pack, '--os', 'win',
+        '--out', 'dist\locks', '--lock-dir', $RepoLocks)
+    if ($pack -eq 'argos' -and $null -ne $canonicalArgosWheel) {
+        $lockArgs += @('--hosted-wheel', $canonicalArgosWheel.FullName)
+    }
+    Invoke-Checked { & $Python @lockArgs } "build_runtime_locks.py $pack (canonical)"
 }
 foreach ($lock in Get-ChildItem -LiteralPath $RepoLocks -Filter '*.lock') {
     $committed = Join-Path $RepoRoot "locks\$($lock.Name)"
@@ -137,10 +143,12 @@ Write-Host "locked: $($packs -join ', ') — совпадают с locks\"
 # --- 3. локальная сводка с file://-базой -------------------------------------
 Step '3. Локальная сводка (file://) и манифест'
 foreach ($pack in $packs) {
-    Invoke-Checked {
-        & $Python 'scripts\build_runtime_locks.py' --pack $pack --os win `
-            --out $LocksOut --url-base $UrlBase
-    } "build_runtime_locks.py $pack (local)"
+    $localArgs = @('scripts\build_runtime_locks.py', '--pack', $pack, '--os', 'win',
+        '--out', $LocksOut, '--url-base', $UrlBase)
+    if ($pack -eq 'argos' -and $null -ne $canonicalArgosWheel) {
+        $localArgs += @('--hosted-wheel', $canonicalArgosWheel.FullName)
+    }
+    Invoke-Checked { & $Python @localArgs } "build_runtime_locks.py $pack (local)"
 }
 $argosWheel = Get-ChildItem -LiteralPath $LocksOut -Filter 'argostranslate-*.whl' |
     Select-Object -First 1

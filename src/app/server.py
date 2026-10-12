@@ -187,6 +187,8 @@ class AppState:
         self.queue_pending = False
         self._queue_restored = False
         self._runtime_manager: runtime.Manager | None = None
+        self._models_lock = threading.Lock()
+        self._models_inflight: set[str] = set()
 
     def runtime_manager(self) -> runtime.Manager:
         """Фоновая установка компонентов рантайма (лениво — тестам сервера не мешает)."""
@@ -381,7 +383,7 @@ def _make_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
             except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
                 return
             except Exception:
-                logger.exception("Ошибка HTTP")
+                logger.exception("Ошибка HTTP %s %s", self.command, self.path)
                 try:
                     _send_json(self, {"error": "Внутренняя ошибка"}, 500)
                 except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError, OSError):
@@ -1069,6 +1071,10 @@ def _download_model(state: AppState, body: dict) -> None:
     kind = str(body.get("kind") or "")
     if kind not in ("detector", "lama", "font"):
         raise ValueError("Неизвестный файл для скачивания")
+    with state._models_lock:
+        if kind in state._models_inflight:
+            raise _HttpError(409, "Эта модель уже скачивается")
+        state._models_inflight.add(kind)
     dest = model_manager.dest_dir(kind, state.settings.models_dir)
 
     def progress(done, total) -> None:
@@ -1080,7 +1086,11 @@ def _download_model(state: AppState, body: dict) -> None:
             "total_bytes": total,
         }))
 
-    model_manager.download(kind, dest, progress)
+    try:
+        model_manager.download(kind, dest, progress)
+    finally:
+        with state._models_lock:
+            state._models_inflight.discard(kind)
 
 
 def _runtime_download(state: AppState, body: dict) -> dict:

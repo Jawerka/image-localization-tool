@@ -326,13 +326,23 @@ class SecondaryState extends ChangeNotifier {
   void startDownload(String kind) {
     final api = _api;
     if (api == null) return;
+    final current = _models[kind] ?? ModelEntry(kind: kind, present: false);
+    if (current.downloading) return;
+    // Мгновенный отклик: бар появляется сразу, кнопка пропадает до конца.
+    _models[kind] = current.copyWith(
+      bytesDone: current.bytesDone > 0 ? current.bytesDone : 1,
+      error: '',
+    );
+    notifyListeners();
     unawaited(
       api.postJson('/api/models/download', {'kind': kind}).then((_) {
         _models[kind] = ModelEntry(kind: kind, present: true);
         notifyListeners();
       }).catchError((Object error) {
-        final current = _models[kind] ?? ModelEntry(kind: kind, present: false);
-        _models[kind] = current.copyWith(error: '$error');
+        final latest = _models[kind] ?? ModelEntry(kind: kind, present: false);
+        final message =
+            error is ApiException ? apiErrorMessage(error) : '$error';
+        _models[kind] = latest.copyWith(error: message);
         notifyListeners();
       }),
     );

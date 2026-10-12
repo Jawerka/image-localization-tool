@@ -837,14 +837,43 @@ def _write_marker(directory: Path, pack: Pack) -> None:
 
 
 def remove(pack_id: str, packs_root: Path | None = None) -> bool:
-    """Удалить пак. False — папки не было (идемпотентно)."""
+    """Удалить пак. False — папки не было (идемпотентно).
+
+    На Windows загруженные DLL (torch) держат файлы, и полный ``rmtree``
+    падает. Тогда каталог переименовывается в ``<id>.tmp`` (rename разрешён
+    при открытых файлах) и дочищается при следующем старте (``activate``).
+    """
     root = Path(packs_root) if packs_root is not None else runtime_root()
     directory = root / _safe_id(pack_id)
     if not directory.is_dir():
         return False
-    shutil.rmtree(directory)
+    try:
+        shutil.rmtree(directory)
+    except OSError:
+        graveyard = root / f"{_safe_id(pack_id)}{TMP_SUFFIX}"
+        if graveyard.exists():
+            shutil.rmtree(graveyard, ignore_errors=True)
+        try:
+            directory.replace(graveyard)
+        except OSError:
+            logger.warning("Не удалось убрать каталог %s", directory, exc_info=True)
+            raise
+        shutil.rmtree(graveyard, ignore_errors=True)
+        logger.info("Каталог %s занят процессом: место освободит перезапуск", directory)
     torch_state(refresh=True)
     return True
+
+
+def _cleanup_stale_temp(root: Path) -> None:
+    """Убрать остатки ``*.tmp``: неудачные установки и отложенные удаления."""
+    for entry in root.glob(f"*{TMP_SUFFIX}"):
+        try:
+            if entry.is_dir():
+                shutil.rmtree(entry, ignore_errors=True)
+            else:
+                entry.unlink(missing_ok=True)
+        except OSError:
+            logger.debug("Не убрался временный каталог %s", entry, exc_info=True)
 
 
 def startup() -> list[str]:
@@ -869,6 +898,8 @@ def activate(packs_root: Path | None = None) -> list[str]:
     root = Path(packs_root) if packs_root is not None else runtime_root()
     if not root.is_dir():
         return []
+    # Вызывается на старте до импорта torch: залоченные файлы уже свободны.
+    _cleanup_stale_temp(root)
     found: list[tuple[int, str, Path]] = []
     for entry in sorted(root.iterdir(), key=lambda item: item.name):
         if not entry.is_dir() or entry.name.endswith(TMP_SUFFIX):

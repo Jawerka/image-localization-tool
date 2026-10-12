@@ -120,7 +120,10 @@ class IltSelect extends StatelessWidget {
 }
 
 /// Текстовое поле ввода настройки.
-class IltTextField extends StatelessWidget {
+///
+/// Контроллер вместо ``initialValue`` с ключом-значением: программное
+/// обновление подхватывается, а фокус при наборе не теряется.
+class IltTextField extends StatefulWidget {
   const IltTextField({
     super.key,
     required this.value,
@@ -137,20 +140,41 @@ class IltTextField extends StatelessWidget {
   final bool enabled;
 
   @override
+  State<IltTextField> createState() => _IltTextFieldState();
+}
+
+class _IltTextFieldState extends State<IltTextField> {
+  late final TextEditingController _controller =
+      TextEditingController(text: widget.value);
+
+  @override
+  void didUpdateWidget(covariant IltTextField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.value != oldWidget.value && widget.value != _controller.text) {
+      _controller.text = widget.value;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final palette = IltPalette.of(context);
     return SizedBox(
       height: kFieldHeight,
       child: TextFormField(
-        initialValue: value,
-        key: ValueKey('field-$hint-$value'),
+        controller: _controller,
         style: Theme.of(context).textTheme.bodySmall,
-        obscureText: obscure,
-        enabled: enabled,
+        obscureText: widget.obscure,
+        enabled: widget.enabled,
         textAlignVertical: TextAlignVertical.center,
         decoration: InputDecoration(
           isDense: true,
-          hintText: hint,
+          hintText: widget.hint,
           contentPadding: const EdgeInsets.symmetric(horizontal: 8),
           filled: true,
           fillColor: palette.input,
@@ -163,7 +187,7 @@ class IltTextField extends StatelessWidget {
             borderSide: BorderSide(color: palette.border),
           ),
         ),
-        onChanged: onChanged,
+        onChanged: widget.onChanged,
       ),
     );
   }

@@ -40,6 +40,7 @@ class _FirstRunScreenState extends State<FirstRunScreen> {
       'target_lang': settings['target_lang'] ?? 'ru',
       'llm_base_url': settings['llm_base_url'] ?? '',
       'llm_model': settings['llm_model'] ?? '',
+      'api_key': '',
     };
     unawaited(state.secondary.refreshModels());
     unawaited(state.secondary.refreshRuntime());
@@ -56,8 +57,30 @@ class _FirstRunScreenState extends State<FirstRunScreen> {
   }
 
   Future<void> _finish() async {
+    await _saveApiKey();
     await state.workspace.completeFirstRun(_draft);
     state.dismissFirstRun();
+  }
+
+  /// Сохранить ключ из мастера в keyring (в настройках JSON он не хранится).
+  Future<void> _saveApiKey() async {
+    final api = state.api;
+    final key = '${_draft['api_key'] ?? ''}'.trim();
+    if (api == null || key.isEmpty) return;
+    try {
+      await api.postJson('/api/settings/secret', {'api_key': key});
+      state.markApiKeySet();
+      _draft['api_key'] = '';
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _llmOk = false;
+          _llmReason = error is ApiException
+              ? apiErrorMessage(error)
+              : 'Ключ не сохранён: $error';
+        });
+      }
+    }
   }
 
   Future<void> _checkLlm() async {
@@ -70,10 +93,8 @@ class _FirstRunScreenState extends State<FirstRunScreen> {
       _llmReason = '';
     });
     try {
-      await state.workspace.updateSettings({
-        'llm_base_url': base,
-        'llm_model': '${_draft['llm_model'] ?? ''}',
-      });
+      await _saveApiKey();
+      await state.workspace.updateSettings({'llm_base_url': base, 'llm_model': '${_draft['llm_model'] ?? ''}'});
       final data = await api.postJson('/api/llm/check');
       if (!mounted) return;
       setState(() {
@@ -310,15 +331,34 @@ class _FirstRunScreenState extends State<FirstRunScreen> {
               ),
               Expanded(
                 child: model.downloading
-                    ? ClipRRect(
-                        borderRadius: BorderRadius.circular(2),
-                        child: LinearProgressIndicator(value: model.percent),
+                    ? Row(
+                        children: [
+                          Expanded(
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(2),
+                              child: LinearProgressIndicator(value: model.percent),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            model.percent == null
+                                ? _formatBytes(model.bytesDone)
+                                : '${(model.percent! * 100).round()} %',
+                            style: theme.textTheme.labelSmall,
+                          ),
+                        ],
                       )
                     : Text(
                         model.error.isNotEmpty
-                            ? 'ошибка'
+                            ? 'ошибка: ${model.error}'
                             : (model.present ? 'уже на диске' : 'не скачано'),
-                        style: theme.textTheme.labelSmall,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: model.error.isNotEmpty
+                              ? palette.textError
+                              : palette.textMuted,
+                        ),
                       ),
               ),
               const SizedBox(width: 8),
@@ -423,9 +463,19 @@ class _FirstRunScreenState extends State<FirstRunScreen> {
               ],
             ),
           ),
+      if ((secondary.errorText ?? '').isNotEmpty) ...[
+        const SizedBox(height: 6),
+        Text(
+          'Ошибка: ${secondary.errorText}',
+          maxLines: 3,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.labelSmall?.copyWith(color: palette.textError),
+        ),
+      ],
       const SizedBox(height: 6),
       Text(
-        'Большие компоненты качаются в фоне — прогресс виден здесь и в настройках.',
+        'Большие компоненты качаются в фоне — прогресс виден здесь и в настройках. '
+        'Смена torch-компонента применится после перезапуска приложения.',
         style: theme.textTheme.labelSmall,
       ),
     ]);
@@ -525,6 +575,18 @@ class _FirstRunScreenState extends State<FirstRunScreen> {
                 ],
                 onChanged: (value) => _set('llm_model', value),
               ),
+      ),
+      FieldRow(
+        label: 'Ключ API',
+        child: IltTextField(
+          key: const Key('wizard-llm-api-key'),
+          value: '${_draft['api_key'] ?? ''}',
+          hint: state.hasApiKey
+              ? 'ключ уже сохранён — оставьте пустым'
+              : 'если сервер требует',
+          obscure: true,
+          onChanged: (value) => _set('api_key', value),
+        ),
       ),
       const SizedBox(height: 8),
       Row(

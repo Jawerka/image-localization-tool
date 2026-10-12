@@ -73,7 +73,10 @@ void main() {
     final sent = <_Sent>[];
     final ws = _state((path) => {'ok': true}, sent);
     ws.startDownload('detector');
+    expect(ws.model('detector').downloading, isTrue);
+    ws.startDownload('detector'); // повтор игнорируется, пока идёт загрузка
     await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(sent.length, 1);
     expect(sent.single.method, 'POST');
     expect(sent.single.path, '/api/models/download');
     expect(sent.single.body, contains('detector'));

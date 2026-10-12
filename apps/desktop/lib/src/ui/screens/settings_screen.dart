@@ -865,6 +865,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
             style: theme.textTheme.labelSmall?.copyWith(color: palette.textMuted),
           ),
         ),
+      if ((secondary.errorText ?? '').isNotEmpty)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: Text(
+            'Ошибка: ${secondary.errorText}',
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.labelSmall?.copyWith(color: palette.textError),
+          ),
+        ),
       if (runtime.packs.isEmpty)
         Text(
           'Список компонентов недоступен.',
@@ -950,6 +960,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
         style: theme.textTheme.labelSmall?.copyWith(
           color: runtime.torchReady ? palette.textSuccess : palette.textMuted,
         ),
+      ),
+      const SizedBox(height: 4),
+      Text(
+        'Смена torch-компонента применится после перезапуска приложения.',
+        style: theme.textTheme.labelSmall?.copyWith(color: palette.textMuted),
       ),
     ]);
   }

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import sys
 import types
 import zipfile
@@ -516,3 +517,30 @@ def test_has_platform_packs_accepts_wheels():
         ],
     }
     assert runtime._has_platform_packs({"packs": [record]}) is True
+
+
+def test_remove_defers_locked_pack_to_restart(monkeypatch, tmp_path):
+    _use(monkeypatch, tmp_path, [_pack_dict("torch-cpu")])
+    install = tmp_path / "install"
+    directory = _install_marker(install, "torch-cpu")
+    root = install / "runtime"
+    real_rmtree = shutil.rmtree
+
+    def locked_rmtree(path, *args, **kwargs):
+        if kwargs.get("ignore_errors"):
+            return None  # залоченные файлы не удаляются, ошибка глотается
+        raise PermissionError(13, "Access is denied", str(path))
+
+    monkeypatch.setattr(runtime.shutil, "rmtree", locked_rmtree)
+    assert runtime.remove("torch-cpu") is True
+    graveyard = root / "torch-cpu.tmp"
+    assert not directory.exists()
+    assert graveyard.is_dir()
+    assert runtime.installed_ids() == []
+    monkeypatch.setattr(runtime.shutil, "rmtree", real_rmtree)
+    before = list(sys.path)
+    try:
+        assert runtime.activate() == []
+    finally:
+        sys.path[:] = before
+    assert not graveyard.exists()

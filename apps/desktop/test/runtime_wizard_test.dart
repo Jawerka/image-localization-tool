@@ -90,6 +90,7 @@ void main() {
     expect(find.textContaining('PyTorch CDN'), findsWidgets);
     expect(find.textContaining('~3 мин'), findsOneWidget);
     expect(find.textContaining('<1 мин'), findsWidgets);
+    expect(find.textContaining('после перезапуска'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('wizard-runtime-download-torch-cu128')));
     await tester.pump();
@@ -135,5 +136,35 @@ void main() {
     await tester.pump();
     expect(host.requests, contains('POST /api/runtime/remove'));
     expect(host.bodies.last, contains('argos'));
+  });
+
+  testWidgets('мастер: ключ API сохраняется при проверке', (tester) async {
+    sizeWindow(tester);
+    final (state, host) = await readyHost(
+      bootstrap: _bootstrap(),
+      reply: (path, method) => path == '/api/runtime' ? _runtimeReply() : {},
+    );
+    addTearDown(() {
+      state.dispose();
+      host.events.close();
+    });
+    await tester.pumpWidget(IltApp(state: state));
+    await tester.pump();
+
+    for (var index = 0; index < 3; index++) {
+      await tester.tap(find.byKey(const Key('first-run-next')));
+      await tester.pump();
+    }
+    expect(find.text('Сервер LLM'), findsWidgets);
+    expect(find.byKey(const Key('wizard-llm-api-key')), findsOneWidget);
+
+    await tester.enterText(find.byKey(const Key('wizard-llm-api-key')), 'sk-test');
+    await tester.tap(find.byKey(const Key('wizard-llm-check')));
+    await tester.pump();
+    await tester.pump();
+
+    final index = host.requests.indexOf('POST /api/settings/secret');
+    expect(index, isNot(-1));
+    expect(host.bodies[index], contains('sk-test'));
   });
 }
