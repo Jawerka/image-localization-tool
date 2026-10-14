@@ -645,6 +645,10 @@ def _api(state: AppState, method: str, path: str, body: dict, query: dict | None
                     if not folder.is_absolute() or not folder.is_dir():
                         raise ValueError("Выберите существующую папку")
                     downloads.ensure_space(folder, 0)
+                    import tempfile
+                    with tempfile.TemporaryFile(dir=folder) as probe:
+                        probe.write(b"ilt")
+                        probe.flush()
                     old = str(components_root())
                     state.settings.components_previous_dir = old
                     state.settings.components_dir = str(folder)

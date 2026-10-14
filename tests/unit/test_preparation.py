@@ -61,6 +61,23 @@ def test_interrupted_state_becomes_paused(fixture_catalog, tmp_path):
     assert manager.current()["state"] == "ready"
 
 
+def test_resume_recalculates_remaining_disk_space(fixture_catalog, tmp_path, monkeypatch):
+    manager = preparation.Manager(path=tmp_path / "queue.json")
+    manager.start(fixture_catalog)
+    wait(manager)
+    assert manager.current()["state"] == "ready"
+    saved = manager.current()
+    saved.update(state="paused", required_space=10**12)
+    downloads.atomic_json(manager.path, saved)
+    restored = preparation.Manager(path=manager.path)
+    calls = []
+    monkeypatch.setattr(downloads, "ensure_space", lambda path, required, *args: calls.append(required))
+    restored.resume()
+    wait(restored)
+    assert restored.current()["state"] == "ready"
+    assert calls[0] == 0
+
+
 def test_resume_rejects_changed_catalog(fixture_catalog, tmp_path):
     state = preparation.plan(fixture_catalog)
     state["catalog_sha"] = "different"

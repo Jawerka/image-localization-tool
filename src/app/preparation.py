@@ -194,7 +194,9 @@ class Manager:
         try:
             with downloads.installer_lock():
                 state = self.current()
-                downloads.ensure_space(components_root(), state["required_space"])
+                # После продолжения место требуется лишь для оставшихся файлов и установок.
+                remaining = plan(state["selection"])
+                downloads.ensure_space(components_root(), remaining["required_space"])
                 done = 0
                 for index, item in enumerate(state["items"]):
                     downloads.check_pause(self._pause)
