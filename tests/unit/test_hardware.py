@@ -8,7 +8,8 @@ from src.app import hardware
 
 
 @pytest.fixture(autouse=True)
-def _clean_cache():
+def _clean_cache(monkeypatch):
+    monkeypatch.setattr(hardware.sys, "platform", "win32")
     hardware._cache = None
     yield
     hardware._cache = None
@@ -48,11 +49,11 @@ def test_classify_vendor():
     assert hardware.classify_vendor("Some Display Adapter") == "other"
 
 
-def test_recommend_cu128_for_new_driver():
+def test_recommend_cu130_for_new_driver():
     recommended, reason = hardware._recommend(
         [{"vendor": "nvidia", "name": "RTX 5060", "driver": "617.14"}]
     )
-    assert recommended == "torch-cu128"
+    assert recommended == "torch-cu130"
     assert "617" in reason
 
 
@@ -94,6 +95,17 @@ def test_recommend_cpu_without_gpu():
     assert "NVIDIA не найдена" in reason
 
 
+@pytest.mark.parametrize("driver,pack", [(569, "torch-cpu"), (570, "torch-cu128"),
+                                        (579, "torch-cu128"), (580, "torch-cu130")])
+def test_driver_boundaries(driver, pack):
+    assert hardware._recommend([{"vendor": "nvidia", "name": "GPU", "driver": str(driver)}])[0] == pack
+
+
+def test_linux_has_only_supported_cpu_pack(monkeypatch):
+    monkeypatch.setattr(hardware.sys, "platform", "linux")
+    assert hardware._recommend([{"vendor": "nvidia", "name": "GPU", "driver": "617"}])[0] == "torch-cpu"
+
+
 def test_detect_prefers_nvidia_and_caches(monkeypatch):
     calls = {"count": 0}
 
@@ -109,7 +121,7 @@ def test_detect_prefers_nvidia_and_caches(monkeypatch):
     assert data["vendor"] == "nvidia"
     assert data["name"] == "NVIDIA GeForce RTX 5060 Laptop GPU"
     assert data["driver"] == 617
-    assert data["recommended"] == "torch-cu128"
+    assert data["recommended"] == "torch-cu130"
     assert [gpu["vendor"] for gpu in data["gpus"]] == ["nvidia", "intel"]
 
     first_count = calls["count"]

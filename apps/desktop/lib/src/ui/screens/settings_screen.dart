@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../api/errors.dart';
 import '../../model/runtime_pack.dart';
+import '../preparation_panel.dart';
 import '../../state/shell_state.dart';
 import '../platform.dart';
 import '../theme.dart';
@@ -852,6 +853,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final runtime = secondary.runtime;
     final busy = runtime.packs.any((pack) => pack.downloading);
     return _card(context, [
+      PreparationPanel(state: secondary, selection: state.workspace.settings, onDeviceChanged: (value) => _set('device', value)),
+      const SizedBox(height: 16),
       const SectionHeader(
         title: 'Компоненты',
         lead: 'PyTorch ускоряет очистку на NVIDIA, Argos переводит офлайн. '
@@ -963,7 +966,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
       const SizedBox(height: 4),
       Text(
-        'Смена torch-компонента применится после перезапуска приложения.',
+        'Смена компонента применится при следующей обработке.',
         style: theme.textTheme.labelSmall?.copyWith(color: palette.textMuted),
       ),
     ]);
@@ -972,10 +975,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// Название второго torch-пака, если он уже стоит или качается.
   String? _torchConflict(RuntimePack pack) {
     if (pack.kind != 'torch') return null;
-    final otherId = pack.id == 'torch-cpu' ? 'torch-cu128' : 'torch-cpu';
-    final other = state.secondary.runtime.pack(otherId);
-    if (other != null && (other.installed || other.downloading)) {
-      return other.title;
+    for (final other in state.secondary.runtime.packs) {
+      if (other.kind == 'torch' && other.id != pack.id && other.downloading) {
+        return other.title;
+      }
     }
     return null;
   }

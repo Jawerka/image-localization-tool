@@ -31,7 +31,7 @@ class RuntimePack {
   final String source;
 
   bool get installed => state == 'installed';
-  bool get downloading => state == 'downloading' || state == 'installing';
+  bool get downloading => state == 'downloading' || state == 'installing' || state == 'checking';
   bool get failed => state == 'error' || error.isNotEmpty;
 
   /// Процент (null, если общий размер неизвестен).

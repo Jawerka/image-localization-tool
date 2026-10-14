@@ -47,6 +47,13 @@ class Config:
     # Проба: автоподстановка CC0-шрифтов для SFX и free-текста.
     auto_stylized_fonts: bool = True
     device: str = "auto"
+    # Каталог внешних моделей и политика докачки компонентов.
+    models_dir: str = ""
+    components_dir: str = ""
+    download_retries: int = 3
+    download_timeout: int = 30
+    download_disk_reserve_mb: int = 64
+    download_cache_limit_mb: int = 4096
     glossary_path: str = ""
     detector_conf: float = 0.3
     # Ореол цвета фона вокруг перевода. 0 — без ореола.

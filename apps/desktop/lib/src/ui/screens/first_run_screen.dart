@@ -7,6 +7,7 @@ import '../../model/runtime_pack.dart';
 import '../../state/shell_state.dart';
 import '../theme.dart';
 import '../widgets.dart';
+import '../preparation_panel.dart';
 
 /// Мастер первого запуска: тема, модели, LLM, языки.
 class FirstRunScreen extends StatefulWidget {
@@ -19,7 +20,7 @@ class FirstRunScreen extends StatefulWidget {
 }
 
 class _FirstRunScreenState extends State<FirstRunScreen> {
-  static const steps = ['Тема', 'Модели', 'Компоненты', 'Сервер LLM', 'Языки'];
+  List<String> get steps => ['Тема', 'Перевод', if (_draft['translator_backend'] != 'argos') 'Сервер LLM', 'Языки', 'Подготовка'];
 
   int _step = 0;
   late Map<String, dynamic> _draft;
@@ -41,6 +42,10 @@ class _FirstRunScreenState extends State<FirstRunScreen> {
       'llm_base_url': settings['llm_base_url'] ?? '',
       'llm_model': settings['llm_model'] ?? '',
       'api_key': '',
+      'translator_backend': settings['translator_backend'] ?? 'llm',
+      'device': settings['device'] ?? 'auto',
+      'inpainter_backend': settings['inpainter_backend'] ?? 'lama',
+      'models_dir': settings['models_dir'] ?? '',
     };
     unawaited(state.secondary.refreshModels());
     unawaited(state.secondary.refreshRuntime());
@@ -147,7 +152,7 @@ class _FirstRunScreenState extends State<FirstRunScreen> {
                     children: [
                       Text('Добро пожаловать', style: theme.textTheme.titleSmall),
                       Text(
-                        'настройка займёт минуту · всё можно изменить позже',
+                        'подготовим нужные компоненты · прогресс загрузки сохранится',
                         style: theme.textTheme.labelSmall,
                       ),
                     ],
@@ -217,10 +222,10 @@ class _FirstRunScreenState extends State<FirstRunScreen> {
                     constraints: const BoxConstraints(maxWidth: 640),
                     child: switch (_step) {
                       0 => _themeStep(context),
-                      1 => _modelsStep(context),
-                      2 => _componentsStep(context),
-                      3 => _llmStep(context),
-                      _ => _languagesStep(context),
+                      1 => _modeStep(context),
+                      2 => _draft['translator_backend'] == 'argos' ? _languagesStep(context) : _llmStep(context),
+                      3 => _draft['translator_backend'] == 'argos' ? _preparationStep(context) : _languagesStep(context),
+                      _ => _preparationStep(context),
                     },
                   ),
                 ),
@@ -297,109 +302,36 @@ class _FirstRunScreenState extends State<FirstRunScreen> {
         ),
       ]);
 
-  Widget _modelsStep(BuildContext context) {
-    final secondary = state.secondary;
-    final palette = IltPalette.of(context);
-    final theme = Theme.of(context);
-    final titles = {
-      'detector': 'Детектор текста (RT-DETR)',
-      'lama': 'LaMa · очистка баллонов',
-      'font': 'Шрифты · офлайн-вёрстка',
-    };
-    final missing = [
-      for (final model in secondary.models)
-        if (!model.present) model.kind,
-    ];
-    return _card(context, [
-      const SectionHeader(
-        title: 'Модели',
-        lead: 'Без них не работает распознавание и очистка. '
-            'Скачиваются в папку models рядом с программой.',
-      ),
-      for (final model in secondary.models)
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          child: Row(
-            children: [
-              SizedBox(
-                width: 200,
-                child: Text(
-                  titles[model.kind] ?? model.kind,
-                  style: theme.textTheme.bodySmall
-                      ?.copyWith(color: palette.textPrimary),
-                ),
-              ),
-              Expanded(
-                child: model.downloading
-                    ? Row(
-                        children: [
-                          Expanded(
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(2),
-                              child: LinearProgressIndicator(value: model.percent),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            model.percent == null
-                                ? _formatBytes(model.bytesDone)
-                                : '${(model.percent! * 100).round()} %',
-                            style: theme.textTheme.labelSmall,
-                          ),
-                        ],
-                      )
-                    : Text(
-                        model.error.isNotEmpty
-                            ? 'ошибка: ${model.error}'
-                            : (model.present ? 'уже на диске' : 'не скачано'),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: model.error.isNotEmpty
-                              ? palette.textError
-                              : palette.textMuted,
-                        ),
-                      ),
-              ),
-              const SizedBox(width: 8),
-              if (!model.present && !model.downloading)
-                OutlinedButton(
-                  key: Key('wizard-download-${model.kind}'),
-                  onPressed: () => secondary.startDownload(model.kind),
-                  child: const Text('Скачать'),
-                )
-              else if (model.present)
-                Icon(Icons.check, size: 14, color: palette.textSuccess),
-            ],
-          ),
-        ),
-      if (missing.isNotEmpty) ...[
-        const SizedBox(height: 8),
-        FilledButton(
-          key: const Key('wizard-download-missing'),
-          onPressed: () {
-            for (final kind in missing) {
-              secondary.startDownload(kind);
-            }
-          },
-          child: const Text('Скачать недостающие'),
-        ),
-        const SizedBox(height: 6),
+  Widget _modeStep(BuildContext context) => _card(context, [
+    const SectionHeader(title: 'Способ перевода', lead: 'Нужные компоненты будут выбраны автоматически.'),
+    SegmentedButton<String>(
+      segments: const [
+        ButtonSegment(value: 'llm', label: Text('Сервер LLM')),
+        ButtonSegment(value: 'argos', label: Text('Оффлайн')),
       ],
-      Text(
-        'Можно закрыть окно — загрузка продолжится в фоне.',
-        style: theme.textTheme.labelSmall,
-      ),
-    ]);
-  }
+      selected: {'${_draft['translator_backend']}'},
+      onSelectionChanged: (values) => _set('translator_backend', values.first),
+    ),
+    const SizedBox(height: 12),
+    const Text('Оффлайн-перевод работает после загрузки языковой модели. Для LLM укажите свой сервер.'),
+  ]);
+
+  Widget _preparationStep(BuildContext context) => _card(context, [
+    PreparationPanel(state: state.secondary, selection: _draft, onDeviceChanged: (value) => _set('device', value)),
+    const SizedBox(height: 12),
+    Material(type: MaterialType.transparency, child: ExpansionTile(
+      title: const Text('Дополнительные настройки компонентов'),
+      children: [_componentsStep(context)],
+    )),
+  ]);
 
   /// Конфликт torch-паков: cpu и cu128 не ставятся одновременно.
   String? _torchConflict(RuntimePack pack) {
     if (pack.kind != 'torch') return null;
-    final otherId = pack.id == 'torch-cpu' ? 'torch-cu128' : 'torch-cpu';
-    final other = state.secondary.runtime.pack(otherId);
-    if (other != null && (other.installed || other.downloading)) {
-      return 'сначала удалите «${other.title}» в настройках';
+    for (final other in state.secondary.runtime.packs) {
+      if (other.kind == 'torch' && other.id != pack.id && other.downloading) {
+        return 'дождитесь завершения «${other.title}»';
+      }
     }
     return null;
   }
@@ -475,7 +407,7 @@ class _FirstRunScreenState extends State<FirstRunScreen> {
       const SizedBox(height: 6),
       Text(
         'Большие компоненты качаются в фоне — прогресс виден здесь и в настройках. '
-        'Смена torch-компонента применится после перезапуска приложения.',
+        'Смена компонента применится при следующей обработке.',
         style: theme.textTheme.labelSmall,
       ),
     ]);

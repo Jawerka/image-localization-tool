@@ -61,11 +61,11 @@ New-Item -ItemType Directory -Path $stage -Force | Out-Null
 # Copy the app without personal state: top-level models/runtime/data stay empty.
 # /XD with a full path only: a bare name excludes directories at any depth
 # and would drop desktop\data (Flutter assets), cv2\data, rapidocr\models.
-$excludedDirs = @('models', 'runtime', 'data') |
+$excludedDirs = @('models', 'runtime', 'data', '.resources', '.downloads', '.builtin') |
     ForEach-Object { Join-Path $DistDir $_ }
 $robocopyArgs = @(
     $DistDir, $stage, '/E', '/XD') + $excludedDirs + @(
-    '/NFL', '/NDL', '/NJH', '/NJS', '/nc', '/ns', '/np'
+    '/XF', '.installer.lock', 'preparation.json', '/NFL', '/NDL', '/NJH', '/NJS', '/nc', '/ns', '/np'
 )
 & robocopy @robocopyArgs
 $code = $LASTEXITCODE

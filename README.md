@@ -183,10 +183,23 @@ python -m venv venv-release
 .\scripts\build-windows.ps1 -SkipModels -BuildPython venv-release\Scripts\python.exe
 ```
 
-При первом запуске мастер предложит компоненты по выбору железа: `torch-cpu` (~125 МБ),
-`torch-cu128` (~2.5 ГБ на NVIDIA с драйвером 570+) и `argos` (~90 МБ) — большие файлы
-скачиваются в фоне с официальных PyPI/PyTorch CDN. Позже их можно поставить в
-«Настройках → Компоненты» или без окна: `ImageLocalizationTool.exe --deploy cpu|argos|all`.
+При первом запуске выберите языки и режим перевода, затем нажмите «Подготовить».
+Программа покажет объём недостающих файлов, выберет ускорение и загрузит OCR,
+очистку, шрифты и языковую модель. Для Windows NVIDIA: драйвер 580+ → `torch-cu130`
+(~1.93 ГБ), 570–579 → `torch-cu128` (~2.5 ГБ), остальные → CPU (~125 МБ).
+Оффлайн-перевод поддерживает en↔ru; языки докачиваются заранее, вместе с MiniSBD.
+Загрузку можно остановить и продолжить после перезапуска. Каждый файл сверяется
+по SHA256; новая установка включается после проверки. Без окна: `--deploy all`
+готовит полный набор en→ru, `--deploy cuda` ставит рекомендованный CUDA-компонент.
+
+Обычный выпуск использует сохранённые каталоги обеих платформ и не подбирает
+зависимости заново. После фиксации исходников: `scripts\release.ps1 -Prepare`
+собирает Windows, запускает Linux CI и сохраняет проверенный комплект в draft.
+После ручной приёмки: `scripts\release.ps1 -Publish -SmokePassed` публикует эти же
+файлы. Изменённый комплект отклоняется. Обновление зависимостей — отдельная
+операция `scripts\build-runtime-locks.ps1 -UpdateCatalog` с проверкой diff.
+Подробности: [план доставки](docs/DOWNLOAD_DELIVERY_PLAN.md),
+[проверки реализации](specs/033-reliable-component-delivery/quickstart.md).
 
 CUDA-сборку torch для локальной разработки ставьте только в dev-`venv`
 (`scripts\setup_models.py --torch-cuda`): в релиз она не попадает.
@@ -239,7 +252,7 @@ tests/
 | LaMa-manga | [Sanster/models](https://github.com/Sanster/models) | скачивается отдельно |
 | Heroika и OFL-шрифты | OFL 1.1 | лежат в `src/resources/fonts/` |
 | CC0 comic-проба (GGBotNet) | CC0 1.0 | см. [docs/FONTS.md](docs/FONTS.md); файлы и `CC0.txt` в `src/resources/fonts/` |
-| Argos Translate | git-зависимость в `requirements.txt` | оффлайн-фолбэк перевода |
+| Argos Translate | фиксированное колесо, MIT, провенанс в `assets/README.md` | оффлайн-фолбэк перевода |
 
 ## Спецификации
 

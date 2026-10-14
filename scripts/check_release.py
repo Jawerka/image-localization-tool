@@ -38,6 +38,7 @@ from scripts.manifest_tools import validate_manifest  # noqa: E402
 from scripts.smoke_dist import read_app_version  # noqa: E402
 
 CACHE_SCHEMA = 1
+_ANONYMOUS = False
 _ASSET_PATTERNS = ("*setup.exe", "*portable.zip", "*server-*.zip", "*server-*.tar.gz")
 
 
@@ -50,6 +51,8 @@ def _file_sha256(path: Path) -> str:
 
 
 def _github_token() -> str:
+    if _ANONYMOUS:
+        return ""
     return (os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN") or "").strip()
 
 
@@ -213,6 +216,7 @@ def load_cache(path: Path) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
+    global _ANONYMOUS
     version = read_app_version(ROOT)
     parser = argparse.ArgumentParser(description="Гейт релиза рантайма (Tier 1 + Tier 2)")
     parser.add_argument(
@@ -226,8 +230,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cache", default="build/deep.json")
     parser.add_argument("--pack", default="torch-cpu", help="пак для Tier 2")
     parser.add_argument("--skip-remote", action="store_true", help="без HEAD-проверок")
+    parser.add_argument("--anonymous", action="store_true", help="проверять доступность без токена разработчика")
+    parser.add_argument("--components", default="", help="также проверить каталог моделей/OCR/языков/шрифтов")
     parser.add_argument("--timeout", type=float, default=30.0, help="таймаут HEAD, с")
     args = parser.parse_args(argv)
+    _ANONYMOUS = args.anonymous
 
     manifest_path = Path(args.manifest)
     if not manifest_path.is_absolute():
@@ -251,6 +258,14 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     if not args.skip_remote:
+        if args.components:
+            from src.app.component_catalog import load
+
+            resources_path = Path(args.components)
+            resources = load(resources_path if resources_path.is_absolute() else ROOT / resources_path)
+            records = [{"id": c.id, "os": "all", "files": [{"name": f.name, "url": f.urls[0],
+                       "size_bytes": f.size_bytes} for f in c.files]} for c in resources]
+            manifest = {**manifest, "packs": [*manifest["packs"], *records]}
         url_failures, warnings = check_urls(manifest, args.timeout)
         for line in warnings:
             print(f"ПРЕДУПРЕЖДЕНИЕ: {line}")

@@ -88,11 +88,12 @@ def test_publish_release_script_uploads_per_file_and_gates_clobber():
     assert "upload $tag @assets" not in text
 
 
-def test_publish_release_merges_pack_summaries_in_python():
+def test_publish_release_uses_fixed_catalog_without_late_merge():
     data = PUBLISH.read_bytes()
     text = data.decode("ascii")
-    # Склейка сводок — в Python: PS 5.1 ConvertFrom-Json портит массивы
-    assert "'--packs' $winSummary '--packs' $linuxSummary" in text
+    # Каталог обеих платформ сформирован до упаковки; Final его только сверяет.
+    assert "runtime-catalog.json" in text
+    assert "'--packs' $winSummary '--packs' $linuxSummary" not in text
     assert "packs-all.json" not in text
     assert "$seen" not in text
 

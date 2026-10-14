@@ -1,6 +1,7 @@
 """Компонент перевода на основе Argos Translate (оффлайн)."""
 
 from functools import lru_cache
+import os
 from src.utils.logger import logger
 
 
@@ -12,6 +13,7 @@ class TranslatorService:
         self._translator = None
         self._initialized = False
         self._error: str | None = None
+        self._pair = None
 
     @property
     def last_error(self) -> str:
@@ -28,13 +30,22 @@ class TranslatorService:
         Returns:
             True если инициализация успешна.
         """
-        if self._initialized:
+        if self._initialized and self._pair == (source_lang, target_lang):
             return self._error is None
         
         self._initialized = True
+        self._pair = (source_lang, target_lang)
+        self._error = None
         
         try:
+            os.environ["ARGOS_CHUNK_TYPE"] = "MINISBD"
             import argostranslate.package
+            import argostranslate.settings
+            from src.app.component_catalog import language_dirs
+
+            directories = language_dirs()
+            argostranslate.settings.package_dirs = directories
+            argostranslate.settings.chunk_type = argostranslate.settings.ChunkType.MINISBD
             import argostranslate.translate
             
             logger.info("Initializing Argos Translate (оффлайн)")
@@ -51,13 +62,9 @@ class TranslatorService:
             
             if not model_found:
                 logger.warning(f"Model {source_lang}->{target_lang} not installed")
-                # Пытаемся установить
-                try:
-                    self._download_model(source_lang, target_lang)
-                except Exception as e:
-                    self._error = f"Could not download model: {e}"
-                    logger.error(self._error)
-                    return False
+                self._error = f"Нужно подготовить оффлайн-перевод {source_lang} → {target_lang} в настройках приложения"
+                logger.error(self._error)
+                return False
             
             self._translator = argostranslate.translate
             return True
@@ -73,30 +80,6 @@ class TranslatorService:
             self._error = f"Translation initialization error: {e}"
             logger.error(self._error)
             return False
-    
-    def _download_model(self, source_lang: str, target_lang: str) -> None:
-        """Скачать языковую модель.
-        
-        Args:
-            source_lang: Исходный язык.
-            target_lang: Целевой язык.
-        """
-        import argostranslate.package
-        
-        logger.info(f"Downloading model: {source_lang}->{target_lang}")
-        argostranslate.package.update_package_index()
-        
-        available_packages = argostranslate.package.get_available_packages()
-        
-        for pkg in available_packages:
-            if pkg.from_code == source_lang and pkg.to_code == target_lang:
-                logger.info(f"Found package: {pkg.package_version}")
-                pkg.download()
-                argostranslate.package.install_from_path(pkg.path)
-                logger.info("Model installed successfully")
-                return
-        
-        raise Exception(f"No package available for {source_lang}->{target_lang}")
     
     def translate_texts(
         self,
@@ -192,8 +175,9 @@ class TranslatorService:
         """
         try:
             import argostranslate.package
+            from src.app.component_catalog import language_dirs
             
-            packages = argostranslate.package.get_installed_packages()
+            packages = argostranslate.package.get_installed_packages(language_dirs())
             langs = set()
             
             for pkg in packages:

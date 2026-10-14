@@ -1,6 +1,7 @@
 """Статус моделей и докачка через подмену urlopen. Сеть не используется."""
 
 import json
+import hashlib
 import urllib.request
 from pathlib import Path
 
@@ -20,7 +21,7 @@ from src.app.model_manager import (
 
 
 def test_font_goes_beside_program_and_models_follow_override(tmp_path, monkeypatch):
-    monkeypatch.setattr("src.app.model_manager.install_root", lambda: tmp_path)
+    monkeypatch.setattr("src.app.model_manager.components_root", lambda: tmp_path)
     monkeypatch.setattr("src.app.model_manager.models_dir", lambda override=None: Path(override) if override else tmp_path / "models")
     assert dest_dir("font") == tmp_path / "fonts"
     custom = tmp_path / "custom"
@@ -34,6 +35,12 @@ def test_urls_match_setup_script():
 
 
 def test_status_on_temp_dir(tmp_path, monkeypatch):
+    from src.app import component_catalog, downloads
+    payloads = {"ogkalu-detector-v4-s_int8.onnx": b"onnx", LAMA_FILENAME: b"pt", FONT_FILENAME: b"otf"}
+    components = [component_catalog.Component(str(i), str(i), "model", (downloads.Artifact(name,
+        ("https://example.org/" + name,), hashlib.sha256(body).hexdigest(), len(body)),))
+        for i, (name, body) in enumerate(payloads.items())]
+    monkeypatch.setattr(component_catalog, "load", lambda: components)
     def fake_model(name, override=None):
         root = Path(override) if override else tmp_path
         return root / name
@@ -61,6 +68,8 @@ def test_status_on_temp_dir(tmp_path, monkeypatch):
 
     (tmp_path / LAMA_FILENAME).write_bytes(b"")
     assert status(str(tmp_path))["lama"]["present"] is False
+    (tmp_path / FONT_FILENAME).write_bytes(b"bad")
+    assert status(str(tmp_path))["font"]["present"] is False
 
 
 class _Response:
@@ -83,6 +92,15 @@ class _Response:
 
 
 def test_download_uses_urlopen_and_skips_existing(tmp_path, monkeypatch):
+    from src.app import component_catalog, downloads
+
+    monkeypatch.setenv("ILT_COMPONENT_ROOT", str(tmp_path / "components"))
+    def fake_component(kind):
+        names = {"lama": LAMA_FILENAME, "font": FONT_FILENAME, "detector": "ogkalu-detector-v4-s_int8.onnx"}
+        urls = {"lama": LAMA_URL, "font": FONT_URL, "detector": "https://example.org/detector"}
+        file = downloads.Artifact(names[kind], (urls[kind],), hashlib.sha256(b"model").hexdigest(), 5)
+        return component_catalog.Component(kind, kind, "model", (file,))
+    monkeypatch.setattr(component_catalog, "by_id", fake_component)
     seen = {}
     progress_calls = []
 

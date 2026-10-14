@@ -235,6 +235,8 @@ class AppSettings:
     export_jpeg_quality: int = 90
     export_conflict: str = "rename"
     models_dir: str = ""
+    components_dir: str = ""
+    components_previous_dir: str = ""
     single_key_shortcuts: bool = True
     dock_position: str = "bottom"  # top|bottom
     first_run_complete: bool = False
@@ -298,6 +300,8 @@ class AppSettings:
         self.export_jpeg_quality = _as_int(self.export_jpeg_quality, 90, 1, 100)
         self.export_conflict = _choice(self.export_conflict, _EXPORT_CONFLICTS, "rename")
         self.models_dir = _raw_text(self.models_dir, "")
+        self.components_dir = _raw_text(self.components_dir, "")
+        self.components_previous_dir = _raw_text(self.components_previous_dir, "")
         self.single_key_shortcuts = _as_bool(self.single_key_shortcuts, True)
         self.dock_position = _choice(self.dock_position, _DOCK_POSITIONS, "bottom")
         self.first_run_complete = _as_bool(self.first_run_complete, False)
@@ -350,6 +354,8 @@ class AppSettings:
             "export_jpeg_quality": self.export_jpeg_quality,
             "export_conflict": self.export_conflict,
             "models_dir": self.models_dir,
+            "components_dir": self.components_dir,
+            "components_previous_dir": self.components_previous_dir,
             "single_key_shortcuts": self.single_key_shortcuts,
             "dock_position": self.dock_position,
             "first_run_complete": self.first_run_complete,
@@ -434,6 +440,8 @@ class AppSettings:
         config.translate_sfx = self.sfx_mode == "replace"
         config.auto_stylized_fonts = self.auto_stylized_fonts
         config.device = self.device
+        config.models_dir = self.models_dir
+        config.components_dir = self.components_dir
         config.glossary_path = self.glossary_path
         config.detector_conf = self.detector_conf
         config.text_stroke_ratio = self.text_stroke_ratio

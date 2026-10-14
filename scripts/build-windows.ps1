@@ -127,6 +127,8 @@ function Copy-ModelsBesideExe {
 $Python = Resolve-BuildPython -Override $BuildPython
 $version = Get-AppVersion -Python $Python
 Write-Host "==> Version $version"
+Invoke-Checked { & $Python (Join-Path $RepoRoot 'scripts\build-runtime-manifest.py') } 'fixed catalogs before build'
+Invoke-Checked { & $Python (Join-Path $RepoRoot 'scripts\release_candidate.py') 'stamp-build' } 'record build source'
 
 $DistDir = Join-Path $RepoRoot 'dist\ImageLocalizationTool'
 $SidecarBuildDir = Join-Path $RepoRoot 'dist\ilt_sidecar'
@@ -292,3 +294,4 @@ Write-Host ""
 Write-Host "Windows build:" -ForegroundColor Green
 Write-Host "  $(Join-Path $DistDir 'desktop\ImageLocalizationTool.exe')"
 Write-Host "  $DistDir"
+Invoke-Checked { & $Python (Join-Path $RepoRoot 'scripts\release_candidate.py') 'verify-build' } 'verify unchanged build source'

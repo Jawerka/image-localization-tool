@@ -50,7 +50,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 [Files]
 ; runtime/ (компоненты torch/Argos) и data/ в установщик не входят:
 ; паки качаются из программы, data/ — признак портативной раскладки.
-Source: "{#DistDir}\*"; DestDir: "{app}"; Excludes: "runtime,data"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#DistDir}\*"; DestDir: "{app}"; Excludes: "runtime,data,models,.downloads,.resources,.builtin,.installer.lock,preparation.json"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; Upgrade over the pywebview layout: drop the old root exe and its bundle.
 [InstallDelete]

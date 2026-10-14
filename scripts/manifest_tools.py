@@ -139,6 +139,9 @@ def build_manifest(version: str, records: list[dict], url_base: str) -> dict:
             }
         if record.get("driver_min") is not None:
             entry["driver_min"] = int(record["driver_min"])
+        for key in ("check", "revision", "unpacked_bytes"):
+            if key in record:
+                entry[key] = record[key]
         entries.append(entry)
     entries.sort(key=lambda item: (item["os"], KIND_ORDER.get(item["kind"], 9), item["id"]))
     return {"schema": 2, "app": version, "packs": entries}

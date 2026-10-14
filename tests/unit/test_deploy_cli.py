@@ -51,7 +51,7 @@ def test_run_pack_installs(monkeypatch, tmp_path):
     pack = runtime.Pack("argos", "Argos", "argos", runtime.platform_tag(), "310", "1.0", "", "", 0)
     installed: list[str] = []
     monkeypatch.setattr(deploy.runtime, "pack_by_id", lambda pack_id: pack)
-    monkeypatch.setattr(deploy.runtime, "is_installed", lambda pack_id: False)
+    monkeypatch.setattr(deploy.runtime, "ready", lambda pack: False)
     monkeypatch.setattr(
         deploy.runtime,
         "download_and_install",
@@ -67,7 +67,8 @@ def test_run_pack_already_installed_activates(monkeypatch, tmp_path):
     pack = runtime.Pack("torch-cpu", "CPU", "torch", runtime.platform_tag(), "310", "1.0", "", "", 0)
     activated: list[Path] = []
     monkeypatch.setattr(deploy.runtime, "pack_by_id", lambda pack_id: pack)
-    monkeypatch.setattr(deploy.runtime, "is_installed", lambda pack_id: True)
+    monkeypatch.setattr(deploy.runtime, "ready", lambda pack: True)
+    monkeypatch.setattr(deploy.runtime, "selected_torch_id", lambda: "torch-cpu")
     monkeypatch.setattr(deploy.runtime, "pack_dir", lambda pack_id: tmp_path)
     monkeypatch.setattr(
         deploy.runtime, "activate_path", lambda directory: activated.append(Path(directory)) or True
@@ -84,7 +85,7 @@ def test_run_pack_already_installed_activates(monkeypatch, tmp_path):
 def test_run_reports_failure(monkeypatch, tmp_path):
     pack = runtime.Pack("argos", "Argos", "argos", runtime.platform_tag(), "310", "1.0", "", "", 0)
     monkeypatch.setattr(deploy.runtime, "pack_by_id", lambda pack_id: pack)
-    monkeypatch.setattr(deploy.runtime, "is_installed", lambda pack_id: False)
+    monkeypatch.setattr(deploy.runtime, "ready", lambda pack: False)
     monkeypatch.setattr(deploy.runtime, "pack_dir", lambda pack_id: tmp_path)
     monkeypatch.setattr(
         deploy.runtime,

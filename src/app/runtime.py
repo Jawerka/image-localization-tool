@@ -24,6 +24,7 @@ import time
 import urllib.error
 import urllib.request
 import zipfile
+import re
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
@@ -31,7 +32,8 @@ from urllib.parse import urlsplit
 from src.app import __version__
 from src.app.events import WorkerEvent
 from src.utils.logger import logger
-from src.utils.paths import install_root
+from src.utils.paths import components_root, install_root
+from src.app import downloads
 
 PACKS_DIR_NAME = "runtime"
 MARKER_NAME = "pack.json"
@@ -49,11 +51,12 @@ _MANIFEST_TIMEOUT = 8
 
 # Порядок активации: torch-пак с CUDA вставляется в sys.path последним и
 # выигрывает у CPU-пака, если установлены оба (нештатная ситуация).
-_ACTIVATION_ORDER = {"torch-cpu": 0, "torch-cu128": 1, "argos": 2}
+_ACTIVATION_ORDER = {"torch-cpu": 0, "torch-cu128": 1, "torch-cu130": 2, "argos": 3}
 
 _manifest_cache: dict = {"data": None, "fetched": False, "started": False}
 _ready_cache: dict = {"checked": False, "torch": False, "cuda": False}
 _cache_lock = threading.Lock()
+_dll_handles: dict[str, object] = {}
 
 
 @dataclass(frozen=True)
@@ -64,6 +67,7 @@ class WheelFile:
     url: str
     sha256: str
     size_bytes: int
+    mirrors: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -83,6 +87,15 @@ class Pack:
     format: str = ""
     files: tuple[WheelFile, ...] = ()
     source: str = ""
+    check: str = ""
+    unpacked_bytes: int = 0
+
+    @property
+    def revision(self) -> str:
+        """Состав и ABI определяют ревизию независимо от версии приложения."""
+        payload = [self.id, self.platform, self.python, self.version,
+                   sorted((f.name, f.sha256, f.size_bytes) for f in self.files), self.sha256]
+        return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
     @property
     def site_packages_name(self) -> str:
@@ -141,11 +154,39 @@ def python_tag() -> str:
 
 def runtime_root() -> Path:
     """Каталог установленных паков: ``<install_root>/runtime``."""
-    return install_root() / PACKS_DIR_NAME
+    return components_root() / PACKS_DIR_NAME
 
 
 def pack_dir(pack_id: str) -> Path:
-    return runtime_root() / _safe_id(pack_id)
+    """Активная проверенная ревизия либо прежний каталог без миграции."""
+    pack_id = _safe_id(pack_id)
+    root = runtime_root()
+    active = root / ".active" / f"{pack_id}.json"
+    if active.is_file():
+        try:
+            revision = json.loads(active.read_text(encoding="utf-8"))["revision"]
+            if _is_sha256(revision):
+                short = root / ".revisions" / pack_id / revision[:24]
+                full = root / ".revisions" / pack_id / revision
+                return full if full.is_dir() and not short.exists() else short
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+    legacy = root / pack_id
+    previous_root = os.environ.get("ILT_COMPONENT_PREVIOUS_ROOT", "")
+    if previous_root and not legacy.exists():
+        previous = Path(previous_root) / PACKS_DIR_NAME
+        try:
+            revision = json.loads((previous / ".active" / f"{pack_id}.json").read_text())["revision"]
+            if _is_sha256(revision):
+                short = previous / ".revisions" / pack_id / revision[:24]
+                full = previous / ".revisions" / pack_id / revision
+                return full if full.is_dir() and not short.exists() else short
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+        if (previous / pack_id).is_dir():
+            return previous / pack_id
+    old = install_root() / PACKS_DIR_NAME / pack_id
+    return old if not legacy.exists() and old.is_dir() else legacy
 
 
 def manifest_url() -> str:
@@ -197,50 +238,28 @@ def _fetch_manifest(url: str) -> dict | None:
 
 
 def load_manifest(force: bool = False) -> dict:
-    """Манифест: кэш → встроенная копия сразу, свежая версия — фоном.
-
-    Если задан ``ILT_RUNTIME_MANIFEST_URL`` (тесты, отладка), он загружается
-    синхронно и считается источником истины. Иначе ответ не блокируется сетью:
-    возвращается встроенный манифест, а фоновый поток обновляет кэш для
-    следующих вызовов.
-    """
+    """Встроенный каталог авторитетен; явное зеркало используется только после валидации."""
     with _cache_lock:
-        cached = _manifest_cache["data"]
-        if force:
-            cached = None
-    if cached is not None:
-        return cached
-
+        if not force and _manifest_cache["data"] is not None:
+            return _manifest_cache["data"]
     override = os.environ.get(MANIFEST_ENV, "").strip()
     if override:
         fetched = _fetch_manifest(override)
         if fetched is not None:
+            if fetched.get("schema") not in (1, 2) or not all(
+                    isinstance(raw, dict) and _pack_from_dict(raw) is not None for raw in fetched["packs"]):
+                raise ValueError("Неверный каталог компонентов")
             with _cache_lock:
                 _manifest_cache["data"] = fetched
             return fetched
-
-    bundled_path = bundled_manifest_path()
-    bundled = _read_manifest_file(bundled_path) if bundled_path else None
+        raise RuntimeError("Не удалось получить явно заданный каталог компонентов")
+    path = bundled_manifest_path()
+    bundled = _read_manifest_file(path) if path else None
     if bundled is None:
-        bundled = {"schema": 1, "app": __version__, "packs": []}
-
-    # Платформа без встроенных записей (Linux-база до релизного манифеста):
-    # тянем манифест синхронно, иначе --deploy на сервере не увидит паков.
-    if not _has_platform_packs(bundled):
-        fetched = _fetch_manifest(manifest_url())
-        if fetched is not None:
-            with _cache_lock:
-                _manifest_cache["data"] = fetched
-            return fetched
-
+        bundled = {"schema": 2, "app": __version__, "packs": []}
     with _cache_lock:
         _manifest_cache["data"] = bundled
-        if not override and not _manifest_cache["started"]:
-            _manifest_cache["started"] = True
-            _start_background_refresh()
-
     return bundled
-
 
 def _record_has_hash(raw: dict) -> bool:
     """Есть ли у записи настоящие хэши: sha256 (archive) или files[] (wheels)."""
@@ -330,7 +349,10 @@ def _files_from_raw(raw: dict) -> tuple[WheelFile, ...]:
         if not name or name in names or not url or not _is_sha256(sha) or size <= 0:
             raise ValueError(f"некорректный файл: {name or '?'}")
         names.add(name)
-        files.append(WheelFile(name=name, url=url, sha256=sha, size_bytes=size))
+        mirrors = item.get("mirrors", [])
+        if not isinstance(mirrors, list) or not all(isinstance(u, str) for u in mirrors):
+            raise ValueError("некорректные зеркала")
+        files.append(WheelFile(name=name, url=url, sha256=sha, size_bytes=size, mirrors=tuple(mirrors)))
     return tuple(files)
 
 
@@ -389,6 +411,8 @@ def _pack_from_dict(raw: dict) -> Pack | None:
         format=pack_format,
         files=files,
         source=source,
+        check=str(raw.get("check") or ""),
+        unpacked_bytes=int(raw.get("unpacked_bytes") or 0),
     )
 
 
@@ -409,18 +433,18 @@ def _safe_id(pack_id: str) -> str:
 
 
 def installed_ids() -> list[str]:
-    """ids паков с валидным маркером и каталогом ``site-packages``."""
-    root = runtime_root()
-    if not root.is_dir():
-        return []
-    found: list[str] = []
-    for entry in sorted(root.iterdir(), key=lambda item: item.name):
-        if not entry.is_dir() or entry.name.endswith(TMP_SUFFIX):
+    """Проверенные активные ревизии и прежние каталоги без скрытого переноса."""
+    roots = {runtime_root(), install_root() / PACKS_DIR_NAME}
+    if os.environ.get("ILT_COMPONENT_PREVIOUS_ROOT"):
+        roots.add(Path(os.environ["ILT_COMPONENT_PREVIOUS_ROOT"]) / PACKS_DIR_NAME)
+    ids = set()
+    for root in roots:
+        if not root.is_dir():
             continue
-        if _installed_dir_ok(entry):
-            found.append(entry.name)
-    return found
-
+        ids.update(p.name for p in root.iterdir()
+                   if p.is_dir() and not p.name.startswith(".") and not p.name.endswith(TMP_SUFFIX))
+        ids.update(p.stem for p in (root / ".active").glob("*.json"))
+    return sorted(pack_id for pack_id in ids if is_installed(pack_id))
 
 def _installed_dir_ok(directory: Path) -> bool:
     marker = directory / MARKER_NAME
@@ -428,10 +452,67 @@ def _installed_dir_ok(directory: Path) -> bool:
         return False
     try:
         data = json.loads(marker.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError):
+        if not isinstance(data, dict) or not data.get("id"):
+            return False
+        inventory = data.get("inventory")
+        if inventory is None:
+            return True
+        if not isinstance(inventory, dict) or not inventory or data.get("checked") is not True:
+            return False
+        site = directory / "site-packages"
+        for name, info in inventory.items():
+            pure = PurePosixPath(name)
+            if pure.is_absolute() or ".." in pure.parts or ":" in name or "\\" in name:
+                return False
+            path = site.joinpath(*pure.parts)
+            stat = path.stat()
+            if not path.is_file() or stat.st_size != info["size"]:
+                return False
+            if stat.st_mtime_ns != info["mtime"] and downloads.digest(path) != info["sha256"]:
+                return False
+        return True
+    except (OSError, ValueError, KeyError, TypeError):
         return False
-    return isinstance(data, dict) and bool(data.get("id"))
 
+
+def matches(pack: Pack) -> bool:
+    """Совпадает состав, а не только имя установленного компонента."""
+    directory = pack_dir(pack.id)
+    if not _installed_dir_ok(directory):
+        return False
+    data = json.loads((directory / MARKER_NAME).read_text(encoding="utf-8"))
+    if data.get("revision"):
+        return data["revision"] == pack.revision
+    if pack.files:
+        return data.get("files") == {f.name: f.sha256 for f in pack.files}
+    return data.get("version") == pack.version and data.get("sha256") == pack.sha256
+
+
+def ready(pack: Pack) -> bool:
+    if not matches(pack):
+        return False
+    if not pack.check:
+        return True
+    from src.app.component_check import validation_identity
+
+    data = json.loads((pack_dir(pack.id) / MARKER_NAME).read_text(encoding="utf-8"))
+    return data.get("checker") == validation_identity()
+
+
+def selected_torch_id(ids: list[str] | None = None) -> str | None:
+    """Проверенный установленный пак ещё должен быть выбран для следующего worker."""
+    ids = installed_ids() if ids is None else ids
+    roots = [runtime_root()]
+    if os.environ.get("ILT_COMPONENT_PREVIOUS_ROOT"):
+        roots.append(Path(os.environ["ILT_COMPONENT_PREVIOUS_ROOT"]) / PACKS_DIR_NAME)
+    for root in roots:
+        try:
+            selected = json.loads((root / ".active" / "torch.json").read_text())["id"]
+            if selected in ids:
+                return selected
+        except (OSError, ValueError, KeyError):
+            pass
+    return max((i for i in ids if i.startswith("torch-")), key=lambda i: _ACTIVATION_ORDER.get(i, -1), default=None)
 
 def installed_version(pack_id: str) -> str:
     """Версия установленного пака или пустая строка."""
@@ -451,7 +532,18 @@ def is_installed(pack_id: str) -> bool:
         directory = pack_dir(pack_id)
     except ValueError:
         return False
-    return _installed_dir_ok(directory)
+    if not _installed_dir_ok(directory):
+        return False
+    try:
+        marker = json.loads((directory / MARKER_NAME).read_text(encoding="utf-8"))
+        if marker.get("python") and marker["python"] != python_tag():
+            return False
+        if marker.get("platform") and marker["platform"] != platform_tag():
+            return False
+        native = re.findall(r"-cp(\d+)-cp\d+-", " ".join(marker.get("files", {})))
+        return not native or all(tag == python_tag() for tag in native)
+    except (OSError, ValueError, TypeError):
+        return False
 
 
 def directory_bytes(directory: Path) -> int:
@@ -484,7 +576,7 @@ def status(device: str = "auto") -> dict:
                 "size_bytes": pack.effective_size,
                 "format": pack.format,
                 "source": pack.source,
-                "state": "installed" if installed else "available",
+                "state": "installed" if ready(pack) else "available",
                 "installed_version": installed_version(pack.id) if installed else "",
                 "installed_bytes": directory_bytes(pack_dir(pack.id)) if installed else 0,
                 "recommended": pack.id == recommended,
@@ -533,39 +625,27 @@ def effective_device(device: str, torch_ok: bool | None = None, cuda_ok: bool | 
 
 
 def torch_state(refresh: bool = False) -> tuple[bool, bool]:
-    """``(torch импортируется, CUDA доступна)``. Импорт torch — один раз, лениво.
-
-    Если torch-пак не установлен и torch ещё не импортирован, импорт не
-    форсируется: базе без пака незачем платить секунды за проверку.
-    """
-    with _cache_lock:
-        if refresh:
-            _ready_cache["checked"] = False
-        if _ready_cache["checked"]:
-            return bool(_ready_cache["torch"]), bool(_ready_cache["cuda"])
-
-    has_pack = any(pack.kind == "torch" and is_installed(pack.id) for pack in platform_packs())
+    """Статус из чистой проверки: parent-sidecar не импортирует и не блокирует torch DLL."""
     already = sys.modules.get("torch")
-    if not has_pack and already is None:
-        with _cache_lock:
-            _ready_cache.update({"checked": True, "torch": False, "cuda": False})
-        return False, False
-
-    torch_ok = False
-    cuda_ok = False
-    try:
-        torch = already if already is not None else importlib.import_module("torch")
-        torch_ok = True
+    if already is not None:
         try:
-            cuda_ok = bool(torch.cuda.is_available())
+            return True, bool(already.cuda.is_available())
         except Exception:
-            cuda_ok = False
-    except Exception as exc:
-        logger.info("torch недоступен: %s", exc)
-    with _cache_lock:
-        _ready_cache.update({"checked": True, "torch": torch_ok, "cuda": cuda_ok})
-    return torch_ok, cuda_ok
-
+            return True, False
+    ids = installed_ids()
+    chosen = selected_torch_id(ids)
+    if chosen is not None:
+        ids = [chosen]
+    for pack_id in reversed(sorted(ids, key=lambda x: _ACTIVATION_ORDER.get(x, 9))):
+        if not pack_id.startswith("torch-"):
+            continue
+        try:
+            data = json.loads((pack_dir(pack_id) / MARKER_NAME).read_text(encoding="utf-8"))
+            if data.get("checked"):
+                return True, bool(data.get("cuda"))
+        except (OSError, ValueError):
+            pass
+    return False, False
 
 def argos_ready() -> bool:
     """Argos импортируется (пак установлен или dev-venv). Без импорта самого пакета."""
@@ -577,51 +657,86 @@ def argos_ready() -> bool:
         return False
 
 
-def download_and_install(pack: Pack | str, progress=None, retries: int = 1) -> Path:
-    """Скачать, проверить и распаковать пак. Возвращает каталог установки.
-
-    ``progress(done, total, state, message)`` вызывается на скачивании и
-    распаковке. Wheels-записи качаются пофайлово (``.parts``), archive — одним
-    архивом (``.part``). Повторная установка уже стоящего пака — no-op.
-    """
+def download_and_install(pack: Pack | str, progress=None, retries: int = 3, pause=None) -> Path:
+    """Проверить новую ревизию до атомарного переключения; кэш сохраняется при любом сбое."""
     if isinstance(pack, str):
         pack = pack_by_id(pack)
-    destination = pack_dir(pack.id)
-    if _installed_dir_ok(destination):
-        _notify(progress, 0, 0, "installed", "уже установлено")
-        return destination
+    with downloads.installer_lock():
+        if matches(pack):
+            directory = pack_dir(pack.id)
+            marker = json.loads((directory / MARKER_NAME).read_text(encoding="utf-8"))
+            from src.app.component_check import validation_identity
 
-    root = runtime_root()
-    root.mkdir(parents=True, exist_ok=True)
-    archive = root / f"{pack.id}{PART_SUFFIX}"
-    staging = root / f"{pack.id}{WHEELS_PART_SUFFIX}"
-    temporary = root / f"{pack.id}{TMP_SUFFIX}"
-    try:
-        if pack.is_wheels:
-            _download_files(pack, staging, progress, retries)
-        else:
-            _download_pack(pack, archive, progress, retries)
-        _notify(progress, 0, 0, "installing", "распаковка")
-        if pack.is_wheels:
-            _extract_wheels(pack, staging, temporary)
-        else:
-            _extract_pack(pack, archive, temporary)
-        _write_marker(temporary, pack)
-        if destination.exists():
-            shutil.rmtree(destination)
-        temporary.replace(destination)
-    finally:
-        if archive.exists():
+            if pack.check and marker.get("checker") != validation_identity():
+                from src.app.component_check import probe
+
+                checked = probe({"kind": pack.check, "site": str(directory / "site-packages")})
+                _write_marker(directory, pack, checked)
+            if pack.kind == "torch":
+                downloads.atomic_json(runtime_root() / ".active" / "torch.json", {"id": pack.id})
+            _notify(progress, pack.effective_size, pack.effective_size, "installed", "уже установлено")
+            return directory
+        root = runtime_root()
+        root.mkdir(parents=True, exist_ok=True)
+        revision_root = root / ".revisions" / pack.id
+        destination = revision_root / pack.revision[:24]
+        temporary = revision_root / f"{pack.revision[:24]}.tmp"
+        staging = root / f"{pack.id}{WHEELS_PART_SUFFIX}"
+        archive = root / f"{pack.id}{PART_SUFFIX}"
+        checked = {}
+        try:
+            if pack.is_wheels:
+                _download_files(pack, staging, progress, retries, pause)
+                needed = sum(info.file_size for wheel in pack.files
+                             for info in zipfile.ZipFile(staging / wheel.name).infolist())
+                downloads.ensure_space(revision_root, needed)
+            else:
+                _download_pack(pack, archive, progress, retries)
+                downloads.ensure_space(revision_root, pack.unpacked_bytes or pack.effective_size * 4)
+            downloads.check_pause(pause)
+            _notify(progress, pack.effective_size, pack.effective_size, "installing", "распаковка")
+            if pack.is_wheels:
+                _extract_wheels(pack, staging, temporary)
+            else:
+                _extract_pack(pack, archive, temporary)
+            _notify(progress, pack.effective_size, pack.effective_size, "checking", "проверка компонента")
+            if pack.check:
+                from src.app.component_check import probe
+
+                checked = probe({"kind": pack.check, "site": str(temporary / "site-packages")})
+            _write_marker(temporary, pack, checked)
+            downloads.check_pause(pause)
+            if destination.exists():
+                if _installed_dir_ok(destination):
+                    if json.loads((destination / MARKER_NAME).read_text())["revision"] != pack.revision:
+                        raise RuntimeError("Конфликт каталога ревизии компонента")
+                    shutil.rmtree(temporary)
+                else:
+                    previous = destination.with_name(destination.name + ".old")
+                    if previous.exists():
+                        raise RuntimeError("Перезапустите приложение для завершения восстановления")
+                    destination.replace(previous)
+                    try:
+                        temporary.replace(destination)
+                    except Exception:
+                        previous.replace(destination)
+                        raise
+                    shutil.rmtree(previous, ignore_errors=True)
+            else:
+                temporary.replace(destination)
+            downloads.atomic_json(root / ".active" / f"{pack.id}.json", {"revision": pack.revision, "activated_at": time.time()})
+            if pack.kind == "torch":
+                downloads.atomic_json(root / ".active" / "torch.json", {"id": pack.id})
+            if not sys.modules.get("torch"):
+                activate_path(destination)
+            _notify(progress, pack.effective_size, pack.effective_size, "installed", "")
+            return destination
+        finally:
             archive.unlink(missing_ok=True)
-        if staging.exists():
-            shutil.rmtree(staging, ignore_errors=True)
-        if temporary.exists():
-            shutil.rmtree(temporary, ignore_errors=True)
-    activate_path(destination)
-    torch_state(refresh=True)
-    _notify(progress, 0, 0, "installed", "")
-    return destination
-
+            if staging.exists():
+                shutil.rmtree(staging, ignore_errors=True)
+            if temporary.exists():
+                shutil.rmtree(temporary, ignore_errors=True)
 
 def _notify(progress, done: int, total: int | None, state: str, message: str) -> None:
     if progress is None:
@@ -682,35 +797,21 @@ def _download_once(pack: Pack, archive: Path, progress) -> None:
         raise RuntimeError(f"Не сходится sha256 компонента {pack.id}")
 
 
-def _download_files(pack: Pack, staging: Path, progress, retries: int) -> None:
-    """Пофайлово скачать колёса записи: ``.part`` на файл, sha256 каждого."""
-    if staging.exists():
-        shutil.rmtree(staging)
+def _download_files(pack: Pack, staging: Path, progress, retries: int, pause=None) -> None:
+    """Staging — ссылки на проверенный постоянный кэш, не источник восстановления."""
     staging.mkdir(parents=True, exist_ok=True)
-    total = pack.effective_size
     done = 0
     for wheel in pack.files:
+        item = downloads.Artifact(wheel.name, (wheel.url, *wheel.mirrors), wheel.sha256, wheel.size_bytes)
+        ready = downloads.fetch(item, progress=lambda n, _t: _notify(
+            progress, done + n, pack.effective_size, "downloading", ""), pause=pause, retries=retries)
         target = staging / wheel.name
-        part = staging / f"{wheel.name}{PART_SUFFIX}"
-        last_error: Exception | None = None
-        for attempt in range(max(0, retries) + 1):
-            try:
-                _download_file(wheel, part, progress, done, total)
-                break
-            except urllib.error.HTTPError as exc:
-                raise RuntimeError(f"Сервер вернул {exc.code} для файла {wheel.name}") from exc
-            except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as exc:
-                last_error = exc
-                if part.exists():
-                    part.unlink(missing_ok=True)
-                if attempt < retries:
-                    logger.info("Повтор загрузки %s (%s)", wheel.name, exc)
-                    time.sleep(2.0 + 2.0 * attempt)
-        else:
-            raise RuntimeError(f"Не удалось скачать файл {wheel.name}: {last_error}")
-        part.replace(target)
+        target.unlink(missing_ok=True)
+        try:
+            os.link(ready, target)
+        except OSError:
+            shutil.copyfile(ready, target)
         done += wheel.size_bytes
-
 
 def _download_file(wheel: WheelFile, target: Path, progress, base: int, total: int) -> None:
     request = urllib.request.Request(
@@ -765,6 +866,8 @@ def _extract_wheel(path: Path, site: Path) -> None:
             if any(part.endswith(".data") for part in parts):
                 continue
             target = site.joinpath(*parts)
+            if os.name == "nt" and target.suffix.lower() in (".dll", ".pyd") and len(str(target.resolve())) >= 248:
+                raise PermissionError("Путь к компонентам слишком длинный. Выберите более короткую папку.")
             target.parent.mkdir(parents=True, exist_ok=True)
             if target.exists():
                 if _zip_entry_equals(archive, info, target):
@@ -819,22 +922,26 @@ def _extract_pack(pack: Pack, archive: Path, temporary: Path) -> None:
         raise RuntimeError(f"В архиве {pack.id} нет site-packages")
 
 
-def _write_marker(directory: Path, pack: Pack) -> None:
-    payload = {
-        "id": pack.id,
-        "version": pack.version,
-        "installed_at": time.time(),
-    }
-    if pack.is_wheels:
-        payload["format"] = "wheels"
-        payload["files"] = {item.name: item.sha256 for item in pack.files}
-    else:
-        payload["format"] = "archive"
-        payload["sha256"] = pack.sha256
-    (directory / MARKER_NAME).write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+def _write_marker(directory: Path, pack: Pack, checked: dict | None = None) -> None:
+    site = directory / "site-packages"
+    inventory = {}
+    for path in site.rglob("*"):
+        if path.is_file() and "__pycache__" not in path.parts:
+            stat = path.stat()
+            inventory[path.relative_to(site).as_posix()] = {
+                "size": stat.st_size, "mtime": stat.st_mtime_ns, "sha256": downloads.digest(path)}
+    payload = {"id": pack.id, "version": pack.version, "revision": pack.revision,
+               "python": pack.python, "platform": pack.platform,
+               "installed_at": time.time(), "inventory": inventory, "checked": True,
+               "cuda": bool((checked or {}).get("cuda"))}
+    from src.app.component_check import validation_identity
 
+    payload["checker"] = validation_identity()
+    if pack.is_wheels:
+        payload.update(format="wheels", files={f.name: f.sha256 for f in pack.files})
+    else:
+        payload.update(format="archive", sha256=pack.sha256)
+    downloads.atomic_json(directory / MARKER_NAME, payload)
 
 def remove(pack_id: str, packs_root: Path | None = None) -> bool:
     """Удалить пак. False — папки не было (идемпотентно).
@@ -844,6 +951,51 @@ def remove(pack_id: str, packs_root: Path | None = None) -> bool:
     при открытых файлах) и дочищается при следующем старте (``activate``).
     """
     root = Path(packs_root) if packs_root is not None else runtime_root()
+    pack_id = _safe_id(pack_id)
+    if packs_root is None:
+        previous = os.environ.get("ILT_COMPONENT_PREVIOUS_ROOT", "")
+        roots = {root, install_root() / PACKS_DIR_NAME}
+        if previous:
+            roots.add(Path(previous) / PACKS_DIR_NAME)
+        removed = False
+        with downloads.installer_lock():
+            for candidate in roots:
+                revisions = candidate / ".revisions" / pack_id
+                active = candidate / ".active" / f"{pack_id}.json"
+                if active.exists() or revisions.exists():
+                    active.unlink(missing_ok=True)
+                    choice = candidate / ".active" / "torch.json"
+                    try:
+                        if json.loads(choice.read_text())["id"] == pack_id:
+                            choice.unlink()
+                    except (OSError, ValueError, KeyError):
+                        pass
+                    if revisions.exists():
+                        graveyard = candidate / f"{pack_id}{TMP_SUFFIX}"
+                        shutil.rmtree(graveyard, ignore_errors=True)
+                        revisions.replace(graveyard)
+                        shutil.rmtree(graveyard, ignore_errors=True)
+                    removed = True
+                removed = remove(pack_id, candidate) or removed
+        return removed
+    active = root / ".active" / f"{pack_id}.json"
+    if active.is_file():
+        with downloads.installer_lock():
+            directory = pack_dir(pack_id)
+            active.unlink()
+            choice = root / ".active" / "torch.json"
+            try:
+                if json.loads(choice.read_text())["id"] == pack_id:
+                    choice.unlink()
+            except (OSError, ValueError, KeyError):
+                pass
+            graveyard = directory.with_name(directory.name + TMP_SUFFIX)
+            try:
+                directory.replace(graveyard)
+                shutil.rmtree(graveyard, ignore_errors=True)
+            except OSError:
+                logger.info("Удаление ревизии завершится после перезапуска")
+            return True
     directory = root / _safe_id(pack_id)
     if not directory.is_dir():
         return False
@@ -882,41 +1034,66 @@ def startup() -> list[str]:
     Вызывается из ``src/app/__main__.py`` и из ``worker_main`` (spawn-ребёнок
     не проходит через main) до первого импорта torch/argostranslate.
     """
+    if getattr(sys, "frozen", False) and not os.environ.get("ILT_COMPONENT_ROOT"):
+        from src.app.paths import settings_path
+        from src.app.settings import AppSettings
+
+        settings, _warnings = AppSettings.load(settings_path())
+        if settings.components_dir:
+            os.environ["ILT_COMPONENT_ROOT"] = settings.components_dir
+        if settings.components_previous_dir:
+            os.environ["ILT_COMPONENT_PREVIOUS_ROOT"] = settings.components_previous_dir
     activated = activate()
     try:
         from src.app.paths import data_root
 
         os.environ.setdefault("ARGOS_PACKAGES_DIR", str(data_root() / "argos-packages"))
+        os.environ.setdefault("ARGOS_TRANSLATE_PACKAGE_DIR", str(data_root() / "argos-packages"))
     except Exception:
         logger.debug("Не удалось задать ARGOS_PACKAGES_DIR", exc_info=True)
     return activated
 
 
+def activation_signature() -> str:
+    """Изменение указателей поднимает новый worker перед следующим заданием."""
+    entries = []
+    root = runtime_root()
+    for path in sorted((root / ".active").glob("*.json")):
+        entries.append((path.name, path.read_text(encoding="utf-8")))
+    from src.app.component_catalog import store_root
+
+    for path in sorted((store_root() / ".active").glob("*.json")):
+        entries.append((path.name, path.read_text(encoding="utf-8")))
+    return hashlib.sha256(json.dumps(entries).encode()).hexdigest()
+
+
 def activate(packs_root: Path | None = None) -> list[str]:
-    """Подключить установленные паки: ``sys.path``, DLL-каталоги, stdlib.zip."""
+    """Выбрать один torch до импорта DLL, затем подключить остальные компоненты."""
     _attach_stdlib()
     root = Path(packs_root) if packs_root is not None else runtime_root()
-    if not root.is_dir():
+    if not root.is_dir() and packs_root is not None:
         return []
-    # Вызывается на старте до импорта torch: залоченные файлы уже свободны.
     _cleanup_stale_temp(root)
-    found: list[tuple[int, str, Path]] = []
-    for entry in sorted(root.iterdir(), key=lambda item: item.name):
-        if not entry.is_dir() or entry.name.endswith(TMP_SUFFIX):
-            continue
-        if not _installed_dir_ok(entry):
-            continue
-        order = _ACTIVATION_ORDER.get(entry.name, 9)
-        found.append((order, entry.name, entry))
-    found.sort(key=lambda item: (item[0], item[1]))
-    activated: list[str] = []
-    for _order, pack_id, directory in found:
-        if activate_path(directory):
+    if packs_root is not None:
+        ids = [p.name for p in root.iterdir() if p.is_dir() and _installed_dir_ok(p)]
+        directories = {i: root / i for i in ids}
+    else:
+        ids = installed_ids()
+        directories = {i: pack_dir(i) for i in ids}
+    torch_ids = [i for i in ids if i.startswith("torch-")]
+    chosen = selected_torch_id(ids) if packs_root is None else None
+    try:
+        chosen = json.loads((root / ".active" / "torch.json").read_text())["id"]
+    except (OSError, ValueError, KeyError):
+        pass
+    if chosen not in torch_ids:
+        chosen = max(torch_ids, key=lambda i: _ACTIVATION_ORDER.get(i, -1), default=None)
+    ids = [i for i in ids if not i.startswith("torch-") or i == chosen]
+    activated = []
+    for pack_id in sorted(ids, key=lambda i: _ACTIVATION_ORDER.get(i, 9)):
+        if activate_path(directories[pack_id]):
             activated.append(pack_id)
-    if activated:
-        logger.info("Активированы компоненты: %s", ", ".join(activated))
     return activated
-
 
 def activate_path(directory: Path) -> bool:
     """Подключить один распакованный пак (после установки — без перезапуска)."""
@@ -934,14 +1111,17 @@ def _add_dll_directories(site: Path) -> None:
     """torch/lib (и nvidia/*/lib на Linux) — в поиск динамических библиотек."""
     if sys.platform != "win32":
         return
-    candidates = [site / "torch" / "lib"]
+    candidates = [site / "torch" / "lib", site / "ctranslate2"]
+    if getattr(sys, "_MEIPASS", None):
+        candidates.append(Path(sys._MEIPASS))
     library_dirs = [path for path in candidates if path.is_dir()]
     if not library_dirs or not hasattr(os, "add_dll_directory"):
         return
     for library in library_dirs:
         text = str(library)
         try:
-            os.add_dll_directory(text)
+            if text not in _dll_handles:
+                _dll_handles[text] = os.add_dll_directory(text)
         except OSError:
             logger.debug("add_dll_directory не сработал: %s", text)
     path = os.environ.get("PATH", "")
@@ -967,7 +1147,7 @@ class Manager:
 
     def __init__(self, fanout=None):
         self._fanout = fanout
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._state: dict = {"id": "", "state": "idle", "done": 0, "total": 0, "error": ""}
         self._thread: threading.Thread | None = None
 
@@ -977,22 +1157,20 @@ class Manager:
 
     def busy(self) -> bool:
         with self._lock:
-            return self._state["state"] in ("downloading", "installing")
+            return bool(self._thread is not None and self._thread.is_alive()) or self._state["state"] in ("downloading", "installing", "checking")
 
     def start(self, pack_id: str) -> dict:
-        """Запустить установку. Уже идёт другая — возвращает её состояние."""
+        """Резервирование и запуск сериализованы, включая параллельные HTTP-запросы."""
         with self._lock:
-            if self._state["state"] in ("downloading", "installing"):
+            if self.busy():
                 return dict(self._state)
-        pack = pack_by_id(pack_id)
-        if _installed_dir_ok(pack_dir(pack.id)):
-            return {"id": pack.id, "state": "installed", "done": 0, "total": 0, "error": ""}
-        self._update({"id": pack.id, "state": "downloading", "done": 0, "total": 0, "error": ""})
-        thread = threading.Thread(target=self._run, args=(pack,), name="ilt-runtime", daemon=True)
-        with self._lock:
-            self._thread = thread
-        thread.start()
-        return self.current()
+            pack = pack_by_id(pack_id)
+            if ready(pack):
+                return {"id": pack.id, "state": "installed", "done": 0, "total": 0, "error": ""}
+            self._update({"id": pack.id, "state": "downloading", "done": 0, "total": 0, "error": ""})
+            self._thread = threading.Thread(target=self._run, args=(pack,), name="ilt-runtime", daemon=True)
+            self._thread.start()
+            return self.current()
 
     def _run(self, pack: Pack) -> None:
         def progress(done, total, state, message) -> None:

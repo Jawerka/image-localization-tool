@@ -121,7 +121,9 @@ def test_runtime_download_installed_is_noop(monkeypatch, tmp_path):
     state = _state(tmp_path)
     directory = tmp_path / "install" / "runtime" / "argos"
     (directory / "site-packages").mkdir(parents=True)
-    (directory / "pack.json").write_text(json.dumps({"id": "argos"}), encoding="utf-8")
+    pack = runtime.pack_by_id("argos")
+    (directory / "pack.json").write_text(json.dumps({"id": "argos", "version": pack.version,
+        "sha256": pack.sha256}), encoding="utf-8")
     result = server._api(state, "POST", "/api/runtime/download", {"id": "argos"}, {})
     assert result.status == 200
     assert result.payload["installed"] is True

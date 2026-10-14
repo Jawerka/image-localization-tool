@@ -10,7 +10,7 @@ import json
 import urllib.request
 from pathlib import Path
 
-from src.utils.paths import install_root, models_dir, resolve_font, resolve_model
+from src.utils.paths import components_root, install_root, models_dir, resolve_font, resolve_model
 
 # Совпадает с scripts/setup_models.py (LAMA_URL, FONT_URL).
 LAMA_URL = (
@@ -63,7 +63,7 @@ FONT_PACK = (
 def dest_dir(kind: str, models_override: str | Path | None = None) -> Path:
     """Куда класть файл: шрифт в ``fonts`` рядом с программой, остальное в модели."""
     if kind == "font":
-        return install_root() / "fonts"
+        return components_root() / "fonts"
     override = str(models_override).strip() if models_override else ""
     return models_dir(override or None)
 
@@ -78,85 +78,45 @@ def status(models_override: str = "") -> dict:
     }
 
 
-def download(kind: str, dest_dir: str | Path, progress=None) -> Path:
-    """Скачать модель или шрифт в ``dest_dir``.
+def download(kind: str, dest_dir: str | Path, progress=None, pause=None) -> Path:
+    """Скачать проверенный ресурс общим загрузчиком, сохраняя прогресс при сбое."""
+    from src.app import component_catalog
 
-    Если файл уже есть и его размер больше нуля, запрос не выполняется.
-    ``progress(done_bytes, total_bytes | None)`` вызывается по ходу чтения.
-    ``kind="font_pack"`` отдаёт набор OFL в ``download_font_pack``
-    (у этого колбэка другая сигнатура).
-    """
     if kind == "font_pack":
-        return download_font_pack(dest_dir, progress)
-    spec = _DOWNLOADS.get(kind)
-    if spec is None:
-        raise ValueError(f"Неизвестный файл для скачивания: {kind}")
-    url, filename = spec
-    directory = Path(dest_dir)
-    directory.mkdir(parents=True, exist_ok=True)
-    dest = directory / filename
-    if dest.is_file() and dest.stat().st_size > 0:
-        return dest
-
-    request = urllib.request.Request(url)
-    temporary = dest.with_suffix(dest.suffix + ".part")
+        return download_font_pack(dest_dir, progress, pause)
     try:
-        with urllib.request.urlopen(request, timeout=120) as response:
-            total_header = response.headers.get("Content-Length")
-            total = int(total_header) if total_header else None
-            done = 0
-            if progress is not None:
-                progress(0, total)
-            with temporary.open("wb") as handle:
-                while True:
-                    chunk = response.read(64 * 1024)
-                    if not chunk:
-                        break
-                    handle.write(chunk)
-                    done += len(chunk)
-                    if progress is not None:
-                        progress(done, total)
-        temporary.replace(dest)
-    except Exception:
-        if temporary.exists():
-            temporary.unlink()
-        raise
-    return dest
+        component = component_catalog.by_id(kind)
+    except StopIteration as exc:
+        raise ValueError("Неизвестный файл для скачивания") from exc
+    folder = component_catalog.install(component, pause=pause, models_override=str(dest_dir),
+        progress=lambda done, total, state, message: progress(done, total) if progress else None)
+    result = folder / component.files[0].name
+    from src.utils.paths import components_root
+
+    destination = Path(dest_dir)
+    default = components_root() / ("fonts" if kind == "font" else "models")
+    if destination != default:
+        from src.app import downloads
+        import shutil
+
+        destination.mkdir(parents=True, exist_ok=True)
+        target = destination / result.name
+        if not downloads.valid(target, component.files[0]):
+            downloads.ensure_space(destination, result.stat().st_size)
+            temporary = target.with_suffix(target.suffix + ".tmp")
+            shutil.copyfile(result, temporary)
+            temporary.replace(target)
+        result = target
+    return result
 
 
-def download_font_pack(dest_dir: str | Path, progress=None) -> Path:
-    """Скачать небольшой набор OFL-шрифтов в ``dest_dir``.
+def download_font_pack(dest_dir: str | Path, progress=None, pause=None) -> Path:
+    """Дополнительные шрифты устанавливаются одной проверенной ревизией."""
+    from src.app import component_catalog
 
-    Уже существующие непустые файлы пропускаются.
-    ``progress(filename, index, total)`` вызывается перед каждым файлом,
-    ``index`` считается с 1. При ошибке сети недокачанный ``.part`` удаляется
-    и исключение пробрасывается дальше.
-    """
-    directory = Path(dest_dir)
-    directory.mkdir(parents=True, exist_ok=True)
-    total = len(FONT_PACK)
-    for index, (url, filename) in enumerate(FONT_PACK, start=1):
-        if progress is not None:
-            progress(filename, index, total)
-        dest = directory / filename
-        if dest.is_file() and dest.stat().st_size > 0:
-            continue
-        request = urllib.request.Request(url)
-        temporary = dest.with_suffix(dest.suffix + ".part")
-        try:
-            with urllib.request.urlopen(request, timeout=120) as response:
-                with temporary.open("wb") as handle:
-                    while True:
-                        chunk = response.read(64 * 1024)
-                        if not chunk:
-                            break
-                        handle.write(chunk)
-            temporary.replace(dest)
-        except Exception:
-            if temporary.exists():
-                temporary.unlink()
-            raise
-    return directory
+    component = component_catalog.by_id("font-pack")
+    return component_catalog.install(component, pause=pause,
+        progress=lambda done, total, state, message: progress(component.title, 1, 1) if progress else None)
 
 
 def check_llm(base_url: str, api_key: str = "") -> dict:
@@ -188,12 +148,27 @@ def _model_entry(names: tuple[str, ...], override: str | None) -> dict:
     for name in names:
         path = resolve_model(name, override)
         fallback = str(path)
-        if path.is_file() and path.stat().st_size > 0:
+        if _checked_file(path):
             return {"present": True, "path": str(path)}
     return {"present": False, "path": fallback}
 
 
 def _font_entry() -> dict:
     path = resolve_font(FONT_FILENAME)
-    present = path.is_file() and path.stat().st_size > 0
+    present = _checked_file(path)
     return {"present": present, "path": str(path)}
+
+
+def _checked_file(path: Path) -> bool:
+    """Официальный файл сверяется с каталогом, произвольная fp32-модель остаётся совместимой."""
+    from src.app import component_catalog, downloads
+
+    if not path.is_file() or path.stat().st_size == 0:
+        return False
+    for component in component_catalog.load():
+        for artifact in component.files:
+            if artifact.name == path.name:
+                if component_catalog.installed_file(path.name) == path:
+                    return True
+                return downloads.valid(path, artifact)
+    return True

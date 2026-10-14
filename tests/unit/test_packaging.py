@@ -436,7 +436,8 @@ def test_stage_puts_web_and_fonts_beside_exe_without_models(tmp_path):
 
     fonts.mkdir(parents=True)
 
-    (fonts / "Demo.otf").write_bytes(b"otf")
+    (fonts / "Heroika-Regular.otf").write_bytes(b"otf")
+    (fonts / "Demo.otf").write_bytes(b"extra")
 
     (fonts / "OFL.txt").write_text("license", encoding="utf-8")
 
@@ -458,7 +459,8 @@ def test_stage_puts_web_and_fonts_beside_exe_without_models(tmp_path):
 
     assert not (dist / "web" / "mockups").exists()
 
-    assert (dist / "fonts" / "Demo.otf").is_file()
+    assert (dist / "fonts" / "Heroika-Regular.otf").is_file()
+    assert not (dist / "fonts" / "Demo.otf").exists()
 
     assert (dist / "fonts" / "OFL.txt").is_file()
 
@@ -695,11 +697,12 @@ def test_release_workflow_builds_and_uploads_linux_assets():
     assert "workflow_dispatch" in text
     assert "contents: write" in text
     assert "build-stdlib-zip.py" in text
-    # Рантайм — официальные колёса: лок-сводки без установки torch.
-    assert "build_runtime_locks.py" in text
-    assert "--hosted-wheel" in text
-    assert "waiting for the argostranslate wheel" in text
-    assert "Check lock reproducibility" in text
+    # Обычный релиз читает фиксированный каталог до упаковки, не разрешает зависимости.
+    assert "build-runtime-manifest.py" in text
+    assert "runtime-catalog.json" in text
+    assert "build_runtime_locks.py" not in text
+    assert "waiting for the argostranslate wheel" not in text
+    assert "Frozen CPU and offline components" in text
     assert "gh release upload" in text
     assert "server-linux-x64.tar.gz" in text
     assert "packs-linux.json" in text

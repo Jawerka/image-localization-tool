@@ -54,7 +54,9 @@ class RapidOcr:
             from rapidocr import RapidOCR
         except ImportError:
             from rapidocr_onnxruntime import RapidOCR
-        self._engine = RapidOCR()
+        from src.app.component_catalog import ocr_params
+
+        self._engine = RapidOCR(params=ocr_params())
         return self._engine
 
     def _words(self, image: Image.Image) -> list[OcrWord]:

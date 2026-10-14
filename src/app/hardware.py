@@ -13,6 +13,7 @@ import subprocess
 import sys
 
 DRIVER_MIN = 570
+DRIVER_MIN_CU130 = 580
 
 _NVIDIA_QUERY = [
     "nvidia-smi",
@@ -159,7 +160,11 @@ def _recommend(gpus: list[dict]) -> tuple[str, str]:
         name = str(nvidia.get("name") or "NVIDIA GPU")
         if major is None:
             return "torch-cpu", f"{name}: версия драйвера неизвестна — CPU"
-        if major >= DRIVER_MIN:
+        if sys.platform != "win32":
+            return "torch-cpu", f"{name}: для этой платформы доступен CPU-компонент"
+        if major >= DRIVER_MIN_CU130 and sys.platform == "win32":
+            return "torch-cu130", f"CUDA доступна: драйвер {major} ≥ {DRIVER_MIN_CU130} ({name})"
+        if major >= DRIVER_MIN and sys.platform == "win32":
             return "torch-cu128", f"CUDA доступна: драйвер {major} ≥ {DRIVER_MIN} ({name})"
         return "torch-cpu", (
             f"драйвер {major} < {DRIVER_MIN}: обновите драйвер NVIDIA для CUDA или CPU"

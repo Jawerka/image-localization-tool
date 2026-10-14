@@ -44,10 +44,12 @@ from src.app.runtime import RELEASE_BASE  # noqa: E402
 PACK_TITLES = {
     "torch-cpu": "PyTorch CPU (LaMa)",
     "torch-cu128": "PyTorch CUDA 12.8 (NVIDIA)",
+    "torch-cu130": "PyTorch CUDA 13.0 (NVIDIA)",
     "argos": "Argos Translate (офлайн-перевод)",
 }
-KIND = {"torch-cpu": "torch", "torch-cu128": "torch", "argos": "argos"}
-DRIVER_MIN = {"torch-cu128": 570}
+KIND = {"torch-cpu": "torch", "torch-cu128": "torch", "torch-cu130": "torch", "argos": "argos"}
+DRIVER_MIN = {"torch-cu128": 570, "torch-cu130": 580}
+WHEEL_BASE = "https://raw.githubusercontent.com/Jawerka/image-localization-tool/cbe2960b7d620cbc0348f50ba325e8945384d795/assets"
 
 TORCH_VERSION = "2.11.0"
 # argostranslate из официального git: в 1.11.1 stanza стал optional extra,
@@ -58,8 +60,9 @@ PYPI_INDEX = "https://pypi.org/simple"
 TORCH_INDEX = {
     "torch-cpu": "https://download.pytorch.org/whl/cpu",
     "torch-cu128": "https://download.pytorch.org/whl/cu128",
+    "torch-cu130": "https://download.pytorch.org/whl/cu130",
 }
-TOP_PACKAGE = {"torch-cpu": "torch", "torch-cu128": "torch", "argos": "argostranslate"}
+TOP_PACKAGE = {key: ("argostranslate" if key == "argos" else "torch") for key in KIND}
 
 APP_VERSION = read_app_version(ROOT)
 
@@ -240,7 +243,7 @@ def hosted_entry(path: Path, url_base: str) -> dict:
     """Запись ``files[]`` для собранного колеса, публикуемого ассетом релиза."""
     return {
         "name": path.name,
-        "url": f"{url_base.rstrip('/')}/v{APP_VERSION}/{path.name}",
+        "url": f"{url_base.rstrip('/')}/{path.name}",
         "sha256": _file_sha256(path),
         "size_bytes": path.stat().st_size,
     }
@@ -300,6 +303,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--os", required=True, choices=["win", "linux"], dest="os_tag")
     parser.add_argument("--python-tag", default="", help="по умолчанию — текущий интерпретатор")
     parser.add_argument("--out", default="dist/locks", help="каталог сводок и колёс")
+    parser.add_argument("--update-catalog", action="store_true", help="явно обновить locks/runtime-catalog.json после проверки колёс")
     parser.add_argument("--work", default="", help="рабочий каталог (иначе <out>/stage/<id>-<os>)")
     parser.add_argument(
         "--lock-dir",
@@ -307,8 +311,8 @@ def main(argv: list[str] | None = None) -> int:
         help="каталог пин-файлов в репозитории (locks/); иначе lock рядом со сводкой",
     )
     parser.add_argument(
-        "--url-base",
-        default=RELEASE_BASE,
+        "--wheel-base",
+        default=WHEEL_BASE,
         help="база URL для публикуемого колеса argostranslate",
     )
     parser.add_argument(
@@ -317,6 +321,8 @@ def main(argv: list[str] | None = None) -> int:
         help="готовое колесо argostranslate (CI); без него колесо собирается из git-пина",
     )
     args = parser.parse_args(argv)
+    if args.os_tag != "win" and args.pack in DRIVER_MIN:
+        parser.error("CUDA-паки в этой версии поддерживаются только на Windows")
 
     out_dir = _resolve(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -337,7 +343,7 @@ def main(argv: list[str] | None = None) -> int:
                 raise SystemExit(f"Нет колеса argostranslate: {wheel}")
         else:
             wheel = build_argos_wheel(work / "wheel")
-        files.append(hosted_entry(wheel, args.url_base))
+        files.append(hosted_entry(wheel, args.wheel_base))
         files.sort(key=lambda item: item["name"])
         # Колесо для публикации — рядом со сводкой (publish-release ищет *.whl там).
         target = out_dir / wheel.name
@@ -346,6 +352,25 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Колесо для релиза: {target}")
 
     record = build_record(args.pack, args.os_tag, python_tag, top_version, files)
+    if args.update_catalog:
+        import zipfile
+        from src.app.runtime import _pack_from_dict
+
+        record["check"] = "torch-cuda" if args.pack in DRIVER_MIN else "torch" if args.pack == "torch-cpu" else "argos"
+        record["unpacked_bytes"] = 0
+        for item in files:
+            path = work / "wheels" / item["name"]
+            if not path.is_file():
+                path = out_dir / item["name"]
+            with zipfile.ZipFile(path) as archive:
+                record["unpacked_bytes"] += sum(entry.file_size for entry in archive.infolist())
+        record["revision"] = _pack_from_dict(record).revision
+        catalog_path = ROOT / "locks" / "runtime-catalog.json"
+        previous = json.loads(catalog_path.read_text(encoding="utf-8")) if catalog_path.is_file() else []
+        previous = [p for p in previous if (p["id"], p["os"]) != (record["id"], record["os"])]
+        previous.append(record)
+        previous.sort(key=lambda p: (p["os"], p["id"]))
+        catalog_path.write_text(json.dumps(previous, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     record_path = out_dir / f"{args.pack}-{args.os_tag}.json"
     record_path.write_text(
         json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"

@@ -261,7 +261,10 @@ class ShellState extends ChangeNotifier {
   }
 
   void _listenEvents(IltApi api) {
-    _events = EventStream(connect: api.openEvents);
+    _events = EventStream(connect: api.openEvents, onConnected: () async {
+      await secondary.refreshPreparation();
+      await secondary.refreshRuntime();
+    });
     _eventsSub = _events!.frames().listen(
       (frame) {
         _lastEvent = frame.event;
@@ -277,6 +280,8 @@ class ShellState extends ChangeNotifier {
             secondary.applyModelProgress(payload);
           case 'runtime.progress':
             secondary.applyRuntimeProgress(payload);
+          case 'preparation.progress':
+            secondary.applyPreparationProgress(payload);
           case 'job.finished':
             secondary.applyJobFinished(payload);
           case 'worker.failed':

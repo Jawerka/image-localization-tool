@@ -1,5 +1,5 @@
 # Translation (Argos Translate - оффлайн)
-argostranslate @ git+https://github.com/argosopentech/argos-translate.git
+argostranslate @ https://raw.githubusercontent.com/Jawerka/image-localization-tool/cbe2960b7d620cbc0348f50ba325e8945384d795/assets/argostranslate-1.11.1-py3-none-any.whl#sha256=b0fa2c47dcede945d9a8edbb6845de9b25791faa363bfff0b89fefaea28241f7
 
 # Image processing / ML
 torch>=2.0.0

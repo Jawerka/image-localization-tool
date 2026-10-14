@@ -58,7 +58,8 @@ else:
         collect_submodules = None
     if collect_data_files is not None:
         try:
-            rapidocr_datas = collect_data_files("rapidocr")
+            rapidocr_datas = [(source, target) for source, target in collect_data_files("rapidocr")
+                             if not source.lower().endswith(".onnx")]
         except Exception:
             rapidocr_datas = []
     if collect_submodules is not None:
@@ -97,6 +98,7 @@ else:
     print(f"WARNING: нет {stdlib_zip}; stdlib.zip не попадёт в _internal")
 # Встроенный манифест рантайма: список паков и sha256 для офлайн-установки.
 datas.append((str(project_dir / "src" / "app" / "runtime_manifest.json"), "src/app"))
+datas.append((str(project_dir / "src" / "app" / "component_manifest.json"), "src/app"))
 
 
 def _file_version_tuple(version: str) -> tuple:
@@ -163,6 +165,10 @@ a = Analysis(
         "src",
         "src.app",
         "src.app.runtime",
+        "src.app.downloads",
+        "src.app.component_catalog",
+        "src.app.component_check",
+        "src.app.preparation",
         "src.app.hardware",
         "src.app.deploy",
         "src.page_pipeline",
@@ -211,6 +217,8 @@ a = Analysis(
 # Базы torch не касается (его нет). Режем чужой CUDA: onnxruntime EP, npp* и т.п.
 a.binaries = drop_cuda_entries(a.binaries)
 a.datas = drop_cuda_entries(a.datas)
+a.datas = [entry for entry in a.datas if not
+           ("rapidocr" in str(entry[0]).lower() and str(entry[0]).lower().endswith(".onnx"))]
 
 pyz = PYZ(a.pure)
 

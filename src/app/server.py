@@ -163,6 +163,10 @@ class AppState:
         token: str | None = None,
     ):
         self.settings = settings
+        if settings.components_dir:
+            os.environ["ILT_COMPONENT_ROOT"] = settings.components_dir
+        if settings.components_previous_dir:
+            os.environ["ILT_COMPONENT_PREVIOUS_ROOT"] = settings.components_previous_dir
         self.settings_path = Path(settings_path)
         self.settings_warnings = list(settings_warnings or [])
         self.store = store
@@ -189,12 +193,26 @@ class AppState:
         self._runtime_manager: runtime.Manager | None = None
         self._models_lock = threading.Lock()
         self._models_inflight: set[str] = set()
+        self._preparation_manager = None
+        self._component_gate = threading.RLock()
+
+    def preparation_manager(self):
+        """Полный снимок доступен после SSE-reconnect и перезапуска приложения."""
+        from src.app.preparation import Manager
+
+        with self._component_gate:
+            if self._preparation_manager is None:
+                self._preparation_manager = Manager(self.fanout, self.store.root / "preparation.json",
+                    can_install=lambda: not self.queue.busy() and not self._models_inflight
+                        and not (self._runtime_manager is not None and self._runtime_manager.busy()))
+            return self._preparation_manager
 
     def runtime_manager(self) -> runtime.Manager:
         """Фоновая установка компонентов рантайма (лениво — тестам сервера не мешает)."""
-        if self._runtime_manager is None:
-            self._runtime_manager = runtime.Manager(self.fanout)
-        return self._runtime_manager
+        with self._component_gate:
+            if self._runtime_manager is None:
+                self._runtime_manager = runtime.Manager(self.fanout)
+            return self._runtime_manager
 
     def queue_path(self) -> Path:
         """JSON очереди рядом с проектами."""
@@ -587,6 +605,60 @@ def _api(state: AppState, method: str, path: str, body: dict, query: dict | None
     if path == "/api/models":
         _need_method(method, "GET")
         return _Result(model_manager.status(state.settings.models_dir))
+    if path.startswith("/api/preparation"):
+        from src.app import downloads, preparation
+
+        manager = state.preparation_manager()
+        if path == "/api/preparation":
+            _need_method(method, "GET")
+            return _Result(manager.current())
+        if path == "/api/preparation/diagnostics":
+            _need_method(method, "GET")
+            snapshot = manager.current()
+            return _Result({"version": __version__, "platform": runtime.platform_tag(),
+                "python": runtime.python_tag(), "preparation": {key: snapshot.get(key) for key in (
+                    "state", "selection", "catalog_sha", "items", "done", "total", "current", "error", "error_kind")}})
+        _need_method(method, "POST")
+        selection = state.settings.to_dict()
+        selection.update({k: v for k, v in body.items() if k in (
+            "source_lang", "target_lang", "translator_backend", "inpainter_backend", "device", "models_dir")})
+        try:
+            if path == "/api/preparation/plan":
+                return _Result(preparation.plan(selection))
+            if path == "/api/preparation/start":
+                with state._component_gate:
+                    result = manager.start(selection)
+                    _update_settings(state, result["selection"])
+                    return _Result(result, status=202)
+            if path == "/api/preparation/pause":
+                return _Result(manager.pause())
+            if path == "/api/preparation/resume":
+                with state._component_gate:
+                    return _Result(manager.resume(), status=202)
+            if path == "/api/preparation/location":
+                from src.utils.paths import components_root
+
+                with state._component_gate:
+                    if manager.busy() or state.queue.busy() or state.runtime_manager().busy():
+                        raise downloads.BusyError("Сначала приостановите подготовку и дождитесь завершения обработки")
+                    folder = Path(str(body.get("path") or ""))
+                    if not folder.is_absolute() or not folder.is_dir():
+                        raise ValueError("Выберите существующую папку")
+                    downloads.ensure_space(folder, 0)
+                    old = str(components_root())
+                    state.settings.components_previous_dir = old
+                    state.settings.components_dir = str(folder)
+                    state.settings.save(state.settings_path)
+                    os.environ["ILT_COMPONENT_PREVIOUS_ROOT"] = old
+                    os.environ["ILT_COMPONENT_ROOT"] = str(folder)
+                    return _Result({"path": str(folder), "previous": old})
+            if path == "/api/preparation/cache/clear":
+                if manager.busy():
+                    raise downloads.BusyError("Дождитесь завершения подготовки")
+                return _Result({"removed_bytes": downloads.clear_cache()})
+        except downloads.BusyError as exc:
+            raise _HttpError(409, str(exc)) from exc
+        raise _HttpError(404, "Неизвестное действие подготовки")
     if path == "/api/models/download":
         _need_method(method, "POST")
         _download_model(state, body)
@@ -709,6 +781,7 @@ def _bootstrap(state: AppState) -> dict:
         "device": state.settings.device,
         "models_ready": ready,
         "runtime": runtime.summary(state.settings.device),
+        "preparation": state.preparation_manager().current(),
         "busy": any(page["status"] in ("queued", "running") for page in pages),
         "recent": _recent_view(state),
         "has_api_key": bool(get_api_key()),
@@ -1071,10 +1144,13 @@ def _download_model(state: AppState, body: dict) -> None:
     kind = str(body.get("kind") or "")
     if kind not in ("detector", "lama", "font"):
         raise ValueError("Неизвестный файл для скачивания")
-    with state._models_lock:
-        if kind in state._models_inflight:
-            raise _HttpError(409, "Эта модель уже скачивается")
-        state._models_inflight.add(kind)
+    with state._component_gate:
+        if state.queue.busy() or (state._preparation_manager is not None and state._preparation_manager.busy()):
+            raise _HttpError(409, "Дождитесь завершения обработки или подготовки")
+        with state._models_lock:
+            if kind in state._models_inflight:
+                raise _HttpError(409, "Эта модель уже скачивается")
+            state._models_inflight.add(kind)
     dest = model_manager.dest_dir(kind, state.settings.models_dir)
 
     def progress(done, total) -> None:
@@ -1094,7 +1170,16 @@ def _download_model(state: AppState, body: dict) -> None:
 
 
 def _runtime_download(state: AppState, body: dict) -> dict:
+    with state._component_gate:
+        return _runtime_download_locked(state, body)
+
+
+def _runtime_download_locked(state: AppState, body: dict) -> dict:
     """Поставить установку пака в фон. Прогресс идёт событиями runtime.progress."""
+    if state._preparation_manager is not None and state._preparation_manager.busy():
+        raise _HttpError(409, "Подготовка уже идёт")
+    if state.queue.busy():
+        raise _HttpError(409, "Дождитесь завершения обработки")
     pack_id = str(body.get("id") or "").strip()
     if not pack_id:
         raise ValueError("Нужен id компонента")
@@ -1105,7 +1190,7 @@ def _runtime_download(state: AppState, body: dict) -> dict:
         pack = runtime.pack_by_id(pack_id)
     except KeyError as exc:
         raise _HttpError(400, "Неизвестный компонент") from exc
-    if runtime.is_installed(pack.id):
+    if runtime.ready(pack) and (pack.kind != "torch" or runtime.selected_torch_id() == pack.id):
         return {"ok": True, "id": pack.id, "installed": True}
     result = manager.start(pack.id)
     return {"ok": True, "id": pack.id, "state": result.get("state", "")}
@@ -1113,6 +1198,8 @@ def _runtime_download(state: AppState, body: dict) -> dict:
 
 def _runtime_remove(state: AppState, body: dict) -> dict:
     """Удалить установленный пак. Во время загрузки удаление запрещено."""
+    if state.queue.busy() or (state._preparation_manager is not None and state._preparation_manager.busy()):
+        raise _HttpError(409, "Дождитесь завершения обработки или подготовки")
     pack_id = str(body.get("id") or "").strip()
     if not pack_id:
         raise ValueError("Нужен id компонента")
@@ -1300,6 +1387,13 @@ def _remember_project(state: AppState, project_id: str) -> None:
 def _remove_pages(state: AppState, body: dict) -> dict:
     if not state.project_id:
         raise ValueError("Нет открытого проекта")
+    if kind in ("translate_page", "translate_all"):
+        from src.app.worker import ProcessWorker
+        if isinstance(state.queue.worker, ProcessWorker):
+            from src.app.preparation import plan
+            prepared = plan(state.settings.to_dict())
+            if prepared["state"] != "ready":
+                raise _HttpError(409, "Сначала подготовьте компоненты в настройках приложения")
     raw = body.get("page_ids")
     if not isinstance(raw, list):
         raise ValueError("Нужен список page_ids")
@@ -1481,6 +1575,15 @@ def _recent_view(state: AppState) -> list[dict]:
 
 
 def _submit(state: AppState, kind: str, page_id: str, payload: dict | None = None):
+    with state._component_gate:
+        return _submit_locked(state, kind, page_id, payload)
+
+
+def _submit_locked(state: AppState, kind: str, page_id: str, payload: dict | None = None):
+    if state._models_inflight or (state._runtime_manager is not None and state._runtime_manager.busy()):
+        raise _HttpError(409, "Дождитесь завершения установки компонентов")
+    if state._preparation_manager is not None and state._preparation_manager.busy():
+        raise _HttpError(409, "Дождитесь завершения подготовки компонентов")
     if not state.project_id:
         raise ValueError("Нет открытого проекта")
     data = dict(payload or {})

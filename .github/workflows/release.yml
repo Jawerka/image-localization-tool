@@ -8,6 +8,9 @@ on:
       tag:
         description: "Release tag, e.g. v1.0.1"
         required: true
+      source_ref:
+        description: "Exact source commit for the candidate"
+        required: false
 
 permissions:
   contents: write
@@ -23,7 +26,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && (inputs.source_ref || inputs.tag) || github.ref }}
 
       - name: Resolve tag and version
         id: meta
@@ -34,7 +37,7 @@ jobs:
             TAG="${GITHUB_REF_NAME}"
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "version=$(python -c 'from scripts.smoke_dist import read_app_version; print(read_app_version())')" >> "$GITHUB_OUTPUT"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -46,6 +49,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-release.txt pyinstaller
+
+      - name: Generate fixed catalogs before packaging
+        run: python scripts/build-runtime-manifest.py
 
       - name: Build stdlib.zip
         run: python scripts/build-stdlib-zip.py
@@ -72,57 +78,21 @@ jobs:
           chmod +x "$ROOT/deploy.sh"
           tar -C dist/server -czf "dist/ImageLocalizationTool-${VERSION}-server-linux-x64.tar.gz" ImageLocalizationTool
 
-      - name: Wait for the hosted argos wheel
+      - name: Frozen CPU and offline components
         run: |
           set -eux
-          TAG="${{ steps.meta.outputs.tag }}"
-          mkdir -p build/argos-wheel
-          for i in $(seq 1 60); do
-            if gh release download "$TAG" -p 'argostranslate-*.whl' --dir build/argos-wheel --clobber 2>/dev/null; then
-              ls -l build/argos-wheel
-              exit 0
-            fi
-            echo "waiting for the argostranslate wheel in $TAG ($i/60)"
-            sleep 15
-          done
-          echo "::error::argostranslate wheel asset not found in release $TAG"
-          exit 1
-
-      - name: Build linux locks (no torch install)
-        run: |
-          set -eux
-          python scripts/build_runtime_locks.py --pack torch-cpu --os linux --out dist/locks
-          python scripts/build_runtime_locks.py --pack argos --os linux --out dist/locks \
-            --hosted-wheel "$(ls build/argos-wheel/argostranslate-*.whl)"
-
-      - name: Check lock reproducibility
-        run: |
-          set -eux
-          mkdir -p build/locks-bootstrap
-          for f in dist/locks/py310-*-linux.lock; do
-            base="$(basename "$f")"
-            if [ -f "locks/$base" ]; then
-              diff -u "locks/$base" "$f"
-            else
-              echo "::warning::locks/$base is missing (bootstrap): commit it from the artifact"
-              cp "$f" build/locks-bootstrap/
-            fi
-          done
-
-      - name: Upload bootstrap locks
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-locks-bootstrap
-          path: build/locks-bootstrap/
-          if-no-files-found: ignore
+          ROOT="dist/server/ImageLocalizationTool"
+          python -c 'import json; from pathlib import Path; p=Path("dist/server/ImageLocalizationTool/data/check.json"); p.write_text(json.dumps({"kind":"prepare-offline","device":"cpu"}))'
+          "$ROOT/ImageLocalizationTool" --component-check "$ROOT/data/check.json"
+          python -c 'import json; from pathlib import Path; p=Path("dist/server/ImageLocalizationTool/data/check.json"); p.write_text(json.dumps({"kind":"offline-functional","device":"cpu","path":str(p.parent.resolve()/"offline-source.png")}))'
+          "$ROOT/ImageLocalizationTool" --component-check "$ROOT/data/check.json"
 
       - name: Checksums for Linux assets
         run: |
           set -eux
           cd dist
           sha256sum ImageLocalizationTool-*-server-linux-x64.tar.gz > SHA256SUMS-linux.txt
-          cp locks/packs.json packs-linux.json
+          python -c 'import json; from pathlib import Path; d=json.loads(Path("../locks/runtime-catalog.json").read_text()); Path("packs-linux.json").write_text(json.dumps([p for p in d if p["os"]=="linux"]))'
 
       - name: Upload to release
         run: |

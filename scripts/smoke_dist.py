@@ -146,7 +146,7 @@ def expected_font_names(root: Path | None = None) -> list[str]:
     names = [
         path.name
         for path in folder.iterdir()
-        if path.is_file() and path.suffix.lower() in _FONT_SUFFIXES
+        if path.is_file() and path.name == "Heroika-Regular.otf"
     ]
     names.sort()
     return names
@@ -186,7 +186,11 @@ def _stage_fonts(src: Path, dest: Path) -> None:
         return
     if dest.exists():
         shutil.rmtree(dest)
-    shutil.copytree(src, dest)
+    dest.mkdir(parents=True, exist_ok=True)
+    for name in ("Heroika-Regular.otf", "OFL.txt", "CC0.txt"):
+        path = src / name
+        if path.is_file():
+            shutil.copy2(path, dest / name)
 
 
 def dist_problems(
@@ -235,6 +239,15 @@ def dist_problems(
         else:
             # Dev-сборка с torch: минимальный CPU-набор обязателен.
             problems.extend(torch_lib_problems(dist))
+    if expect_no_torch:
+        for name in ("argostranslate", "ctranslate2", "sentencepiece"):
+            if (internal / name).exists():
+                problems.append(f"В базу попал скачиваемый компонент: {name}")
+        for path in (internal / "rapidocr").rglob("*.onnx"):
+            problems.append(f"В базу попала скачиваемая OCR-модель: {path.name}")
+        if any(p.is_file() and p.name != "Heroika-Regular.otf" and p.suffix in _FONT_SUFFIXES
+               for p in (dist / "fonts").glob("*")):
+            problems.append("В базу попали дополнительные скачиваемые шрифты")
     return problems
 
 

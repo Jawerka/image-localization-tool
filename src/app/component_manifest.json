@@ -1,0 +1,204 @@
+{
+  "schema": 1,
+  "components": [
+    {
+      "id": "detector",
+      "title": "Распознавание областей страницы",
+      "kind": "model",
+      "files": [
+        {
+          "name": "ogkalu-detector-v4-s_int8.onnx",
+          "url": "https://huggingface.co/ogkalu/comic-text-and-bubble-detector/resolve/16e8a622f91fabc6b5b65c96d32d1183f8843546/detector-v4-s_int8.onnx",
+          "sha256": "5fe9e4f576e49d4e7e8b0e029d6d3cdc252abd4694113e1cae120e62c931ea79",
+          "size_bytes": 11120765
+        }
+      ],
+      "check": "onnx",
+      "license": "Apache-2.0",
+      "provenance": "ogkalu revision 16e8a622f91fabc6b5b65c96d32d1183f8843546"
+    },
+    {
+      "id": "lama",
+      "title": "Очистка изображения",
+      "kind": "model",
+      "files": [
+        {
+          "name": "anime-manga-big-lama.pt",
+          "url": "https://github.com/Sanster/models/releases/download/AnimeMangaInpainting/anime-manga-big-lama.pt",
+          "sha256": "479d3afdcb7ed2fd944ed4ebcc39ca45b33491f0f2e43eb1000bd623cfb41823",
+          "size_bytes": 205717870
+        }
+      ],
+      "check": "lama",
+      "license": "Apache-2.0",
+      "provenance": "Sanster/models AnimeMangaInpainting; локальный файл сверяется по SHA256"
+    },
+    {
+      "id": "rapidocr",
+      "title": "Оффлайн-распознавание текста",
+      "kind": "ocr",
+      "files": [
+        {
+          "name": "PP-OCRv6_det_small.onnx",
+          "url": "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/onnx/PP-OCRv6/det/PP-OCRv6_det_small.onnx",
+          "sha256": "090f04abcd9d9a7498bc4ebf677e4cb9bdce1fe4197ddb7e529f1ef44e1ff94f",
+          "size_bytes": 9929594
+        },
+        {
+          "name": "PP-OCRv6_rec_small.onnx",
+          "url": "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/onnx/PP-OCRv6/rec/PP-OCRv6_rec_small.onnx",
+          "sha256": "6f327246b50388f3c176ae304bd95767ea6dc0c9ae92153ef8cbe210b3c14884",
+          "size_bytes": 21234383
+        },
+        {
+          "name": "ch_ppocr_mobile_v2.0_cls_mobile.onnx",
+          "url": "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/onnx/PP-OCRv4/cls/ch_ppocr_mobile_v2.0_cls_mobile.onnx",
+          "sha256": "e47acedf663230f8863ff1ab0e64dd2d82b838fceb5957146dab185a89d6215c",
+          "size_bytes": 585532
+        }
+      ],
+      "check": "rapidocr",
+      "license": "Apache-2.0",
+      "provenance": "RapidOCR 3.9.2 default_models.yaml"
+    },
+    {
+      "id": "language-en-ru",
+      "title": "Оффлайн-перевод en → ru",
+      "kind": "language",
+      "files": [
+        {
+          "name": "translate-en_ru-1_9.argosmodel",
+          "url": "https://argos-net.com/v1/translate-en_ru-1_9.argosmodel",
+          "sha256": "591d743ae103752b88ffc38785c50421320f4eff93c8967e0d3d2e14d4e27811",
+          "size_bytes": 195746693
+        },
+        {
+          "name": "en.onnx",
+          "url": "https://github.com/LibreTranslate/MiniSBD/releases/download/v0.0.1/en.onnx",
+          "sha256": "6fa9f3a3b201687bd43e329b2b0736789efc97b37883b5b759b31988dca9f353",
+          "size_bytes": 188043
+        }
+      ],
+      "check": "argos-language",
+      "source": "en",
+      "target": "ru",
+      "dependencies": [
+        "argos"
+      ],
+      "license": "upstream model metadata",
+      "provenance": "argospm-index 1.9; SHA256 локального оригинального архива; MiniSBD upstream GitHub digest"
+    },
+    {
+      "id": "language-ru-en",
+      "title": "Оффлайн-перевод ru → en",
+      "kind": "language",
+      "files": [
+        {
+          "name": "translate-ru_en-1_9.argosmodel",
+          "url": "https://argos-net.com/v1/translate-ru_en-1_9.argosmodel",
+          "sha256": "e9ba8bf722d10a4a4c39f74289d5938fd47eac08dbe4ed0afd22d89445a5c3ac",
+          "size_bytes": 156239112
+        },
+        {
+          "name": "ru.onnx",
+          "url": "https://github.com/LibreTranslate/MiniSBD/releases/download/v0.0.1/ru.onnx",
+          "sha256": "53c65ef031698d99fd0c736275eeb3c37f4694613c5c0d4423745741b0843138",
+          "size_bytes": 181514
+        }
+      ],
+      "check": "argos-language",
+      "source": "ru",
+      "target": "en",
+      "dependencies": [
+        "argos"
+      ],
+      "license": "upstream model metadata",
+      "provenance": "argospm-index 1.9; SHA256 локального оригинального архива; MiniSBD upstream GitHub digest"
+    },
+    {
+      "id": "font-pack",
+      "title": "Дополнительные шрифты",
+      "kind": "font",
+      "files": [
+        {
+          "name": "Blaec-Italic.ttf",
+          "url": "https://raw.githubusercontent.com/Jawerka/image-localization-tool/cbe2960b7d620cbc0348f50ba325e8945384d795/src/resources/fonts/Blaec-Italic.ttf",
+          "sha256": "aca791c0a0eb0a1f0685857ea70fe7d820e868b562f45c5c0608ddd10b2447ce",
+          "size_bytes": 124908
+        },
+        {
+          "name": "Blaec-Regular.ttf",
+          "url": "https://raw.githubusercontent.com/Jawerka/image-localization-tool/cbe2960b7d620cbc0348f50ba325e8945384d795/src/resources/fonts/Blaec-Regular.ttf",
+          "sha256": "bc36518409bfc20dc3a9bae654a1edf40f05a60395dbb100975e28a61a6892c7",
+          "size_bytes": 121220
+        },
+        {
+          "name": "DeltaBlock-Regular.ttf",
+          "url": "https://raw.githubusercontent.com/Jawerka/image-localization-tool/cbe2960b7d620cbc0348f50ba325e8945384d795/src/resources/fonts/DeltaBlock-Regular.ttf",
+          "sha256": "9ecd20e7eee8f2b0db39ad0b6ca2d97408ec985d53ac6b3236e2cef3285a2889",
+          "size_bytes": 50664
+        },
+        {
+          "name": "FirstTimeWriting.ttf",
+          "url": "https://raw.githubusercontent.com/Jawerka/image-localization-tool/cbe2960b7d620cbc0348f50ba325e8945384d795/src/resources/fonts/FirstTimeWriting.ttf",
+          "sha256": "ff42d749e994863ad8ae6ea3b94843fec55779e343471c09a9debc96c3930f57",
+          "size_bytes": 2105720
+        },
+        {
+          "name": "Liber-Struct.ttf",
+          "url": "https://raw.githubusercontent.com/Jawerka/image-localization-tool/cbe2960b7d620cbc0348f50ba325e8945384d795/src/resources/fonts/Liber-Struct.ttf",
+          "sha256": "bbe6e911289aaa4a12e1ff5cbb1288b614b1531f85703f75b17d2571de7b82d1",
+          "size_bytes": 195816
+        },
+        {
+          "name": "OperationNapalm-Regular.ttf",
+          "url": "https://raw.githubusercontent.com/Jawerka/image-localization-tool/cbe2960b7d620cbc0348f50ba325e8945384d795/src/resources/fonts/OperationNapalm-Regular.ttf",
+          "sha256": "24454062e6ad999f3a9e30fd351a1f34bb0f8fcfd121148336d19ed7783060b3",
+          "size_bytes": 163880
+        },
+        {
+          "name": "Pixelzone.ttf",
+          "url": "https://raw.githubusercontent.com/Jawerka/image-localization-tool/cbe2960b7d620cbc0348f50ba325e8945384d795/src/resources/fonts/Pixelzone.ttf",
+          "sha256": "b69f193f42d246b4c3c8fa793b73fe65af69f742f30016281070ff960bc8555b",
+          "size_bytes": 139948
+        },
+        {
+          "name": "PublicPixel.ttf",
+          "url": "https://raw.githubusercontent.com/Jawerka/image-localization-tool/cbe2960b7d620cbc0348f50ba325e8945384d795/src/resources/fonts/PublicPixel.ttf",
+          "sha256": "931eb4bf9ef25a6d4bb31783b8681712a42b7408988d53971a3070a2f7443ccf",
+          "size_bytes": 128684
+        },
+        {
+          "name": "Unsightly.ttf",
+          "url": "https://raw.githubusercontent.com/Jawerka/image-localization-tool/cbe2960b7d620cbc0348f50ba325e8945384d795/src/resources/fonts/Unsightly.ttf",
+          "sha256": "2b860071ef521df6308825bf0bc4a66067920927a6d0eff7e39eb1d06ddbaf37",
+          "size_bytes": 34220
+        },
+        {
+          "name": "VyazPixel.ttf",
+          "url": "https://raw.githubusercontent.com/Jawerka/image-localization-tool/cbe2960b7d620cbc0348f50ba325e8945384d795/src/resources/fonts/VyazPixel.ttf",
+          "sha256": "a414c11dfb55fddc3ce0d656023e303c25079190bffcf8568c0cc4455bd6e065",
+          "size_bytes": 44616
+        }
+      ],
+      "check": "font",
+      "license": "OFL/CC0; лицензии в базовой сборке",
+      "provenance": "src/resources/fonts, pinned repository commit"
+    },
+    {
+      "id": "font",
+      "title": "Базовый кириллический шрифт",
+      "kind": "font",
+      "check": "font",
+      "license": "OFL-1.1",
+      "files": [
+        {
+          "name": "Heroika-Regular.otf",
+          "url": "https://raw.githubusercontent.com/Jawerka/image-localization-tool/cbe2960b7d620cbc0348f50ba325e8945384d795/src/resources/fonts/Heroika-Regular.otf",
+          "sha256": "538b3b4ff320cfda3b45096480895010b666635df8b7beddf9d84240b764b790",
+          "size_bytes": 51552
+        }
+      ]
+    }
+  ]
+}

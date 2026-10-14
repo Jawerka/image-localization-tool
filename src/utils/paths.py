@@ -28,8 +28,22 @@ def install_root() -> Path:
     if override:
         return Path(override)
     if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
+        directory = Path(sys.executable).resolve().parent
+        return directory.parent if directory.name == "sidecar" else directory
     return project_root()
+
+
+def components_root() -> Path:
+    """Доступные для записи компоненты; старые install-пути читаются отдельно."""
+    explicit = os.environ.get("ILT_COMPONENT_ROOT", "").strip()
+    if explicit:
+        return Path(explicit)
+    installed = install_root()
+    if not getattr(sys, "frozen", False) or (installed / "data").is_dir() or sys.platform != "win32":
+        return installed
+    from src.app.paths import data_root
+
+    return data_root() / "components"
 
 
 def models_dir(override: str | Path | None = None) -> Path:
@@ -40,20 +54,26 @@ def models_dir(override: str | Path | None = None) -> Path:
     """
     if override:
         return Path(override)
-    installed = install_root() / "models"
+    installed = components_root() / "models"
     if installed.is_dir():
         return installed
     if getattr(sys, "frozen", False):
         installed.mkdir(parents=True, exist_ok=True)
         return installed
-    return project_root() / "models"
+    return installed
 
 
 def resolve_model(filename: str, override: str | Path | None = None) -> Path:
     """Первый существующий файл модели. Если файла нет — последний кандидат."""
     candidates: list[Path] = []
+    from src.app.component_catalog import installed_file
+
+    external = installed_file(filename)
+    if external is not None:
+        candidates.append(external)
     if override:
         candidates.append(Path(override) / filename)
+    candidates.append(components_root() / "models" / filename)
     candidates.append(install_root() / "models" / filename)
     candidates.append(bundle_root() / "models" / filename)
     candidates.append(project_root() / "models" / filename)
@@ -65,7 +85,11 @@ def resolve_model(filename: str, override: str | Path | None = None) -> Path:
 
 def resolve_font(filename: str) -> Path:
     """Шрифт в бандле, рядом с программой или в src/resources/fonts."""
-    candidates = [
+    from src.app.component_catalog import installed_file
+
+    external = installed_file(filename)
+    candidates = ([external] if external is not None else []) + [
+        components_root() / "fonts" / filename,
         bundle_root() / "src" / "resources" / "fonts" / filename,
         install_root() / "fonts" / filename,
         project_root() / "src" / "resources" / "fonts" / filename,

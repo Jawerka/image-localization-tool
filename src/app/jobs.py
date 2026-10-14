@@ -189,6 +189,11 @@ class JobQueue:
         self._pump()
         return job
 
+    def busy(self) -> bool:
+        """Есть ли задания, уже переданные воркеру, включая другие проекты."""
+        with self._lock:
+            return bool(self._inflight_batch or self._inflight_edits)
+
     def pause(self) -> None:
         """Не отдавать новые задания. Уже отданные воркер может закончить."""
         with self._lock:

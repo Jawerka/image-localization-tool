@@ -76,12 +76,14 @@ class EventStream {
     required this.connect,
     this.initialDelay = const Duration(seconds: 1),
     this.maxDelay = const Duration(seconds: 15),
+    this.onConnected,
   });
 
   /// Открыть соединение `/api/events` (бросает при не-200).
   final Future<http.StreamedResponse> Function() connect;
   final Duration initialDelay;
   final Duration maxDelay;
+  final Future<void> Function()? onConnected;
 
   bool _stopped = false;
 
@@ -90,6 +92,7 @@ class EventStream {
     while (!_stopped) {
       try {
         final response = await connect();
+        await onConnected?.call();
         await for (final frame in sseFrames(response)) {
           delay = initialDelay;
           yield frame;

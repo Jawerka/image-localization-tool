@@ -255,6 +255,7 @@ def test_bootstrap_requires_cookie(api: Api):
         "device",
         "models_ready",
         "runtime",
+        "preparation",
         "busy",
         "recent",
         "has_api_key",

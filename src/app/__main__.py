@@ -105,6 +105,11 @@ _guard_stdio()
 
 
 def main(argv: list[str] | None = None) -> int:
+    arguments = sys.argv[1:] if argv is None else argv
+    if len(arguments) == 2 and arguments[0] == "--component-check":
+        from src.app.component_check import run
+
+        return run(arguments[1])
     prepare_logging()
     from src.utils.logger import logger
 

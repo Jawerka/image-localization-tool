@@ -64,3 +64,9 @@ htmlcov/
 test-img/
 data/
 session.token
+.downloads/
+.resources/
+runtime/
+preparation.json
+.installer.lock
+.builtin/

@@ -17,10 +17,11 @@
   .\scripts\build-runtime-locks.ps1 -Variant argos -OutDir dist\locks
 #>
 param(
-    [ValidateSet('all', 'cpu', 'cu128', 'argos')]
+    [ValidateSet('all', 'cpu', 'cu128', 'cu130', 'argos')]
     [string] $Variant = 'all',
     [string] $OutDir = '',
-    [string] $Python = ''
+    [string] $Python = '',
+    [switch] $UpdateCatalog
 )
 
 $ErrorActionPreference = 'Stop'
@@ -70,11 +71,14 @@ $Script = Join-Path $RepoRoot 'scripts\build_runtime_locks.py'
 $packs = @()
 if ($Variant -eq 'all' -or $Variant -eq 'cpu') { $packs += 'torch-cpu' }
 if ($Variant -eq 'all' -or $Variant -eq 'cu128') { $packs += 'torch-cu128' }
+if ($Variant -eq 'all' -or $Variant -eq 'cu130') { $packs += 'torch-cu130' }
 if ($Variant -eq 'all' -or $Variant -eq 'argos') { $packs += 'argos' }
 
 foreach ($pack in $packs) {
+    $catalogArgs = @()
+    if ($UpdateCatalog) { $catalogArgs += '--update-catalog' }
     Invoke-Checked {
-        & $Python $Script --pack $pack --os win --out $OutDir --lock-dir $LocksDir
+        & $Python $Script --pack $pack --os win --out $OutDir --lock-dir $LocksDir @catalogArgs
     } "build-runtime-locks.py $pack (win)"
 }
 

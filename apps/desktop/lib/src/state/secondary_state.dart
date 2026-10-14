@@ -218,6 +218,52 @@ class SecondaryState extends ChangeNotifier {
   void Function(String path)? onOpenFolder;
 
   IltApi? get api => _api;
+  Map<String, dynamic> _preparation = const {};
+  Map<String, dynamic> _preparationPlan = const {};
+  Map<String, dynamic> get preparation => _preparation;
+  Map<String, dynamic> get preparationPlan => _preparationPlan;
+
+  Future<void> refreshPreparation() => _guard((api) async {
+        final snapshot = await api.getJson('/api/preparation');
+        if (_api != api) return;
+        _preparation = snapshot;
+        if (snapshot['state'] == 'ready' && mapEquals(
+            _preparationPlan['selection'] as Map?, snapshot['selection'] as Map?)) {
+          _preparationPlan = snapshot;
+        }
+      });
+
+  Future<void> previewPreparation(Map<String, dynamic> selection) => _guard((api) async {
+        _preparationPlan = const {};
+        _preparationPlan = await api.postJson('/api/preparation/plan', selection);
+      });
+
+  Future<void> startPreparation(Map<String, dynamic> selection) => _guard((api) async {
+        _preparation = await api.postJson('/api/preparation/start', selection);
+        await refreshPreparation();
+      });
+
+  Future<void> pausePreparation() => _guard((api) async {
+        _preparation = await api.postJson('/api/preparation/pause');
+      });
+
+  Future<void> resumePreparation() => _guard((api) async {
+        _preparation = await api.postJson('/api/preparation/resume');
+        await refreshPreparation();
+      });
+  Future<void> changeComponentLocation(String path) => _guard((api) async {
+        await api.postJson('/api/preparation/location', {'path': path});
+      });
+
+  void applyPreparationProgress(Map<String, dynamic> data) {
+    _preparation = data;
+    if (data['state'] == 'ready') {
+      _preparationPlan = data;
+      unawaited(refreshRuntime());
+      unawaited(refreshModels());
+    }
+    notifyListeners();
+  }
   String? get errorText => _errorText;
   RuntimeView get runtime => _runtime;
   RemoteView get remote => _remote;
@@ -237,6 +283,8 @@ class SecondaryState extends ChangeNotifier {
   bool get allModelsPresent => models.every((item) => item.present);
 
   void bind(IltApi api) {
+    _preparation = const {};
+    _preparationPlan = const {};
     _api = api;
     _errorText = null;
     _models.clear();
@@ -249,6 +297,8 @@ class SecondaryState extends ChangeNotifier {
   }
 
   void detach() {
+    _preparation = const {};
+    _preparationPlan = const {};
     _api = null;
     _errorText = null;
     _models.clear();

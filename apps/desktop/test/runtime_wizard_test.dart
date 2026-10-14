@@ -78,10 +78,12 @@ void main() {
     await tester.pumpWidget(IltApp(state: state));
     await tester.pump();
 
-    await tester.tap(find.byKey(const Key('first-run-next')));
-    await tester.pump();
-    await tester.tap(find.byKey(const Key('first-run-next')));
-    await tester.pump();
+    for (var index = 0; index < 4; index++) {
+      await tester.tap(find.byKey(const Key('first-run-next')));
+      await tester.pump();
+    }
+    await tester.tap(find.text('Дополнительные настройки компонентов'));
+    await tester.pump(const Duration(milliseconds: 300));
 
     expect(host.requests, contains('GET /api/runtime'));
     expect(find.text('PyTorch CUDA 12.8 (NVIDIA)'), findsOneWidget);
@@ -90,8 +92,10 @@ void main() {
     expect(find.textContaining('PyTorch CDN'), findsWidgets);
     expect(find.textContaining('~3 мин'), findsOneWidget);
     expect(find.textContaining('<1 мин'), findsWidgets);
-    expect(find.textContaining('после перезапуска'), findsOneWidget);
+    expect(find.textContaining('при следующей обработке'), findsOneWidget);
 
+    await tester.ensureVisible(find.byKey(const Key('wizard-runtime-download-torch-cu128')));
+    await tester.pump(const Duration(milliseconds: 500));
     await tester.tap(find.byKey(const Key('wizard-runtime-download-torch-cu128')));
     await tester.pump();
     expect(host.requests, contains('POST /api/runtime/download'));
@@ -151,7 +155,7 @@ void main() {
     await tester.pumpWidget(IltApp(state: state));
     await tester.pump();
 
-    for (var index = 0; index < 3; index++) {
+    for (var index = 0; index < 2; index++) {
       await tester.tap(find.byKey(const Key('first-run-next')));
       await tester.pump();
     }

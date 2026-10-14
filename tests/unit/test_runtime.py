@@ -208,10 +208,11 @@ def test_activate_prefers_cu128(monkeypatch, tmp_path):
     before = list(sys.path)
     try:
         activated = runtime.activate()
-        assert activated == ["torch-cpu", "torch-cu128"]
+        assert activated == ["torch-cu128"]
         cu128 = str(install / "runtime" / "torch-cu128" / "site-packages")
         cpu = str(install / "runtime" / "torch-cpu" / "site-packages")
-        assert sys.path.index(cu128) < sys.path.index(cpu)
+        assert cu128 in sys.path
+        assert cpu not in sys.path
     finally:
         sys.path[:] = before
 
@@ -544,3 +545,34 @@ def test_remove_defers_locked_pack_to_restart(monkeypatch, tmp_path):
     finally:
         sys.path[:] = before
     assert not graveyard.exists()
+
+
+def test_failed_runtime_check_preserves_old_revision_and_cache(monkeypatch, tmp_path):
+    _use(monkeypatch, tmp_path, [])
+    old_wheel = tmp_path / "demo-1.0-py3-none-any.whl"
+    _make_wheel(old_wheel, {"demo/__init__.py": "VALUE = 1\n"})
+    old = runtime._pack_from_dict(_wheels_pack_dict("argos", [_wheel_file(old_wheel)], kind="argos"))
+    old_folder = runtime.download_and_install(old)
+    new_wheel = tmp_path / "demo-2.0-py3-none-any.whl"
+    _make_wheel(new_wheel, {"demo/__init__.py": "VALUE = 2\n"})
+    record = _wheels_pack_dict("argos", [_wheel_file(new_wheel)], kind="argos")
+    record["check"] = "argos"
+    new = runtime._pack_from_dict(record)
+    monkeypatch.setattr("src.app.component_check.probe", lambda *args: (_ for _ in ()).throw(RuntimeError("failed probe")))
+    with pytest.raises(RuntimeError, match="probe"):
+        runtime.download_and_install(new)
+    assert runtime.pack_dir("argos") == old_folder
+    assert runtime.matches(old)
+    assert not runtime.matches(new)
+    from src.app import downloads
+    assert (downloads.cache_root() / f"{new.files[0].sha256}.blob").is_file()
+
+
+def test_remove_previous_location_does_not_reactivate_it(monkeypatch, tmp_path):
+    _use(monkeypatch, tmp_path, [_pack_dict("argos", kind="argos")])
+    previous = tmp_path / "previous"
+    _install_marker(previous, "argos")
+    monkeypatch.setenv("ILT_COMPONENT_PREVIOUS_ROOT", str(previous))
+    assert runtime.is_installed("argos")
+    assert runtime.remove("argos")
+    assert not runtime.is_installed("argos")

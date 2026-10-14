@@ -66,7 +66,7 @@ def test_hosted_entry_url_and_hash(tmp_path) -> None:
     wheel.write_bytes(b"wheel-bytes")
     entry = locks.hosted_entry(wheel, "https://github.com/o/r/releases/download")
     assert entry["url"] == (
-        f"https://github.com/o/r/releases/download/v{locks.APP_VERSION}/"
+        "https://github.com/o/r/releases/download/"
         "argostranslate-1.11.1-py3-none-any.whl"
     )
     assert entry["sha256"] == hashlib.sha256(b"wheel-bytes").hexdigest()

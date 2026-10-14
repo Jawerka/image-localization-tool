@@ -109,7 +109,7 @@ $Version = (& $Python -c $verSnippet $RepoRoot).Trim()
 Write-Host "Версия $Version, python $Python"
 
 $packs = @('torch-cpu', 'argos')
-if ($Full) { $packs += 'torch-cu128' }
+if ($Full) { $packs += @('torch-cu128', 'torch-cu130') }
 
 # --- 1. pytest ---------------------------------------------------------------
 Step '1. pytest: клиент колёс, генератор, манифест, гейт'
@@ -118,48 +118,11 @@ Invoke-Checked {
         tests\unit\test_manifest_schema2.py tests\unit\test_check_release.py -q
 } 'pytest unit (runtime wheelset)'
 
-# --- 2. канонические лок-сводки и сверка с репозиторием ----------------------
-Step '2. Канонические win-локи (dist\locks) и сверка locks\'
-# Колесо argostranslate уже собрано и залито на rc: не пересобираем, иначе
-# sha разойдётся с встроенным манифестом и опубликованным ассетом.
-$canonicalArgosWheel = Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'dist\locks') `
-    -Filter 'argostranslate-*.whl' -ErrorAction SilentlyContinue | Select-Object -First 1
-foreach ($pack in $packs) {
-    $lockArgs = @('scripts\build_runtime_locks.py', '--pack', $pack, '--os', 'win',
-        '--out', 'dist\locks', '--lock-dir', $RepoLocks)
-    if ($pack -eq 'argos' -and $null -ne $canonicalArgosWheel) {
-        $lockArgs += @('--hosted-wheel', $canonicalArgosWheel.FullName)
-    }
-    Invoke-Checked { & $Python @lockArgs } "build_runtime_locks.py $pack (canonical)"
-}
-foreach ($lock in Get-ChildItem -LiteralPath $RepoLocks -Filter '*.lock') {
-    $committed = Join-Path $RepoRoot "locks\$($lock.Name)"
-    Assert (Test-Path -LiteralPath $committed) "нет закоммиченного лока locks\$($lock.Name) — закоммичьте файл"
-    $diff = Compare-Object (Get-Content -LiteralPath $lock.FullName) (Get-Content -LiteralPath $committed)
-    Assert ($null -eq $diff) "лок $($lock.Name) отличается от закоммиченного: перегенерируйте и закоммитьте"
-}
-Write-Host "locked: $($packs -join ', ') — совпадают с locks\"
-
-# --- 3. локальная сводка с file://-базой -------------------------------------
-Step '3. Локальная сводка (file://) и манифест'
-foreach ($pack in $packs) {
-    $localArgs = @('scripts\build_runtime_locks.py', '--pack', $pack, '--os', 'win',
-        '--out', $LocksOut, '--url-base', $UrlBase)
-    if ($pack -eq 'argos' -and $null -ne $canonicalArgosWheel) {
-        $localArgs += @('--hosted-wheel', $canonicalArgosWheel.FullName)
-    }
-    Invoke-Checked { & $Python @localArgs } "build_runtime_locks.py $pack (local)"
-}
-$argosWheel = Get-ChildItem -LiteralPath $LocksOut -Filter 'argostranslate-*.whl' |
-    Select-Object -First 1
-Assert ($null -ne $argosWheel) 'не найдено собранное колесо argostranslate'
-$releaseDir = Join-Path $ReleaseRoot "v$Version"
-New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
-Copy-Item -LiteralPath $argosWheel.FullName -Destination $releaseDir -Force
+# --- 2/3. fixed catalog -------------------------------------------------------
+Step '2. Fixed catalog and cached wheels (no dependency resolution)'
 Invoke-Checked {
-    & $Python 'scripts\build-runtime-manifest.py' --packs (Join-Path $LocksOut 'packs.json') `
-        --out $ManifestPath --url-base $UrlBase --no-bundled
-} 'build-runtime-manifest.py (local)'
+    & $Python 'scripts/stage-runtime-e2e.py' --packs ($packs -join ',') --release $ReleaseRoot --out $ManifestPath
+} 'stage fixed runtime catalog'
 
 # --- 4. dev-установка ---------------------------------------------------------
 Step '4. dev: --deploy cpu/argos, идемпотентность, битый sha'
@@ -175,10 +138,13 @@ try {
     $importCheck = @'
 import sys
 root = sys.argv[1]
-sys.path.insert(0, root + r'\runtime\torch-cpu\site-packages')
+import os
+os.environ['ILT_INSTALL_ROOT'] = root
+from src.app import runtime
+runtime.startup()
 import torch
 print('torch', torch.__version__)
-sys.path.insert(0, root + r'\runtime\argos\site-packages')
+runtime.activate_path(runtime.pack_dir('argos'))
 import argostranslate.translate
 print('argostranslate ok')
 '@
@@ -235,9 +201,7 @@ try {
     $env:ILT_RUNTIME_MANIFEST_URL = Get-FileUri $ManifestPath
     Invoke-FrozenDeploy -Exe $sidecar -Target 'cpu' -Label 'frozen portable --deploy cpu'
     Invoke-FrozenDeploy -Exe $sidecar -Target 'cpu' -Label 'frozen portable --deploy cpu (повтор)'
-    $marker = Join-Path $portableApp 'runtime\torch-cpu\pack.json'
-    Assert (Test-Path -LiteralPath $marker) 'портативный runtime\torch-cpu\pack.json не создан'
-    $frozenCheck = "import sys; sys.path.insert(0, sys.argv[1] + r'\runtime\torch-cpu\site-packages'); import torch; print('portable torch', torch.__version__)"
+    $frozenCheck = "import os,sys; os.environ['ILT_INSTALL_ROOT']=sys.argv[1]; from src.app import runtime; runtime.startup(); import torch; print('portable torch',torch.__version__)"
     Invoke-Checked { & $Python -c $frozenCheck $portableApp } 'импорт torch из портативного пака'
 } finally {
     $env:ILT_INSTALL_ROOT = $oldInstall

@@ -53,7 +53,7 @@ def main(argv: list[str] | None = None) -> int:
 
     version = read_app_version(ROOT)
     entries: list[dict] = []
-    for packs_arg in args.packs or ["dist/locks/packs.json"]:
+    for packs_arg in args.packs or ["locks/runtime-catalog.json"]:
         packs_path = Path(packs_arg)
         if not packs_path.is_absolute():
             packs_path = ROOT / packs_path
@@ -73,27 +73,21 @@ def main(argv: list[str] | None = None) -> int:
         out_path = ROOT / out_path
     out_path.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(manifest, ensure_ascii=False, indent=2) + "\n"
-    out_path.write_text(text, encoding="utf-8")
+    out_path.write_text(text, encoding="utf-8", newline="\n")
     print(f"Манифест релиза: {out_path} (schema 2, паков: {len(manifest['packs'])})")
 
     if not args.no_bundled:
         bundled = Path(args.bundled)
         if not bundled.is_absolute():
             bundled = ROOT / bundled
-        if bundled.is_file():
-            try:
-                existing = json.loads(bundled.read_text(encoding="utf-8"))
-            except (OSError, UnicodeError, json.JSONDecodeError):
-                existing = {}
-            old_packs = existing.get("packs") if isinstance(existing, dict) else None
-            if isinstance(old_packs, list):
-                # Старые записи (в т.ч. плейсхолдеры schema 1) остаются запасным
-                # путём; встроенную копию не валидируем строго.
-                manifest["packs"] = merge_entries(old_packs, manifest["packs"])
-        bundled.write_text(
-            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-        )
+        bundled.parent.mkdir(parents=True, exist_ok=True)
+        bundled.write_text(text, encoding="utf-8", newline="\n")
         print(f"Встроенная копия: {bundled} (паков: {len(manifest['packs'])})")
+    resources = ROOT / "src/app/component_manifest.json"
+    if resources.is_file():
+        canonical = json.dumps(json.loads(resources.read_text(encoding="utf-8")), ensure_ascii=False, indent=2) + "\n"
+        resources.write_text(canonical, encoding="utf-8", newline="\n")
+        (out_path.parent / f"ilt-component-manifest-{version}.json").write_text(canonical, encoding="utf-8", newline="\n")
     return 0
 
 

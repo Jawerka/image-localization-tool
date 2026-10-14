@@ -602,7 +602,10 @@ class PagePipeline:
 
     def _detect(self, image: Image.Image):
         if self.detector is None:
-            self.detector = BubbleDetector(conf=self.config.detector_conf)
+            from src.utils.paths import resolve_model
+
+            self.detector = BubbleDetector(conf=self.config.detector_conf, model_path=resolve_model(
+                "ogkalu-detector-v4-s_int8.onnx", self.config.models_dir or None))
         return self.detector.detect(image)
 
     def _client(self) -> LlmClient:
@@ -737,7 +740,11 @@ class PagePipeline:
         allow_flat_fill: bool = True,
     ) -> Image.Image:
         if self.inpainter is None:
+            from src.utils.paths import resolve_model
+
             self.inpainter = LamaInpainter(
+                model_path=resolve_model(
+                    "anime-manga-big-lama.pt", self.config.models_dir or None),
                 device=self.config.device,
                 force_opencv=self.config.inpainter_backend == "opencv",
             )

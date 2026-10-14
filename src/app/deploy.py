@@ -17,6 +17,24 @@ TARGETS = ("cpu", "cuda", "argos", "models", "all")
 
 def run(values: list[str]) -> int:
     """Развернуть указанные компоненты. 0 — всё хорошо, 1 — были ошибки."""
+    if "all" in values:
+        import time
+        from src.app.preparation import Manager
+
+        manager = Manager()
+        try:
+            manager.start({"translator_backend": "argos", "source_lang": "en", "target_lang": "ru"})
+            while manager.busy():
+                time.sleep(0.2)
+            result = manager.current()
+            if result["state"] != "ready":
+                print(result.get("error") or "Подготовка не завершена", file=sys.stderr)
+                return 1
+            print("Приложение подготовлено.")
+            return 0
+        except Exception as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
     targets = normalize(values)
     if not targets:
         print("Нечего разворачивать: укажите cpu, cuda, argos, models или all", file=sys.stderr)
@@ -60,10 +78,15 @@ def recommended_torch() -> str:
     from src.app import hardware
 
     recommended = str(hardware.detect().get("recommended") or "torch-cpu")
-    return "cuda" if recommended == "torch-cu128" else "cpu"
+    return "cuda" if recommended.startswith("torch-cu") else "cpu"
 
 
 def _pack_id_for(target: str) -> str:
+    if target == "cuda":
+        from src.app import hardware
+
+        recommended = str(hardware.detect().get("recommended") or "torch-cpu")
+        return recommended if recommended.startswith("torch-cu") else "torch-cpu"
     mapping = {"cpu": "torch-cpu", "cuda": "torch-cu128", "argos": "argos"}
     return mapping[target]
 
@@ -71,7 +94,7 @@ def _pack_id_for(target: str) -> str:
 def _deploy_pack(pack_id: str) -> None:
     pack = runtime.pack_by_id(pack_id)
     print(f"[{pack.id}] {pack.title} v{pack.version}")
-    if runtime.is_installed(pack.id):
+    if runtime.ready(pack) and (pack.kind != "torch" or runtime.selected_torch_id() == pack.id):
         print(f"[{pack.id}] уже установлено: {runtime.pack_dir(pack.id)}")
         runtime.activate_path(runtime.pack_dir(pack.id))
         return

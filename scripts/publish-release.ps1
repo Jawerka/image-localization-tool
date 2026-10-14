@@ -47,6 +47,9 @@ $ErrorActionPreference = 'Stop'
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $RepoRoot
+if ($Publish -and -not $DryRun) {
+    throw 'Use scripts/release.ps1 -Publish -SmokePassed to verify and publish the prepared candidate.'
+}
 
 function Invoke-Checked {
     param([scriptblock]$Command, [string]$Label)
@@ -116,8 +119,7 @@ function Send-ReleaseAssets {
             continue
         }
         if (-not $Replace) {
-            Write-Host "==> skip $name (release copy differs; pass -Replace to overwrite)"
-            continue
+            throw "Release asset differs: $name. Prepare a new candidate or explicitly replace the draft."
         }
         Invoke-Checked { & gh release upload $Tag $path --clobber } "gh release upload $name"
     }
@@ -153,7 +155,7 @@ function Invoke-ReleaseGate {
     try {
         Invoke-Checked {
             & $Python (Join-Path $RepoRoot 'scripts\check_release.py') `
-                '--manifest' $Manifest '--assets' 'dist'
+                '--manifest' $Manifest '--assets' 'dist' '--anonymous' '--components' 'src/app/component_manifest.json'
         } "check_release.py ($Tag)"
     } finally {
         $env:GH_TOKEN = $previousToken
@@ -193,13 +195,9 @@ if ($Phase -eq 'Windows') {
             throw "Missing asset: $path. Build it first (build-windows.ps1, package-portable.ps1, package-server.ps1)."
         }
     }
-    $locksSummary = Join-Path $RepoRoot 'dist\locks\packs.json'
+    $locksSummary = Join-Path $RepoRoot 'locks\runtime-catalog.json'
     if (-not (Test-Path -LiteralPath $locksSummary)) {
         throw 'No lock summary in dist\locks. Run scripts\build-runtime-locks.ps1.'
-    }
-    $locksWheels = @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'dist\locks') -Filter 'argostranslate-*.whl' | Sort-Object Name)
-    if ($locksWheels.Count -eq 0) {
-        throw 'No hosted argostranslate wheel in dist\locks. Run scripts\build-runtime-locks.ps1.'
     }
     $extensions = @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'dist') -Filter "ilt-extension-*-$version.zip" | Sort-Object Name)
     if ($extensions.Count -eq 0) {
@@ -212,7 +210,9 @@ if ($Phase -eq 'Windows') {
     } 'build-runtime-manifest.py'
 
     $manifest = Join-Path $RepoRoot "dist\ilt-runtime-manifest-$version.json"
-    $assets = @($setup, $portable, $serverZip, $manifest) + $locksWheels.FullName + $extensions.FullName
+    $components = Join-Path $RepoRoot "dist\ilt-component-manifest-$version.json"
+    Copy-Item -LiteralPath (Join-Path $RepoRoot 'src\app\component_manifest.json') -Destination $components -Force
+    $assets = @($setup, $portable, $serverZip, $manifest, $components) + $extensions.FullName
     $sumLines = @($assets | ForEach-Object { Get-Sha256Line -Path $_ })
     $sumPath = Join-Path $RepoRoot 'dist\SHA256SUMS-windows.txt'
     $sumLines | Set-Content -LiteralPath $sumPath -Encoding ASCII
@@ -266,13 +266,15 @@ if ($Phase -eq 'Final') {
     if (-not (Test-Path -LiteralPath $linuxSummary)) {
         throw "No Linux pack summary: $linuxSummary. Did the CI finish?"
     }
-    # Python merges the summaries by (id, os); a later --packs wins.
-    Invoke-Checked {
-        & $python (Join-Path $RepoRoot 'scripts\build-runtime-manifest.py') `
-            '--packs' $winSummary '--packs' $linuxSummary `
-            '--out' "dist\ilt-runtime-manifest-$version.json" '--no-bundled'
-    } 'build-runtime-manifest.py (merged)'
-
+    # Final verifies the catalog embedded before packaging; no late merge.
+    $fixed = Get-Content -LiteralPath (Join-Path $RepoRoot 'locks\runtime-catalog.json') -Raw | ConvertFrom-Json
+    $linux = Get-Content -LiteralPath $linuxSummary -Raw | ConvertFrom-Json
+    foreach ($entry in $linux) {
+        $match = @($fixed | Where-Object { $_.id -eq $entry.id -and $_.os -eq 'linux' }) | Select-Object -First 1
+        if (-not $match -or ($match.files | ConvertTo-Json -Depth 8 -Compress) -ne ($entry.files | ConvertTo-Json -Depth 8 -Compress)) {
+            throw "Linux runtime differs from the catalog embedded in Windows: $($entry.id)"
+        }
+    }
     $manifest = Join-Path $RepoRoot "dist\ilt-runtime-manifest-$version.json"
     # This phase rebuilds the manifest, so its checksum line must be fresh;
     # the Windows list still carries the win-only manifest hash.

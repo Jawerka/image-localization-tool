@@ -295,7 +295,10 @@ def _looks_like_tech_sfx(text: str, folded: str) -> bool:
 
 def _bundle_font_dirs() -> list[Path]:
     """Каталоги встроенных шрифтов (Heroika, CC0-проба)."""
-    return [
+    from src.app.component_catalog import by_id, directory, ready
+
+    extra = by_id("font-pack")
+    return ([directory(extra)] if ready(extra) else []) + [
         bundle_root() / "src" / "resources" / "fonts",
         install_root() / "fonts",
         project_root() / "src" / "resources" / "fonts",

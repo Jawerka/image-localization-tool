@@ -406,6 +406,7 @@ class ProcessWorker:
         self._closed = False
         self._listener_stop = threading.Event()
         self._lanes_paused = False
+        self._runtime_signature = None
         # Колбэки родителя. Дочерний процесс удалённый сервер не видит.
         self.on_page_done = None
         self.on_progress = None
@@ -471,9 +472,17 @@ class ProcessWorker:
         self._stop_process()
 
     def _ensure(self) -> None:
+        from src.app import runtime
+
+        signature = runtime.activation_signature()
         process = self._process
         if process is not None and process.is_alive():
-            return
+            if signature == self._runtime_signature:
+                return
+            if not self._wait_idle(0.1, None):
+                raise RuntimeError("Дождитесь завершения обработки перед сменой компонентов")
+            self._stop_process()
+        self._runtime_signature = signature
         self._start()
 
     def _start(self) -> None:

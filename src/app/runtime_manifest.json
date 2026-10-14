@@ -73,7 +73,10 @@
           "sha256": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8",
           "size_bytes": 45571
         }
-      ]
+      ],
+      "check": "torch",
+      "revision": "f25dd5d1643831753bf40e6c5539b776a8ae8f9b8726cac7bada287a538e14f2",
+      "unpacked_bytes": 801715858
     },
     {
       "id": "argos",
@@ -106,7 +109,7 @@
         },
         {
           "name": "argostranslate-1.11.1-py3-none-any.whl",
-          "url": "https://github.com/Jawerka/image-localization-tool/releases/download/v1.0.1/argostranslate-1.11.1-py3-none-any.whl",
+          "url": "https://raw.githubusercontent.com/Jawerka/image-localization-tool/cbe2960b7d620cbc0348f50ba325e8945384d795/assets/argostranslate-1.11.1-py3-none-any.whl",
           "sha256": "b0fa2c47dcede945d9a8edbb6845de9b25791faa363bfff0b89fefaea28241f7",
           "size_bytes": 42269
         },
@@ -458,7 +461,10 @@
           "sha256": "1b35ef7379323a149a6398f6261248bf48b61666210bd69e2ab24a9a9afdedc0",
           "size_bytes": 231084
         }
-      ]
+      ],
+      "check": "argos",
+      "revision": "2e8428716484df97bca0baaee5310bbc9c542a66530deecaead69b56c8d1ad9f",
+      "unpacked_bytes": 570677518
     },
     {
       "id": "torch-cpu",
@@ -531,7 +537,10 @@
           "sha256": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8",
           "size_bytes": 45571
         }
-      ]
+      ],
+      "check": "torch",
+      "revision": "1515a14f14f8544201a5f71f9d7e8bd413e098ebc138efc5167ec369ee3a6c53",
+      "unpacked_bytes": 468205889
     },
     {
       "id": "torch-cu128",
@@ -605,7 +614,87 @@
           "size_bytes": 45571
         }
       ],
-      "driver_min": 570
+      "driver_min": 570,
+      "check": "torch-cuda",
+      "revision": "36afcb50b7b1f51decd328cb8d9c491293dc1ea893d1af64a53392f1b3afb631",
+      "unpacked_bytes": 4414087501
+    },
+    {
+      "id": "torch-cu130",
+      "title": "PyTorch CUDA 13.0 (NVIDIA)",
+      "kind": "torch",
+      "os": "win",
+      "arch": "x64",
+      "python": "310",
+      "version": "2.11.0+cu130",
+      "format": "wheels",
+      "size_bytes": 1925358797,
+      "files": [
+        {
+          "name": "filelock-4.1.0-py3-none-any.whl",
+          "url": "https://files.pythonhosted.org/packages/ee/86/032133892a5de43b5a98200b01aadcad68cc255e274a762f08b8a76d2912/filelock-4.1.0-py3-none-any.whl",
+          "sha256": "2ce9818e3e2d8f284c1a964414447ef148d42a5fd5e2a477a7118e574b293ec1",
+          "size_bytes": 133003
+        },
+        {
+          "name": "fsspec-2026.9.0-py3-none-any.whl",
+          "url": "https://files.pythonhosted.org/packages/6c/c0/a98505f18594f1bce828bb159cec0fcf9860562f1a2c85913409fc8f3d9e/fsspec-2026.9.0-py3-none-any.whl",
+          "sha256": "8dd6e646e99ea382bd85f97a45e6b526a442d79423a7dc673f1e2756d05fcb5f",
+          "size_bytes": 221738
+        },
+        {
+          "name": "jinja2-3.1.6-py3-none-any.whl",
+          "url": "https://files.pythonhosted.org/packages/62/a1/3d680cbfd5f4b8f15abc1d571870c5fc3e594bb582bc3b64ea099db13e56/jinja2-3.1.6-py3-none-any.whl",
+          "sha256": "85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67",
+          "size_bytes": 134899
+        },
+        {
+          "name": "markupsafe-3.0.4-cp310-cp310-win_amd64.whl",
+          "url": "https://files.pythonhosted.org/packages/50/50/394a1c61c9b9972cb4f76875c332af7109bd39bdad09d3a0ec5327a339dc/markupsafe-3.0.4-cp310-cp310-win_amd64.whl",
+          "sha256": "5c22873ad1f0532ba40fa1727f3c0fc1bbbaab6d373d4cbe3f0dc74b2e2521c7",
+          "size_bytes": 14329
+        },
+        {
+          "name": "mpmath-1.3.0-py3-none-any.whl",
+          "url": "https://files.pythonhosted.org/packages/43/e3/7d92a15f894aa0c9c4b49b8ee9ac9850d6e63b03c9c32c0367a13ae62209/mpmath-1.3.0-py3-none-any.whl",
+          "sha256": "a0b2b9fe80bbcd81a6647ff13108738cfb482d481d826cc0e02f5b35e5c88d2c",
+          "size_bytes": 536198
+        },
+        {
+          "name": "networkx-3.4.2-py3-none-any.whl",
+          "url": "https://files.pythonhosted.org/packages/b9/54/dd730b32ea14ea797530a4479b2ed46a6fb250f682a9cfb997e968bf0261/networkx-3.4.2-py3-none-any.whl",
+          "sha256": "df5d4365b724cf81b8c6a7312509d0c22386097011ad1abe274afd5e9d3bbc5f",
+          "size_bytes": 1723263
+        },
+        {
+          "name": "setuptools-81.0.0-py3-none-any.whl",
+          "url": "https://files.pythonhosted.org/packages/e1/e3/c164c88b2e5ce7b24d667b9bd83589cf4f3520d97cad01534cd3c4f55fdb/setuptools-81.0.0-py3-none-any.whl",
+          "sha256": "fdd925d5c5d9f62e4b74b30d6dd7828ce236fd6ed998a08d81de62ce5a6310d6",
+          "size_bytes": 1062021
+        },
+        {
+          "name": "sympy-1.14.0-py3-none-any.whl",
+          "url": "https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135c444fc97158ef34a095e5681d0a6c10b75bf356191/sympy-1.14.0-py3-none-any.whl",
+          "sha256": "e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5",
+          "size_bytes": 6299353
+        },
+        {
+          "name": "torch-2.11.0+cu130-cp310-cp310-win_amd64.whl",
+          "url": "https://download-r2.pytorch.org/whl/cu130/torch-2.11.0%2Bcu130-cp310-cp310-win_amd64.whl",
+          "sha256": "5b603a44f34816e18df254443a1fbfb4eef7d57128e5c7f6655f7fab45071f6e",
+          "size_bytes": 1915188422
+        },
+        {
+          "name": "typing_extensions-4.16.0-py3-none-any.whl",
+          "url": "https://files.pythonhosted.org/packages/49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80/typing_extensions-4.16.0-py3-none-any.whl",
+          "sha256": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8",
+          "size_bytes": 45571
+        }
+      ],
+      "driver_min": 580,
+      "check": "torch-cuda",
+      "revision": "adccb29ec14eeedb8996cb851251608d2fc6865f33aed32aba6c9a99b453473f",
+      "unpacked_bytes": 2866411442
     },
     {
       "id": "argos",
@@ -638,7 +727,7 @@
         },
         {
           "name": "argostranslate-1.11.1-py3-none-any.whl",
-          "url": "https://github.com/Jawerka/image-localization-tool/releases/download/v1.0.1/argostranslate-1.11.1-py3-none-any.whl",
+          "url": "https://raw.githubusercontent.com/Jawerka/image-localization-tool/cbe2960b7d620cbc0348f50ba325e8945384d795/assets/argostranslate-1.11.1-py3-none-any.whl",
           "sha256": "b0fa2c47dcede945d9a8edbb6845de9b25791faa363bfff0b89fefaea28241f7",
           "size_bytes": 42269
         },
@@ -1002,7 +1091,10 @@
           "sha256": "513dd1f4a1f91030d5656d9f4b3af8aa490d4db1eb53481e6846b8a5ee7acfcd",
           "size_bytes": 105398
         }
-      ]
+      ],
+      "check": "argos",
+      "revision": "adf7d1339ab48191a426f8f0dc75093568ff6591da26bcb3d8e6939570040747",
+      "unpacked_bytes": 343036673
     }
   ]
 }
