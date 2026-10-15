@@ -52,8 +52,8 @@
 
 - [x] T024 Обновить README.md, docs/APP.md, RELEASE_NOTES_1.0.1.md и research.md по финальной реализации.
 - [x] T025 Прогнать полный pytest, Flutter analyze/test и record результатов в specs/033-reliable-component-delivery/quickstart.md.
-- [ ] T026 Выполнить Windows frozen CPU/Argos/OCR и GPU smoke, аудит base; Linux smoke через CI; отметить фактические ограничения в quickstart.md.
-- [ ] T027 Прогнать speckit-converge и закрыть выявленные gaps в tasks.md.
+- [x] T026 Выполнить Windows frozen CPU/Argos/OCR и GPU smoke, аудит base; Linux smoke через CI; отметить фактические ограничения в quickstart.md.
+- [x] T027 Прогнать speckit-converge и закрыть выявленные gaps в tasks.md.
 
 ## Dependencies & Execution Order
 
@@ -67,4 +67,4 @@ T001→T002/T003→T004/T005→US2→US3→US1→US4→Polish. Изолиров�
 
 - [x] T028 Проверить proof исходников и хэшей Windows-сборки при создании candidate, отклонить незакоммиченные новые исходники и запретить CI перезаписывать опубликованный релиз per FR-014, SC-005 (partial).
 
-Сверка: проверены17 FR,5 SC,4 истории и6 принципов/границ конституции. Реализация общего загрузчика, очереди, транзакций, путей, интерфейса и каталогов соответствует плану. Найден один HIGH gap выпуска (T028); реальная приёмка Windows/CUDA/Linux остаётся в T026. Ручная приёмка пользователя и публикация не выполнены и не подменяются автоматическими проверками. Hooks before_converge/after_converge в extensions.yml отсутствуют.
+Сверка: проверены 17 FR, 5 SC, 4 истории и 6 принципов/границ конституции. Реализация общего загрузчика, очереди, транзакций, путей, интерфейса и каталогов соответствует плану. Найденный HIGH gap выпуска (T028) закрыт; Windows/CUDA/Linux приёмка T026 подтверждена в quickstart.md. Ручная приёмка пользователя и публикация не выполнены и не подменяются автоматическими проверками. Hooks before_converge/after_converge в extensions.yml отсутствуют.

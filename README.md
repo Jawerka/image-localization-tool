@@ -43,6 +43,10 @@ python scripts\setup_models.py
 python scripts\setup_models.py --torch-cuda
 ```
 
+Перед оффлайн-обработкой из исходников подготовьте также RapidOCR и языковую
+модель: `python -m src.app --deploy all` (набор en→ru). В окне это делает
+кнопка «Подготовить приложение»; во время обработки языки не загружаются.
+
 Скрипт скачивает:
 
 | Файл | Куда |
