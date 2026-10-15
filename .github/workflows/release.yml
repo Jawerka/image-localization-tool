@@ -99,6 +99,10 @@ jobs:
           set -eux
           TAG="${{ steps.meta.outputs.tag }}"
           VERSION="${{ steps.meta.outputs.version }}"
+          if [ "$(gh release view "$TAG" --json isDraft --jq '.isDraft' 2>/dev/null || true)" = "false" ]; then
+            echo "Published releases are immutable; use a new version."
+            exit 1
+          fi
           gh release view "$TAG" >/dev/null 2>&1 \
             || gh release create "$TAG" --draft --title "$VERSION" --notes "Linux assets for $TAG"
           gh release upload "$TAG" \

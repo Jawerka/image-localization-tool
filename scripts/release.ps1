@@ -48,7 +48,7 @@ if ($Prepare) {
         Checked { & 'scripts\build-windows.ps1' -SkipModels -Portable -ServerZip -BuildPython $BuildPython } 'Windows base'
     }
     Checked { & $Python 'scripts\build-extension.py' } 'browser extensions'
-    $dirty = (& git status --porcelain --untracked-files=no | Out-String).Trim()
+    $dirty = (& git status --porcelain --untracked-files=all | Where-Object { $_ -notlike '?? .agents/*' } | Out-String).Trim()
     if ($dirty) { throw 'Commit the prepared source/catalog before triggering Linux CI; ordinary releases do not rewrite locks.' }
     $commit = (& git rev-parse HEAD).Trim()
     $branch = (& git branch --show-current).Trim()

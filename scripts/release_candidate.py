@@ -66,6 +66,7 @@ def create(root: Path, assets: Path, version: str, tag: str, checks: bool = Fals
     missing = [name for name in required if not (assets / name).is_file()]
     if missing:
         raise ValueError("Неполный комплект релиза: " + ", ".join(missing))
+    verify_build(root, assets)
     catalogs = {name: (root / "src/app" / name).read_bytes()
                 for name in ("runtime_manifest.json", "component_manifest.json")}
     for released, bundled in ((f"ilt-runtime-manifest-{version}.json", "runtime_manifest.json"),
@@ -82,6 +83,16 @@ def create(root: Path, assets: Path, version: str, tag: str, checks: bool = Fals
     return {"schema": 1, "version": version, "commit": commit, "source_sha": source_digest(root),
             "tag": tag, "catalogs": {n: hashlib.sha256(v).hexdigest() for n, v in catalogs.items()},
             "assets": records, "checks_passed": checks, "manual_smoke_passed": False}
+
+
+def verify_build(root: Path, assets: Path) -> None:
+    """Пропуск пересборки допустим только для подтверждённых исходников и архивов."""
+    proof = json.loads((root / "build/build-source.json").read_text())
+    if proof.get("source_sha") != source_digest(root) or len(proof.get("assets", [])) != 3:
+        raise ValueError("Нет подтверждения сборки из текущих исходников. Пересоберите Windows.")
+    for item in proof["assets"]:
+        if Path(item["name"]).name != item["name"] or digest(assets / item["name"]) != item["sha256"]:
+            raise ValueError("Файл Windows-сборки изменён после проверки")
 
 
 def verify(root: Path, assets: Path, report: dict, require_smoke: bool = True) -> None:
@@ -109,6 +120,7 @@ def main():
     parser.add_argument("--report", default="build/release-candidate.json")
     parser.add_argument("--tag", default="")
     parser.add_argument("--checks-passed", action="store_true")
+    parser.add_argument("--complete-windows", action="store_true")
     args = parser.parse_args()
     path = ROOT / args.report
     assets = ROOT / args.assets
@@ -120,6 +132,12 @@ def main():
             proof = json.loads((ROOT / "build/build-source.json").read_text())
             if proof["source_sha"] != source_digest(ROOT):
                 raise ValueError("Исходники изменились во время сборки. Пересоберите кандидат.")
+            if args.complete_windows:
+                version = read_app_version(ROOT)
+                names = [f"ImageLocalizationTool-{version}-{suffix}" for suffix in
+                         ("windows-x64-setup.exe", "windows-x64-portable.zip", "server-win64.zip")]
+                proof["assets"] = [{"name": n, "sha256": digest(assets / n)} for n in names]
+            atomic_json(ROOT / "build/build-source.json", proof)
             return 0
         if args.action == "create":
             version = read_app_version(ROOT)

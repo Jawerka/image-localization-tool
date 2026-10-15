@@ -294,4 +294,6 @@ Write-Host ""
 Write-Host "Windows build:" -ForegroundColor Green
 Write-Host "  $(Join-Path $DistDir 'desktop\ImageLocalizationTool.exe')"
 Write-Host "  $DistDir"
-Invoke-Checked { & $Python (Join-Path $RepoRoot 'scripts\release_candidate.py') 'verify-build' } 'verify unchanged build source'
+$proofArgs = @()
+if ($Portable -and $ServerZip -and -not $SkipInno) { $proofArgs += '--complete-windows' }
+Invoke-Checked { & $Python (Join-Path $RepoRoot 'scripts\release_candidate.py') 'verify-build' @proofArgs } 'verify unchanged build source'

@@ -42,3 +42,24 @@ def test_publish_requires_manual_smoke(tmp_path):
 def test_candidate_requires_all_platforms(tmp_path):
     with pytest.raises(ValueError, match="Неполный"):
         release_candidate.create(tmp_path, tmp_path, "1.0.1", "v1.0.1")
+
+
+def test_build_proof_rejects_stale_binary_and_source(tmp_path):
+    source(tmp_path)
+    (tmp_path / "build").mkdir()
+    artifact = tmp_path / "app.zip"
+    artifact.write_bytes(b"built")
+    for name in ("setup.exe", "server.zip"):
+        (tmp_path / name).write_bytes(b"built")
+    proof = {"source_sha": release_candidate.source_digest(tmp_path),
+             "assets": [{"name": name, "sha256": digest(tmp_path / name)}
+                        for name in ("app.zip", "setup.exe", "server.zip")]}
+    (tmp_path / "build/build-source.json").write_text(json.dumps(proof))
+    release_candidate.verify_build(tmp_path, tmp_path)
+    artifact.write_bytes(b"changed")
+    with pytest.raises(ValueError, match="изменён"):
+        release_candidate.verify_build(tmp_path, tmp_path)
+    artifact.write_bytes(b"built")
+    (tmp_path / "src/app/new.py").write_text("new source")
+    with pytest.raises(ValueError, match="исходников"):
+        release_candidate.verify_build(tmp_path, tmp_path)
