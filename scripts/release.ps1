@@ -53,9 +53,15 @@ if ($Prepare) {
     $commit = (& git rev-parse HEAD).Trim()
     $branch = (& git branch --show-current).Trim()
     Checked { & git push origin $branch } 'push release source'
+    # gh пишет "release not found" в stderr; с $ErrorActionPreference='Stop'
+    # и редиректом 2>$null PowerShell 5.1 делает это терминальной ошибкой.
+    $probeEap = $ErrorActionPreference
+    $ErrorActionPreference = 'SilentlyContinue'
     $existing = & gh release view $Tag --json isDraft --jq '.isDraft' 2>$null
-    if ($LASTEXITCODE -eq 0 -and $existing -eq 'false') { throw 'This release is already public; use a new version.' }
-    if ($LASTEXITCODE -ne 0) {
+    $viewExit = $LASTEXITCODE
+    $ErrorActionPreference = $probeEap
+    if ($viewExit -eq 0 -and $existing -eq 'false') { throw 'This release is already public; use a new version.' }
+    if ($viewExit -ne 0) {
         Checked { & gh release create $Tag --draft --target $commit --title $version --notes-file "docs\RELEASE_NOTES_$version.md" } 'create draft'
     }
     $dispatchTime = (Get-Date).ToUniversalTime().AddSeconds(-2)
