@@ -30,6 +30,8 @@ class Config:
     llm_model: str = ""
     llm_thinking: bool = False
     llm_timeout: int = 300
+    # Ключ API LLM. save() его не пишет; load() читает при ручной правке файла.
+    llm_api_key: str = field(default="", repr=False)
     # vlm | rapid
     ocr_backend: str = "vlm"
     # Длинная сторона страницы, которую видит VLM при OCR. Крупный скан
@@ -94,8 +96,11 @@ class Config:
         """Сохранить конфигурацию в файл."""
         config_path = Path(path) if path else self._config_path
 
-        # Исключаем служебные поля
-        data = {k: v for k, v in asdict(self).items() if not k.startswith("_")}
+        # Исключаем служебные поля и секрет
+        data = {
+            k: v for k, v in asdict(self).items()
+            if not k.startswith("_") and k != "llm_api_key"
+        }
 
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)

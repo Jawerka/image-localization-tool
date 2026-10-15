@@ -152,6 +152,8 @@ def test_save_roundtrip_has_schema_without_secret(tmp_path, monkeypatch):
     settings = AppSettings(theme="dark", llm_base_url="")
     assert settings.set_api_key("secret") is True
     assert settings.get_api_key() == "secret"
+    config = settings.to_config()
+    assert config.llm_api_key == "secret"
     path = tmp_path / "settings.json"
     settings.save(path)
     text = path.read_text(encoding="utf-8")

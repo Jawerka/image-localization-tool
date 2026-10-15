@@ -79,7 +79,10 @@ llama-server -m path\to\vision-model.gguf --port 8080
 |-------|-----------|
 | CLI | `config.json` → `llm_base_url`, или флаг `--llm-url` |
 | Окно | Настройки → адрес LLM. По умолчанию пусто |
-| Ключ API | В окне через «секрет»; хранится в keyring (`ImageLocalizationTool` / `llm`), в JSON не пишется |
+| Ключ API (окно) | В окне через «секрет»; хранится в keyring (`ImageLocalizationTool` / `llm`), в JSON не пишется |
+| Ключ API (CLI) | Флаг `--llm-api-key`, переменная `ILT_LLM_API_KEY`, или `llm_api_key` в `config.json` вручную (команда его туда не пишет) |
+
+Ключ уходит в заголовке `Authorization: Bearer` на заданный `llm_base_url` — и в `/v1/models`, и в `/v1/chat/completions`. Перед вводом ключа проверьте адрес. «Проверить» с заданным ключом шлёт ещё и минимальный запрос `chat/completions` (`max_tokens: 1`), чтобы отличить неверный ключ от публичного списка моделей.
 
 Пример `config.json` (создаётся рядом с CLI при сохранении, в git не входит):
 

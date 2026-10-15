@@ -158,6 +158,7 @@ class PagePipeline:
         )
         self.ocr_name = ""
         self.translator_name = ""
+        self._shared_client = None
         self._llm_down = False
         self._step_timings: dict[str, float] = {}
 
@@ -614,6 +615,7 @@ class PagePipeline:
             model=self.config.llm_model,
             thinking=self.config.llm_thinking,
             timeout=self.config.llm_timeout,
+            api_key=getattr(self.config, "llm_api_key", ""),
         )
 
     def _save_marked(self, image, regions, debug: Path) -> None:

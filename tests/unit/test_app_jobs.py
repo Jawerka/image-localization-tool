@@ -21,6 +21,7 @@ def test_needs_llm_snapshot_and_events():
     assert translate.needs_llm is True
     assert translate.settings["llm_base_url"] == "http://127.0.0.1:9/v1"
     assert "api_key" not in translate.settings
+    assert "llm_api_key" not in translate.settings
 
     offline = AppSettings(
         llm_base_url="http://127.0.0.1:9/v1",
@@ -349,6 +350,7 @@ def test_save_load_round_trip_while_paused(tmp_path):
     assert loaded["payload"] == job.payload
     assert loaded["needs_llm"] == job.needs_llm
     assert "api_key" not in loaded["settings"]
+    assert "llm_api_key" not in loaded["settings"]
     assert restored.job_status(job.id) == "queued"
     assert skip_ready(Job.from_dict(loaded)) is True
     restored.resume()

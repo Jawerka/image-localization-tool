@@ -1131,7 +1131,20 @@ def _set_secret(state: AppState, body: dict) -> dict:
 
 
 def _check_llm(state: AppState) -> dict:
-    result = model_manager.check_llm(state.settings.llm_base_url, get_api_key())
+    url = str(state.settings.llm_base_url or "").strip()
+    key = get_api_key()
+    result = model_manager.check_llm(url, key)
+    if result.get("ok") and key:
+        models = [str(item) for item in result.get("models") or []]
+        model = str(state.settings.llm_model or "").strip() or (models[0] if models else "")
+        if model:
+            probe = model_manager.verify_llm(url, key, model)
+            if not probe.get("ok"):
+                result = {
+                    "ok": False,
+                    "models": models,
+                    "reason": str(probe.get("reason") or "Ключ API не принят"),
+                }
     if result.get("ok"):
         state.llm_status = {
             "ok": True,

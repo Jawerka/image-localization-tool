@@ -424,7 +424,11 @@ class AppSettings:
         file_path.write_text(text + "\n", encoding="utf-8")
 
     def to_config(self) -> Config:
-        """Поля пайплайна. Пустой ``llm_base_url`` остаётся пустым, без дефолта из Config."""
+        """Поля пайплайна. Пустой ``llm_base_url`` остаётся пустым, без дефолта из Config.
+
+        Ключ API берётся из keyring: он нужен клиентам LLM, но в снапшоты
+        заданий не попадает.
+        """
         self._normalize()
         config = Config()
         config.source_lang = self.source_lang
@@ -450,6 +454,7 @@ class AppSettings:
         config.min_font_size = self.min_font_size
         config.max_font_size = self.max_font_size
         config.llm_base_url = self.llm_base_url
+        config.llm_api_key = self.get_api_key()
         return config
 
 

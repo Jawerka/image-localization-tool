@@ -1,6 +1,9 @@
 """Вёрстка не затирает более новую правку."""
 
+import queue
+import sys
 import threading
+import types
 
 from PIL import Image
 
@@ -274,3 +277,73 @@ def test_restore_turns_running_page_into_queued(tmp_path):
     status = store.page_status(project["id"], page["id"])
     assert status["status"] == "queued"
     assert status["stage"] == ""
+
+
+class _StubPipe:
+    """Минимальный пайплайн для проверки сброса клиентов в ``_pipeline``."""
+
+    def __init__(self, config=None):
+        self.config = config
+        self.ocr = None
+        self.translator = None
+        self.ocr_name = ""
+        self.translator_name = ""
+        self.inpainter = object()
+        self._llm_down = False
+        self._shared_client = None
+        self.typesetter = types.SimpleNamespace(
+            min_font_size=10,
+            max_font_size=128,
+            stroke_ratio=0.08,
+            margin_ratio=0.08,
+            lang="ru",
+        )
+
+
+def _install_keyring(monkeypatch, bag):
+    module = types.ModuleType("keyring")
+
+    def get_password(service, username):
+        return bag.get((service, username))
+
+    def set_password(service, username, value):
+        bag[(service, username)] = value
+
+    def delete_password(service, username):
+        bag.pop((service, username), None)
+
+    module.get_password = get_password
+    module.set_password = set_password
+    module.delete_password = delete_password
+    monkeypatch.setitem(sys.modules, "keyring", module)
+    return bag
+
+
+def test_pipeline_recreates_clients_when_key_changes(monkeypatch):
+    bag = _install_keyring(monkeypatch, {("ImageLocalizationTool", "llm"): "first-key"})
+    module = types.ModuleType("src.page_pipeline")
+    module.PagePipeline = _StubPipe
+    monkeypatch.setitem(sys.modules, "src.page_pipeline", module)
+
+    ctx = worker._Runtime(queue.Queue())
+    settings = {"llm_base_url": "http://box/v1"}
+    pipe, _ = worker._pipeline(ctx, settings, reset_clients=True)
+    pipe.ocr = object()
+    pipe.translator = object()
+    pipe._shared_client = object()
+    pipe._llm_down = True
+
+    same, _ = worker._pipeline(ctx, settings, reset_clients=True)
+    assert same is pipe
+    assert same.ocr is not None
+    assert same.translator is not None
+    assert same._shared_client is not None
+
+    bag[("ImageLocalizationTool", "llm")] = "second-key"
+    changed, _ = worker._pipeline(ctx, settings, reset_clients=True)
+    assert changed is pipe
+    assert changed.ocr is None
+    assert changed.translator is None
+    assert changed._shared_client is None
+    assert changed._llm_down is False
+    assert changed.inpainter is not None

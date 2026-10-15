@@ -9,6 +9,7 @@ import sys
 import threading
 import time
 import types
+import urllib.error
 from http.client import HTTPConnection
 from pathlib import Path
 from urllib.parse import quote
@@ -659,6 +660,44 @@ def test_llm_check_remembers_models_without_network(api: Api, monkeypatch):
     assert payload["models"] == ["demo-model"]
     status, _, bootstrap = api.json("GET", "/api/bootstrap")
     assert bootstrap["llm"] == {"ok": True, "models": ["demo-model"]}
+
+
+def test_llm_check_rejects_wrong_key_with_probe(api: Api, monkeypatch):
+    api.json("PUT", "/api/settings", {"llm_base_url": "http://127.0.0.1:9/v1"})
+    status, _, _ = api.json("POST", "/api/settings/secret", {"api_key": "wrong"})
+    assert status == 200
+
+    calls = []
+
+    def fake_urlopen(request, timeout=0):
+        calls.append((request.full_url, request.get_header("Authorization")))
+        if request.full_url.endswith("/chat/completions"):
+            raise urllib.error.HTTPError(request.full_url, 401, "Invalid API Key", {}, None)
+
+        class _Response:
+            def read(self):
+                return b'{"data":[{"id":"demo-model"}]}'
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+        return _Response()
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    status, _, payload = api.json("POST", "/api/llm/check", {})
+    assert status == 200
+    assert payload["ok"] is False
+    assert "HTTP 401" in payload["reason"]
+    assert payload["models"] == ["demo-model"]
+    assert calls == [
+        ("http://127.0.0.1:9/v1/models", "Bearer wrong"),
+        ("http://127.0.0.1:9/v1/chat/completions", "Bearer wrong"),
+    ]
+    status, _, bootstrap = api.json("GET", "/api/bootstrap")
+    assert bootstrap["llm"] == {"ok": False, "models": []}
 
 
 def test_sse_reads_one_event_then_closes(api: Api, tmp_path):

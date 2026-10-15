@@ -1,5 +1,6 @@
 """Живой запрос к LLM. В обычном прогоне пропускается маркером slow."""
 
+import os
 import urllib.request
 
 import pytest
@@ -9,9 +10,18 @@ from src.config import Config
 from src.utils.llm_client import LlmClient
 
 
+def _api_key() -> str:
+    return os.environ.get("ILT_LLM_API_KEY", "").strip()
+
+
 def _server_up(url: str) -> bool:
+    headers = {}
+    key = _api_key()
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+    request = urllib.request.Request(url.rstrip("/") + "/models", headers=headers)
     try:
-        with urllib.request.urlopen(url.rstrip("/") + "/models", timeout=3) as response:
+        with urllib.request.urlopen(request, timeout=3) as response:
             return response.status == 200
     except Exception:
         return False
@@ -28,6 +38,7 @@ def test_server_returns_json():
         model=config.llm_model,
         thinking=False,
         timeout=60,
+        api_key=_api_key(),
     )
     image = Image.new("RGB", (32, 32), "white")
     payload = client.chat_json(

@@ -73,6 +73,7 @@ class LlmClient:
         model: str = "",
         thinking: bool = False,
         timeout: int = 300,
+        api_key: str = "",
         session: Any = None,
     ):
         self.base_url = base_url.rstrip("/")
@@ -81,6 +82,8 @@ class LlmClient:
         self.timeout = timeout
         self._session = session
         self._resolved_model = model.strip()
+        key = str(api_key or "").strip()
+        self._headers = {"Authorization": f"Bearer {key}"} if key else {}
 
     def _http(self):
         if self._session is not None:
@@ -92,6 +95,7 @@ class LlmClient:
         """Имена моделей с /v1/models."""
         response = self._http().get(
             f"{self.base_url}/models",
+            headers=self._headers,
             timeout=min(15, self.timeout),
         )
         response.raise_for_status()
@@ -145,8 +149,11 @@ class LlmClient:
                 )
             except LlmError as exc:
                 last_error = exc
+                text = str(exc)
+                if "HTTP 401" in text or "HTTP 403" in text:
+                    break
                 if attempt == 0 and (
-                    "response_format" in str(exc).lower() or "HTTP 400" in str(exc)
+                    "response_format" in text.lower() or "HTTP 400" in text
                 ):
                     try:
                         return self._chat_once(
@@ -212,6 +219,7 @@ class LlmClient:
             response = self._http().post(
                 f"{self.base_url}/chat/completions",
                 json=payload,
+                headers=self._headers,
                 timeout=self.timeout,
             )
         except requests.RequestException as exc:

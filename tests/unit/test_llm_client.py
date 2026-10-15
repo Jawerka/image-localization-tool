@@ -1,8 +1,9 @@
-"""Клиент LLM без сети: разбор ответа и тело запроса."""
+"""Клиент LLM без сети: разбор ответа, тело запроса и заголовок ключа."""
 
+import pytest
 from PIL import Image
 
-from src.utils.llm_client import LlmClient, parse_json_content, strip_think
+from src.utils.llm_client import LlmClient, LlmError, parse_json_content, strip_think
 
 
 class FakeResponse:
@@ -23,12 +24,16 @@ class FakeSession:
     def __init__(self, content='{"ok": 1}'):
         self.content = content
         self.posts = []
+        self.post_headers = []
+        self.get_headers = []
 
-    def get(self, url, timeout=0):
+    def get(self, url, headers=None, timeout=0):
+        self.get_headers.append(headers)
         return FakeResponse({"data": [{"id": "qwen-test"}, {"id": "alias"}]})
 
-    def post(self, url, json=None, timeout=0):
+    def post(self, url, json=None, headers=None, timeout=0):
         self.posts.append(json)
+        self.post_headers.append(headers)
         return FakeResponse({"choices": [{"message": {"content": self.content}}]})
 
 
@@ -57,3 +62,40 @@ def test_chat_json_sends_image_schema_and_disables_thinking():
     assert parts[0]["type"] == "text"
     assert parts[1]["type"] == "image_url"
     assert parts[1]["image_url"]["url"].startswith("data:image/jpeg;base64,")
+
+
+def test_api_key_goes_to_models_and_chat_requests():
+    session = FakeSession('{"blocks": []}')
+    client = LlmClient("http://llm/v1", model="fixed", api_key="secret", session=session)
+    client.list_models()
+    image = Image.new("RGB", (8, 8), "white")
+    client.chat_json("read", {"type": "object"}, "ocr", images=[image])
+    assert session.get_headers == [{"Authorization": "Bearer secret"}]
+    assert session.post_headers == [{"Authorization": "Bearer secret"}]
+
+
+def test_empty_api_key_sends_no_auth_header():
+    session = FakeSession()
+    client = LlmClient("http://llm/v1", model="fixed", api_key="   ", session=session)
+    client.list_models()
+    image = Image.new("RGB", (8, 8), "white")
+    client.chat_json("read", {"type": "object"}, "ocr", images=[image])
+    assert session.get_headers == [{}]
+    assert session.post_headers == [{}]
+
+
+def test_auth_error_is_not_retried(monkeypatch):
+    sleeps: list[float] = []
+    monkeypatch.setattr("src.utils.llm_client.time.sleep", sleeps.append)
+
+    class UnauthSession(FakeSession):
+        def post(self, url, json=None, headers=None, timeout=0):
+            self.posts.append(json)
+            return FakeResponse({"error": "Invalid API Key"}, status=401, text="Invalid API Key")
+
+    session = UnauthSession()
+    client = LlmClient("http://llm/v1", model="fixed", api_key="bad", session=session)
+    with pytest.raises(LlmError):
+        client.chat_json("read", {"type": "object"}, "ocr")
+    assert len(session.posts) == 1
+    assert sleeps == []

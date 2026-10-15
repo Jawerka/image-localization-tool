@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -1070,6 +1071,14 @@ def _paint(
     )))
 
 
+def _key_fingerprint(api_key) -> str:
+    """Отпечаток ключа LLM для сигнатуры клиентов: смена ключа их пересоздаёт."""
+    key = str(api_key or "").strip()
+    if not key:
+        return ""
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+
+
 def _pipeline(ctx: _Runtime, settings: dict, *, reset_clients: bool):
     """Один PagePipeline на процесс. Импорт тяжёлого модуля — только здесь."""
     from src.app.settings import AppSettings
@@ -1091,12 +1100,14 @@ def _pipeline(ctx: _Runtime, settings: dict, *, reset_clients: bool):
         config.inpainter_backend,
         config.device,
         config.glossary_path,
+        _key_fingerprint(getattr(config, "llm_api_key", "")),
     )
     if reset_clients and signature != ctx.clients_sig:
         pipe.ocr = None
         pipe.translator = None
         pipe.ocr_name = ""
         pipe.translator_name = ""
+        pipe._shared_client = None
         pipe._llm_down = False
         if ctx.clients_sig is not None and ctx.clients_sig[6:8] != signature[6:8]:
             pipe.inpainter = None

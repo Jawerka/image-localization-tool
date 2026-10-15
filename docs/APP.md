@@ -48,6 +48,8 @@ python -m src.app page.png --browser папка
 
 Ключ API в JSON не пишется. Он лежит в keyring: служба `ImageLocalizationTool`, имя `llm`. Пустая строка в `set_api_key` удаляет запись. `PUT /api/settings` поля `api_key` и `schema` пропускает. `POST /api/settings/secret` с непустым `api_key` пишет ключ в keyring; пустая строка в этом запросе запись не меняет.
 
+Ключ попадает в запросы пайплайна: `AppSettings.to_config()` кладёт его в `Config.llm_api_key`, клиент LLM шлёт `Authorization: Bearer` в `/models` и `/chat/completions`. Смена ключа меняет сигнатуру и пересоздаёт клиентов LLM в воркере. «Проверить» с заданным ключом дополнительно шлёт минимальный `chat/completions` (max_tokens 1): публичный `/models` (OpenRouter) сам по себе ничего не доказывает про ключ. Ошибки 401/403 клиент не повторяет.
+
 В настройках есть строка `glossary_path` — путь к файлу глоссария. Глоссарий открытого проекта хранится в проекте и правится в окне. Экспорт пишет PNG или JPG (`rename`, `overwrite`, `skip`). Формата CBZ нет.
 
 Поле `sfx_mode` — `skip` или `replace`, по умолчанию `skip`. Рядом хранится `translate_sfx`: `true` только при `replace`. В старом JSON без `sfx_mode` флаг `translate_sfx: true` читается как `replace`, отсутствие флага или `false` — как `skip`. Если `sfx_mode` уже есть, он главнее: значение вне этих двух становится `skip`, и `translate_sfx` выравнивается по нему.
@@ -154,7 +156,7 @@ ZIP, CBZ, CBR/RAR, CB7/7Z и CBT/TAR распаковываются в ката�
 | POST | `/api/dialog/reveal` | Показать папку последнего экспорта или каталог проекта |
 | PUT | `/api/settings` | Записать известные поля настроек. `api_key` и `schema` игнорируются |
 | POST | `/api/settings/secret` | Записать непустой `api_key` в keyring |
-| POST | `/api/llm/check` | Проверить адрес LLM. В ответе `vision` всегда `false` |
+| POST | `/api/llm/check` | Проверить адрес LLM; с заданным ключом — ещё и минимальный `chat/completions`. В ответе `vision` всегда `false` |
 | GET | `/api/models` | Есть ли на диске `detector`, `lama` и `font` (`present`, `path`) |
 | POST | `/api/models/download` | Скачать `kind`: `detector` и `lama` в каталог моделей, `font` в `fonts` рядом с программой. Ответ 202 уходит после окончания загрузки. По ходу шлётся `model.progress` |
 | GET | `/api/fonts` | Каталог шрифтов: `id`, `family`, `category`, `cyrillic` |

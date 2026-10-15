@@ -2,6 +2,7 @@
 
 import json
 import hashlib
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from src.app.model_manager import (
     dest_dir,
     download,
     status,
+    verify_llm,
 )
 
 
@@ -159,3 +161,33 @@ def test_check_llm_without_network(monkeypatch):
     failed = check_llm("http://example/v1")
     assert failed["ok"] is False
     assert failed["models"] == []
+
+
+def test_verify_llm_probes_chat_with_key(monkeypatch):
+    assert verify_llm("http://example/v1", "") == {"ok": True, "reason": ""}
+
+    seen = {}
+
+    def fake_urlopen(request, timeout=0):
+        seen["url"] = request.full_url
+        seen["auth"] = request.get_header("Authorization")
+        seen["body"] = json.loads(request.data.decode("utf-8"))
+        seen["timeout"] = timeout
+        return _Response(b'{"choices": []}')
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    result = verify_llm("http://example/v1", "secret", "demo-model")
+    assert result == {"ok": True, "reason": ""}
+    assert seen["url"] == "http://example/v1/chat/completions"
+    assert seen["auth"] == "Bearer secret"
+    assert seen["timeout"] == 15
+    assert seen["body"]["model"] == "demo-model"
+    assert seen["body"]["max_tokens"] == 1
+
+    def reject(request, timeout=0):
+        raise urllib.error.HTTPError(request.full_url, 401, "Invalid API Key", {}, None)
+
+    monkeypatch.setattr(urllib.request, "urlopen", reject)
+    bad = verify_llm("http://example/v1", "bad-key", "demo-model")
+    assert bad["ok"] is False
+    assert "HTTP 401" in bad["reason"]

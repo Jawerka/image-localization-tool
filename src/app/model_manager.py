@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -141,6 +142,43 @@ def check_llm(base_url: str, api_key: str = "") -> dict:
         elif isinstance(item, str) and item:
             models.append(item)
     return {"ok": True, "models": models}
+
+
+def verify_llm(base_url: str, api_key: str, model: str = "") -> dict:
+    """Пробный ``chat/completions`` с ключом: проверяет, что сервер его принимает.
+
+    Публичный ``/models`` (OpenRouter) ничего не доказывает про ключ, поэтому
+    после успешной проверки списка моделей шлём минимальный запрос. 401/403 —
+    ключ отклонён, прочие ошибки — как есть.
+    """
+    base = str(base_url or "").strip()
+    key = str(api_key or "").strip()
+    if not base or not key:
+        return {"ok": True, "reason": ""}
+    body = json.dumps({
+        "model": str(model or "").strip(),
+        "messages": [{"role": "user", "content": "ping"}],
+        "max_tokens": 1,
+    }).encode("utf-8")
+    request = urllib.request.Request(
+        base.rstrip("/") + "/chat/completions",
+        data=body,
+        headers={
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            response.read()
+    except urllib.error.HTTPError as exc:
+        if exc.code in (401, 403):
+            return {"ok": False, "reason": f"Ключ API отклонён (HTTP {exc.code})"}
+        return {"ok": False, "reason": f"HTTP {exc.code}"}
+    except Exception as exc:
+        return {"ok": False, "reason": str(exc)}
+    return {"ok": True, "reason": ""}
 
 
 def _model_entry(names: tuple[str, ...], override: str | None) -> dict:

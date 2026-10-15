@@ -50,3 +50,16 @@ class TestConfig:
         config.save(path)
         data = json.loads(path.read_text(encoding="utf-8"))
         assert data["min_confidence"] == 0.7
+
+    def test_save_never_writes_api_key(self, tmp_path):
+        config = Config(llm_api_key="secret-key")
+        path = tmp_path / "out.json"
+        config.save(path)
+        text = path.read_text(encoding="utf-8")
+        assert "secret-key" not in text
+        assert "llm_api_key" not in text
+
+    def test_load_reads_manual_api_key(self, tmp_path):
+        path = tmp_path / "config.json"
+        path.write_text(json.dumps({"llm_api_key": "manual"}), encoding="utf-8")
+        assert Config.load(path).llm_api_key == "manual"

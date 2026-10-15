@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -88,6 +89,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Явная пара Argos, ISO 639-1. LLM это поле игнорирует",
     )
     parser.add_argument("--llm-url", type=str, default=None, help="OpenAI-совместимый URL LLM")
+    parser.add_argument(
+        "--llm-api-key",
+        type=str,
+        default=None,
+        help="Ключ API LLM. Иначе ILT_LLM_API_KEY, затем llm_api_key из config.json",
+    )
     parser.add_argument("--llm-think", action="store_true", help="Включить thinking на сервере LLM")
     parser.add_argument("--ocr", choices=["vlm", "rapid"], default=None, help="OCR: vlm или rapid")
     parser.add_argument(
@@ -131,9 +138,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def apply_v2_config(args, config: Config) -> None:
-    """Перенести флаги CLI в Config."""
+    """Перенести флаги CLI в Config. Ключ: флаг, затем env, затем config.json."""
     if args.llm_url:
         config.llm_base_url = args.llm_url
+    if args.llm_api_key:
+        config.llm_api_key = args.llm_api_key
+    else:
+        env_key = os.environ.get("ILT_LLM_API_KEY", "").strip()
+        if env_key:
+            config.llm_api_key = env_key
     if args.llm_think:
         config.llm_thinking = True
     if args.ocr:
