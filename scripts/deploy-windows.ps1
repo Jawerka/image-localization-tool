@@ -50,15 +50,30 @@ if (-not (Test-Path -LiteralPath $Dest)) {
     New-Item -ItemType Directory -Path $Dest -Force | Out-Null
 }
 
+# User data that lives beside the app and must survive /MIR. Full destination
+# paths only: a bare name would also drop nested source dirs such as
+# desktop\data (Flutter assets) or rapidocr\models.
+$userDirs = @('models', 'runtime', 'data', '.resources', '.downloads', '.builtin', 'components')
 $exclude = @()
 if (-not $IncludeModels) {
-    # Full path: /XD with a bare name excludes directories at any depth
-    # (rapidocr\models, torch\models, etc.).
+    # Source has no models to copy; exclude the dist copy path as well.
     $exclude += (Join-Path $DistDir 'models')
     Write-Host "==> Mirror (excluding models) $DistDir -> $Dest"
 } else {
     Write-Host "==> Mirror (including models) $DistDir -> $Dest"
 }
+$protect = @()
+foreach ($name in $userDirs) {
+    if ($IncludeModels -and $name -eq 'models') {
+        # -IncludeModels copies dist\models over the destination on purpose.
+        continue
+    }
+    $protect += (Join-Path $Dest $name)
+}
+$exclude += $protect
+
+# Remember which user dirs exist so the mirror cannot silently delete them.
+$existingUserDirs = @($protect | Where-Object { Test-Path -LiteralPath $_ })
 
 # /MIR keeps dest in sync with dist. Exit codes 0-7 are success for robocopy.
 $robocopyArgs = @($DistDir, $Dest, '/MIR', '/NFL', '/NDL', '/NJH', '/NJS', '/nc', '/ns', '/np')
@@ -83,6 +98,11 @@ if (-not (Test-Path -LiteralPath $destSidecar)) {
 $destWeb = Join-Path $Dest 'web'
 if (-not (Test-Path -LiteralPath $destWeb)) {
     throw "Deploy incomplete: missing $destWeb"
+}
+foreach ($userDir in $existingUserDirs) {
+    if (-not (Test-Path -LiteralPath $userDir)) {
+        throw "Deploy deleted user data: $userDir"
+    }
 }
 
 Write-Host ""
