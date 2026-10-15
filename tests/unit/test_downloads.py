@@ -20,8 +20,8 @@ def server(body, mode="range"):
 
         def do_GET(self):
             calls.append(self.headers.get("Range"))
-            if mode == "retry" and len(calls) == 1:
-                self.send_response(503)
+            if mode in ("retry", "retry429") and len(calls) == 1:
+                self.send_response(429 if mode == "retry429" else 503)
                 self.end_headers()
                 return
             offset = int(self.headers.get("Range", "bytes=0-").split("=")[1].split("-")[0])
@@ -72,9 +72,10 @@ def test_resume_handles_range_or_restarts_safely(tmp_path, mode):
         assert len(calls) == (2 if mode == "416" else 1)
 
 
-def test_retry_temporary_http_error(tmp_path, monkeypatch):
+@pytest.mark.parametrize("mode", ["retry", "retry429"])
+def test_retry_temporary_http_error(tmp_path, monkeypatch, mode):
     monkeypatch.setattr(downloads, "wait_retry", lambda *args: None)
-    with server(b"hello", "retry") as (url, calls):
+    with server(b"hello", mode) as (url, calls):
         assert downloads.fetch(artifact(url, b"hello"), tmp_path, retries=1).read_bytes() == b"hello"
         assert len(calls) == 2
 

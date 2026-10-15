@@ -162,6 +162,7 @@ a = Analysis(
     binaries=[],
     datas=datas,
     hiddenimports=[
+        "cmath",
         "src",
         "src.app",
         "src.app.runtime",

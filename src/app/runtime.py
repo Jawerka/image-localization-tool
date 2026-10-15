@@ -1028,6 +1028,17 @@ def _cleanup_stale_temp(root: Path) -> None:
             logger.debug("Не убрался временный каталог %s", entry, exc_info=True)
 
 
+def configure_argos_paths() -> None:
+    """Все служебные папки Argos принадлежат приложению, включая portable."""
+    from src.app.paths import data_root
+
+    for key, folder in (("XDG_DATA_HOME", "share"), ("XDG_CONFIG_HOME", "config"), ("XDG_CACHE_HOME", "cache")):
+        os.environ.setdefault(key, str(data_root() / "libraries" / folder))
+    os.environ.setdefault("ARGOS_PACKAGES_DIR", str(data_root() / "argos-packages"))
+    os.environ.setdefault("ARGOS_TRANSLATE_PACKAGE_DIR", str(data_root() / "argos-packages"))
+    os.environ["ARGOS_CHUNK_TYPE"] = "MINISBD"
+
+
 def startup() -> list[str]:
     """Старт процесса: активация паков и ``ARGOS_PACKAGES_DIR``.
 
@@ -1044,6 +1055,7 @@ def startup() -> list[str]:
         if settings.components_previous_dir:
             os.environ["ILT_COMPONENT_PREVIOUS_ROOT"] = settings.components_previous_dir
     activated = activate()
+    configure_argos_paths()
     try:
         from src.app.paths import data_root
 

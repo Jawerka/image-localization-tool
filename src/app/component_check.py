@@ -51,6 +51,7 @@ def run(path: str) -> int:
         os.environ["ARGOS_CHUNK_TYPE"] = "MINISBD"
         from src.app import runtime
 
+        runtime.configure_argos_paths()
         runtime._attach_stdlib()
         if spec.get("site"):
             runtime.activate_path(Path(spec["site"]).parent)
@@ -92,25 +93,30 @@ def check(spec: dict) -> dict:
         from PIL import Image, ImageDraw, ImageFont
         from src.config import Config
         from src.page_pipeline import PagePipeline
-        from src.utils.paths import resolve_font
         from src.components.translator import TranslatorService
 
         translator = TranslatorService()
         translated = translator.translate_texts(["Hello."], "en", "ru")
-        if translator.last_error or not translated or not translated[0].strip():
+        if translator.last_error or not translated.get("Hello.", "").strip() or translated["Hello."] == "Hello.":
             raise RuntimeError(translator.last_error or "Оффлайн-перевод не работает")
         image = Image.new("RGB", (640, 400), "white")
         draw = ImageDraw.Draw(image)
         draw.ellipse((40, 40, 600, 360), outline="black", width=4)
-        draw.text((220, 165), "HELLO", fill="black", font=ImageFont.truetype(str(resolve_font("Heroika-Regular.otf")), 42))
+        draw.multiline_text((175, 145), "Hello world!\nHow are you?", fill="black", spacing=10,
+                            font=ImageFont.load_default(size=40))
         path = Path(spec["path"])
         path.parent.mkdir(parents=True, exist_ok=True)
         image.save(path)
-        config = Config(ocr_backend="rapid", translator_backend="argos", llm_base_url="", device=spec.get("device", "cpu"))
+        config = Config(ocr_backend="rapid", translator_backend="argos", llm_base_url="", device=spec.get("device", "cpu"),
+                        sfx_mode="replace", translate_sfx=True)
         result = PagePipeline(config).process(path, source_lang="en", target_lang="ru")
         if attempts:
             raise RuntimeError("Пайплайн предпринял скрытую попытку загрузки")
-        result.image.save(path.with_name("offline-result.png"))
+        if not any(region.translation and region.translation != region.text for region in result.regions):
+            raise RuntimeError("Контрольная страница не получила перевода")
+        if not {"inpaint", "typeset"}.issubset(result.stages_completed):
+            raise RuntimeError("Контрольная страница не прошла очистку и вёрстку")
+        result.output_image.save(path.with_name("offline-result.png"))
         return {"ok": True, "regions": len(result.regions), "warnings": result.warnings}
     if kind in ("torch", "torch-cuda"):
         import torch

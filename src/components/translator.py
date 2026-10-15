@@ -38,6 +38,8 @@ class TranslatorService:
         self._error = None
         
         try:
+            from src.app.runtime import configure_argos_paths
+            configure_argos_paths()
             os.environ["ARGOS_CHUNK_TYPE"] = "MINISBD"
             import argostranslate.package
             import argostranslate.settings
