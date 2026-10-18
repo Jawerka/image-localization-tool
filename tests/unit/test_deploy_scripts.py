@@ -27,12 +27,14 @@ def test_deploy_windows_script_is_ascii_and_skips_models_by_default():
     assert r"D:\Documents\apps\ImageLocalizationTool" in text or "apps\\ImageLocalizationTool" in text
 
 
-def test_deploy_lan_script_has_host_fallback_and_preserves_runtime():
+def test_deploy_lan_script_uses_current_host_and_proxy_jump():
     data = LAN.read_bytes()
     text = data.decode("ascii")
     assert "$ErrorActionPreference = 'Stop'" in text
     assert "192.168.88.41" in text
-    assert "192.168.88.168" in text
+    assert '[string[]] $Hosts = @("192.168.88.41")' in text
+    assert '[string] $ProxyJump = "pve.30"' in text
+    assert "'-J', $ProxyJump" in text
     assert "DryRun" in text
     assert "ilt.service" in text
     assert "/opt/image-localization-tool" in text

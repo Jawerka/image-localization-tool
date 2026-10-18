@@ -8,7 +8,7 @@
 
 # LAN / CT113
 .\scripts\deploy-lan.ps1
-.\scripts\deploy-lan.ps1 -Hosts @("192.168.88.41","192.168.88.168") -DryRun
+.\scripts\deploy-lan.ps1 -Hosts @("192.168.88.41") -DryRun
 
 # Same filter as CI
 pytest tests/unit -m "not slow and not ui and not requires_llm and not requires_argos" -q

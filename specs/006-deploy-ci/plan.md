@@ -6,7 +6,7 @@
 
 - Build: `scripts/build-windows.ps1` (ASCII, SkipInno).
 - Apps path (local): `D:\Documents\apps\ImageLocalizationTool`.
-- LAN: SSH to `192.168.88.41` / `.168`, root `/opt/image-localization-tool`, `ilt.service`.
+- LAN: SSH to `192.168.88.41`, root `/opt/image-localization-tool`, `ilt.service`.
 - Tests: `pytest tests/unit -m "not slow and not ui and not requires_llm and not requires_argos"`.
 
 ## Constitution Check
