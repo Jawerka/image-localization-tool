@@ -152,6 +152,7 @@ def _merge_regions(regions: list[TextRegion], can_merge) -> list[TextRegion]:
             confidence=max(item.confidence for item in members),
             block_type=first.block_type,
             bubble_bbox=None,
+            document=all(item.document for item in members),
         ))
     return merged
 
@@ -337,16 +338,25 @@ def refine_document_regions(
     """Крупный текстовый бокс документа режется на абзацы по строкам букв."""
     height, width = image_rgb.shape[:2]
     page_area = height * width
+    from src.components.document_layout import document_ink, is_document_page
+    document_page=is_document_page(image_rgb,regions)
+    document_anchors=[r for r in regions if box_area(r.bbox)<.03*page_area] if document_page else []
     refined: list[TextRegion] = []
     for region in regions:
-        if region.bubble_bbox is not None or box_area(region.bbox) < 0.12 * page_area:
+        if document_page:
+            region.document=True
+            region.bubble_bbox=None
+            if box_area(region.bbox)<.03*page_area:
+                refined.append(region)
+                continue
+        if not document_page and (region.bubble_bbox is not None or box_area(region.bbox) < 0.12 * page_area):
             refined.append(region)
             continue
         x, y, box_w, box_h = region.bbox
         x0, y0 = max(0, x), max(0, y)
         x1, y1 = min(width, x + box_w), min(height, y + box_h)
         crop = image_rgb[y0:y1, x0:x1]
-        lines = _line_boxes(_ink_components(crop))
+        lines = _line_boxes(document_ink(crop) if document_page else _ink_components(crop))
         groups = _group_line_boxes(lines)
         if len(groups) <= 1:
             if lines:
@@ -354,15 +364,20 @@ def refine_document_regions(
             refined.append(region)
             continue
         for group in groups:
+            refined_box=_padded_box(group,(x0,y0),(width,height))
+            if document_page and any(anchor is not region and overlap_ratio(anchor.bbox,refined_box)>.5 for anchor in document_anchors):
+                continue
             refined.append(TextRegion(
                 id=0,
-                bbox=_padded_box(group, (x0, y0), (width, height)),
+                bbox=refined_box,
                 class_name="text_free",
                 confidence=region.confidence,
                 block_type="narration",
+                document=document_page,
             ))
     refined = _drop_contained_duplicates(refined)
-    refined = merge_columns(refined)
+    if not document_page:
+        refined = merge_columns(refined)
     direction = "rtl" if reading_order == "rtl" else "ltr"
     refined = assign_reading_order(refined, direction)
     for index, region in enumerate(refined, start=1):

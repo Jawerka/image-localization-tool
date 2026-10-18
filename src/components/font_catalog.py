@@ -232,6 +232,8 @@ def assign_stylized_fonts(
 
 def role_font_id(region) -> str | None:
     """Id шрифта по роли региона. См. ``docs/FONTS.md``."""
+    if getattr(region,"document",False):
+        return None
     block = str(getattr(region, "block_type", "") or "").strip().lower()
     text = str(getattr(region, "text", "") or "")
     folded = "".join(ch.casefold() for ch in text if not ch.isspace())

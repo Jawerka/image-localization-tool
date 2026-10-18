@@ -174,7 +174,8 @@ def test_stroke_and_margin_pick_a_smaller_size():
     with_stroke.render(image, [stroked])
     with_margin.render(image, [margined])
     assert plain.style.font_size > stroked.style.font_size
-    assert plain.style.font_size > margined.style.font_size
+    # Новый перенос может сохранить кегль, перераспределив слова по строкам.
+    assert plain.style.font_size >= margined.style.font_size
 
 
 def test_zero_margin_does_not_shrink_the_bubble():

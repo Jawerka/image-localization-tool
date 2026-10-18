@@ -84,3 +84,18 @@ def test_typeset_does_not_auto_shorten_on_overflow():
     assert typesetter.calls == 1
     assert typesetter.last_force is True
     assert any("не влез" in item for item in warnings)
+
+
+def test_retypeset_replaces_stale_overflow_warning():
+    class Fits:
+        def render(self, image, regions, force=False):
+            return image, []
+
+    pipeline = PagePipeline(typesetter=Fits())
+    warnings = ["Текст не влез полностью: [5]", "OCR: проверить блок 2"]
+    pipeline._typeset(Image.new("RGB", (80, 40), "white"), [], "ru", warnings)
+    assert warnings == ["OCR: проверить блок 2"]
+    pipeline.typesetter = _AlwaysOverflow()
+    pipeline._typeset(Image.new("RGB", (80, 40), "white"), [], "ru", warnings)
+    pipeline._typeset(Image.new("RGB", (80, 40), "white"), [], "ru", warnings)
+    assert warnings.count("Текст не влез полностью: [5]") == 1

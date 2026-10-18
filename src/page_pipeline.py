@@ -781,6 +781,8 @@ class PagePipeline:
             enabled=bool(getattr(self.config, "auto_stylized_fonts", True)),
         )
         rendered, overflow = self.typesetter.render(image, regions, force=True)
+        # Повторная вёрстка заменяет результат своей проверки, а не накапливает его.
+        warnings[:] = [item for item in warnings if not item.startswith("Текст не влез полностью:")]
         if overflow:
             warnings.append(f"Текст не влез полностью: {overflow}")
         return rendered, overflow

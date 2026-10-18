@@ -160,7 +160,7 @@ def _bubble_retouch_mask(
     При провале силуэта — None (вызывающий код останется на ink-маске),
     без эллипса по AABB детектора.
     """
-    if region.bubble_bbox is None or region.block_type == "sfx":
+    if region.document or region.bubble_bbox is None or region.block_type == "sfx":
         return None
     silhouette = bubble_interior_mask(image_rgb, region, inset_px=max(0, int(inset_px)))
     if np.any(silhouette):
@@ -222,7 +222,8 @@ def segment_region(
     style.fill_rgb = fill
     style.stroke_rgb = stroke
     style.font_size = max(10, int(line_height * 0.85))
-    style.alignment = _alignment(ink_bool)
+    if not (region.document and (region.manual or region.edited)):
+        style.alignment = "left" if region.document else _alignment(ink_bool)
     style.uppercase = _is_uppercase(region.text)
     style.line_height = line_height
     if capture_ink is not None:
@@ -232,6 +233,11 @@ def segment_region(
     if bubble is not None:
         return bubble
     full[cy0:cy1, cx0:cx1] = dilated
+    if region.document:
+        # Соседние строки и аватары за рамкой документа не ретушируем.
+        bounded = np.zeros_like(full)
+        bounded[y0:y1, x0:x1] = full[y0:y1, x0:x1]
+        return bounded
     return full
 
 

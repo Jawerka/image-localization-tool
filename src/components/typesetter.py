@@ -20,10 +20,10 @@ _HYPHENATORS: dict[str, object] = {}
 
 
 def _font_file(region: TextRegion) -> Path | None:
-    if region.bubble_bbox is not None and COMIC_FONT.exists():
+    if not region.document and region.bubble_bbox is not None and COMIC_FONT.exists():
         return COMIC_FONT
     candidates = []
-    if region.bubble_bbox is not None:
+    if not region.document and region.bubble_bbox is not None:
         candidates.append(Path(r"C:\Windows\Fonts\comic.ttf"))
     candidates.extend([
         Path(r"C:\Windows\Fonts\segoeui.ttf"),
@@ -239,16 +239,20 @@ def _fill_holes(mask: np.ndarray) -> np.ndarray:
 
 
 def interior_mask(image_rgb: np.ndarray, region: TextRegion) -> np.ndarray:
-    """Внутренность баллона заливкой от центра текста. Для документа — сам bbox."""
+    """Общая геометрия облачка; прежняя заливка — запасной путь. Документ — bbox."""
     height, width = image_rgb.shape[:2]
     mask = np.zeros((height, width), dtype=np.uint8)
-    if region.bubble_bbox is None:
+    if region.document or region.bubble_bbox is None:
         x, y, box_w, box_h = region.bbox
         x0, y0 = max(0, x), max(0, y)
         x1, y1 = min(width, x + box_w), min(height, y + box_h)
         mask[y0:y1, x0:x1] = 255
         return mask
 
+    from src.components.bubble_contour import bubble_interior_mask
+    silhouette = bubble_interior_mask(image_rgb, region, inset_px=0)
+    if np.any(silhouette):
+        return silhouette
     bx, by, bw, bh = region.bubble_bbox
     cx = int(region.bbox[0] + region.bbox[2] / 2)
     cy = int(region.bbox[1] + region.bbox[3] / 2)
@@ -270,6 +274,14 @@ def interior_mask(image_rgb: np.ndarray, region: TextRegion) -> np.ndarray:
         inset = max(4, min(bw, bh) // 12)
         mask[y0 + inset:max(y0 + inset, y1 - inset), x0 + inset:max(x0 + inset, x1 - inset)] = 255
     mask = _fill_holes(mask)
+    tx,ty,tw,th=region.bbox
+    xa,ya=max(0,tx),max(0,ty)
+    xb,yb=min(width,tx+tw),min(height,ty+th)
+    covered=mask[ya:yb,xa:xb]
+    if covered.size and np.mean(covered>0)<.8:
+        # Маленькая компонента фона не должна превращать всю реплику в микротекст.
+        mask[:]=0
+        mask[ya:yb,xa:xb]=255
     if int(np.sum(mask > 0)) > 200:
         mask = cv2.erode(mask, np.ones((3, 3), np.uint8), iterations=1)
     return mask
@@ -845,11 +857,25 @@ def _fit_size(
     letter_spacing: float,
     line_spacing: float,
     stroke_pad,
+    layout_fn=None,
 ) -> tuple[list | None, ImageFont.ImageFont | None, bool]:
     """Наибольший кегль из ``[low, high]``, который влезает без обрезки."""
     placed = None
     chosen = None
     fits_any = False
+    layout_fn = layout_fn or _layout
+    if layout_fn is not _layout:
+        # При смене числа строк допустимость не обязана быть монотонной.
+        for size in range(high, low - 1, -1):
+            font = _load_font(font_path, size)
+            candidate, fits = layout_fn(
+                text, font, draw, spans, word_break, align,
+                letter_spacing=letter_spacing, line_spacing=line_spacing,
+                stroke_pad=int(stroke_pad(size)),
+            )
+            if fits:
+                return candidate, font, True
+        return None, None, False
     while low <= high:
         mid = (low + high) // 2
         font = _load_font(font_path, mid)
@@ -942,6 +968,19 @@ class Typesetter:
         width = max(1, int(round(size * self.stroke_ratio)))
         return _median_rgb(image_rgb, area), width
 
+    def _fit_stroke_width(self, region: TextRegion, size: int, complex_background: bool) -> int:
+        """Ширина обводки для подбора кегля без повторного измерения фона."""
+        mode = region.style.stroke_mode
+        if mode == "none":
+            return 0
+        if mode == "custom" and region.style.stroke_width > 0:
+            return max(1, int(round(region.style.stroke_width)))
+        if self.stroke_ratio <= 0:
+            return max(1, size // 12) if complex_background else 0
+        if complex_background:
+            return max(2, int(round(size * 0.12)))
+        return max(1, int(round(size * self.stroke_ratio)))
+
     def render(
         self,
         image: Image.Image,
@@ -964,11 +1003,13 @@ class Typesetter:
             if region.style.uppercase:
                 text = text.upper()
             area = interior_mask(rgb, region)
+            from src.components.bubble_layout import separate_neighbour_bubbles
+            area = separate_neighbour_bubbles(area, region, regions)
             if not np.any(area):
                 overflow.append(region.id)
                 continue
             clip = np.maximum(clip, area)
-            align = "center" if region.bubble_bbox is not None else region.style.alignment
+            align = "center" if region.bubble_bbox is not None and not region.document else region.style.alignment
             font_path = self._region_font(region)
             letter_spacing = float(region.style.letter_spacing or 0.0)
             line_spacing = float(region.style.line_spacing or 0.0)
@@ -980,15 +1021,29 @@ class Typesetter:
             override = int(region.style.font_size_override or 0)
             is_sfx = region.block_type == "sfx"
             word_break = None if is_sfx else hyphenator
+            layout_fn = _layout
+            if region.document and not is_sfx and not _style_needs_layer(region.style):
+                from src.components.document_layout import layout_rectangle
+                layout_fn=layout_rectangle
+            elif region.bubble_bbox is not None and not is_sfx and not _style_needs_layer(region.style):
+                from src.components.bubble_layout import layout_in_shape, shape_row_spans
+                layout_fn = layout_in_shape
+                if layout_fn is not _layout:
+                    spans = shape_row_spans(layout_area)
+
+            # Цвет/сложность фона не требуют повторного обхода всей страницы.
+            area_y, area_x = np.nonzero(area)
+            paint_rgb = rgb[area_y.min():area_y.max()+1, area_x.min():area_x.max()+1]
+            paint_area = area[area_y.min():area_y.max()+1, area_x.min():area_x.max()+1]
+            complex_background = _background_is_complex(paint_rgb, paint_area)
 
             def stroke_pad(size: int) -> int:
-                _color, width = self._stroke_paint(rgb, area, region, size)
-                return int(width or 0)
+                return self._fit_stroke_width(region, size, complex_background)
 
             if override > 0:
                 size = min(self.max_font_size, max(self.min_font_size, override))
                 chosen_font = _load_font(font_path, size)
-                placed, fits = _layout(
+                placed, fits = layout_fn(
                     text, chosen_font, draw, spans, word_break, align,
                     letter_spacing=letter_spacing, line_spacing=line_spacing,
                     stroke_pad=stroke_pad(size),
@@ -1036,11 +1091,12 @@ class Typesetter:
                 heights = [index for index, span in enumerate(spans) if span]
                 interior_h = (heights[-1] - heights[0] + 1) if heights else self.max_font_size
                 high = min(self.max_font_size, max(self.min_font_size, interior_h))
-                if _is_short_reply(text) and region.bubble_bbox is not None:
+                if _is_short_reply(text) and region.bubble_bbox is not None and layout_fn is _layout:
                     high = _short_reply_cap(high, region, regions, self.min_font_size, interior_h)
                 placed, chosen_font, fits_any = _fit_size(
                     text, draw, spans, hyphenator, align, font_path,
                     self.min_font_size, high, letter_spacing, line_spacing, stroke_pad,
+                    layout_fn=layout_fn,
                 )
                 if not fits_any:
                     overflow.append(region.id)

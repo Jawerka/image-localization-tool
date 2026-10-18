@@ -1,8 +1,8 @@
 """Интерьер речевого баллона для маски ретуши (без AABB-эллипса).
 
-Силуэт — связная светлая область от текста, остановленная тёмной/градиентной
-обводкой. Уголочки детекторного прямоугольника снаружи облачка не входят
-в маску; inset фиксированный (Config.bubble_mask_inset_px).
+Силуэт объединяет достаточно крупные светлые компоненты у текста,
+ограниченные цветом и градиентной обводкой. Отступ внутрь задаётся
+Config.bubble_mask_inset_px.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from src.models import TextRegion
 
 _DEFAULT_INSET = 2
 _ROI_PAD = 4
-_SEED_BAND = 28.0
+_SEED_BAND = 56.0
 _DARK_DELTA = 45.0
 _MIN_FILL_RATIO = 0.08
 
@@ -62,11 +62,22 @@ def bubble_interior_mask(
     fillable = (dist <= _SEED_BAND) & ~barrier
     fillable[sy, sx] = True
 
-    labels = _label_from_seed(fillable.astype(np.uint8), sx, sy)
-    if labels is None:
-        return empty
-
-    interior = (labels == labels[sy, sx]).astype(np.uint8) * 255
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(
+        fillable.astype(np.uint8), connectivity=4
+    )
+    tx, ty, tw, th = region.bbox
+    text_labels = labels[
+        max(0, ty - y0):max(0, min(y1 - y0, ty + th - y0)),
+        max(0, tx - x0):max(0, min(x1 - x0, tx + tw - x0)),
+    ]
+    hits = np.bincount(text_labels.ravel(), minlength=count)
+    # Фон одного облачка может распадаться на части на границе панелей.
+    selected = [
+        label for label in range(1, count)
+        if hits[label] >= max(20, tw * th * 0.005)
+        and stats[label, cv2.CC_STAT_AREA] >= bw * bh * 0.015
+    ]
+    interior = np.isin(labels, selected).astype(np.uint8) * 255
     contours, _ = cv2.findContours(interior, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
         return empty
@@ -75,6 +86,25 @@ def bubble_interior_mask(
 
     box_area = max(1, bw * bh)
     if int(np.sum(filled > 0)) < _MIN_FILL_RATIO * box_area:
+        return empty
+
+    # У незамкнутого/прозрачного облачка внешний фон может войти в компоненту.
+    # Заливка такого контура уничтожит обводку: безопаснее маска отдельных букв.
+    probe=cv2.erode(filled,cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(5,5)))>0
+    text_area=np.zeros_like(probe)
+    xa,ya=max(0,tx-x0-5),max(0,ty-y0-5)
+    xb,yb=min(probe.shape[1],tx+tw-x0+5),min(probe.shape[0],ty+th-y0+5)
+    text_area[ya:yb,xa:xb]=True
+    dark_outside=(gray<100)&probe&~text_area
+    if np.count_nonzero(dark_outside)>max(50,np.count_nonzero(probe)*.005):
+        return empty
+    text_probe=probe[max(0,ty-y0):min(probe.shape[0],ty+th-y0),max(0,tx-x0):min(probe.shape[1],tx+tw-x0)]
+    if text_probe.size and np.mean(text_probe)<.5:
+        return empty
+    # В сером прозрачном облачке панель может разорвать фон на разные оттенки.
+    # Неполная заливка оставит буквы; цветные фигурные облачка имеют иные боксы.
+    chroma=np.max(crop,axis=2).astype(float)-np.min(crop,axis=2)
+    if text_probe.size and np.mean(chroma)<8 and np.mean(text_probe)<.9:
         return empty
 
     if inset_px > 0:
@@ -106,11 +136,14 @@ def _seed_in_crop(
     cy = min(max(cy, 0.0), ch - 1.0)
 
     gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY).astype(np.float32)
-    median = float(np.median(gray))
-    bright = gray >= median - 8.0
-    if not np.any(bright):
-        bright = gray >= float(np.percentile(gray, 40))
-    ys, xs = np.where(bright)
+    xa, ya = max(0, tx - origin_x), max(0, ty - origin_y)
+    xb, yb = min(cw, tx + tw - origin_x), min(ch, ty + th - origin_y)
+    if xb <= xa or yb <= ya:
+        return None
+    patch = gray[ya:yb, xa:xb]
+    # Медиана всего кропа на тёмном рисунке допускает пиксели букв.
+    ys, xs = np.where(patch >= float(np.percentile(patch, 85)) - 8.0)
+    ys, xs = ys + ya, xs + xa
     if ys.size == 0:
         return None
     nearest = int(np.argmin((xs - cx) ** 2 + (ys - cy) ** 2))
