@@ -111,8 +111,14 @@ public static class HealthSwitchSidecar {
 
 function Invoke-Updater([string] $ScriptPath, [string[]] $Arguments) {
     $engine = (Get-Process -Id $PID).Path
-    $output = & $engine -NoProfile -ExecutionPolicy Bypass -File $ScriptPath @Arguments 2>&1
-    $code = $LASTEXITCODE
+    $previousErrorAction = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = & $engine -NoProfile -ExecutionPolicy Bypass -File $ScriptPath @Arguments 2>&1
+        $code = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousErrorAction
+    }
     $output | ForEach-Object { Write-Host $_ }
     return $code
 }
@@ -142,7 +148,7 @@ try {
     [IO.Compression.ZipFile]::CreateFromDirectory($GoodBundle, $goodArchive, [IO.Compression.CompressionLevel]::Optimal, $true)
     foreach ($folder in @('data', 'models', 'runtime', '.resources', '.downloads', '.builtin', 'components')) {
         New-Item -ItemType Directory -Path (Join-Path $InstallRoot $folder) -Force | Out-Null
-        Set-Content -LiteralPath (Join-Path $InstallRoot $folder 'preserve.txt') -Encoding utf8 -Value "preserve $folder"
+        Set-Content -LiteralPath (Join-Path (Join-Path $InstallRoot $folder) 'preserve.txt') -Encoding utf8 -Value "preserve $folder"
     }
     $before = @{}
     Get-ChildItem -LiteralPath $InstallRoot -Recurse -Filter preserve.txt | ForEach-Object {
