@@ -34,6 +34,20 @@ def test_publish_rejects_modified_asset_or_source(tmp_path):
         release_candidate.verify(tmp_path, assets, report)
 
 
+def test_source_digest_ignores_generated_flutter_ephemeral(tmp_path):
+    source(tmp_path)
+    (tmp_path / "apps/desktop/windows/runner").mkdir(parents=True)
+    (tmp_path / "apps/desktop/windows/runner/main.cpp").write_text("code")
+    (tmp_path / "apps/desktop/pubspec.yaml").write_text("name: x")
+    (tmp_path / "apps/desktop/pubspec.lock").write_text("lock")
+    before = release_candidate.source_digest(tmp_path)
+    ephemeral = tmp_path / "apps/desktop/windows/flutter/ephemeral"
+    ephemeral.mkdir(parents=True)
+    (ephemeral / "flutter_windows.dll").write_bytes(b"generated")
+    (ephemeral / "generated_config.cmake").write_text("generated")
+    assert release_candidate.source_digest(tmp_path) == before
+
+
 def test_publish_requires_manual_smoke(tmp_path):
     with pytest.raises(ValueError, match="ручную"):
         release_candidate.verify(tmp_path, tmp_path, {"checks_passed": True})

@@ -33,8 +33,18 @@ from src.app.runtime import RELEASE_BASE  # noqa: E402
 def load_packs(path: Path) -> list[dict]:
     data = json.loads(Path(path).read_text(encoding="utf-8-sig"))
     if not isinstance(data, list):
-        raise SystemExit(f"Ожидался список записей: {path}")
+        raise SystemExit(f"Неверный формат списка пакетов: {path}")
     return [item for item in data if isinstance(item, dict)]
+
+
+def write_if_changed(path: Path, text: str) -> bool:
+    """Не трогать tracked JSON, если меняются только переводы строк."""
+    if path.is_file():
+        existing = path.read_text(encoding="utf-8")
+        if existing.replace("\r\n", "\n") == text:
+            return False
+    path.write_text(text, encoding="utf-8", newline="\n")
+    return True
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -81,12 +91,12 @@ def main(argv: list[str] | None = None) -> int:
         if not bundled.is_absolute():
             bundled = ROOT / bundled
         bundled.parent.mkdir(parents=True, exist_ok=True)
-        bundled.write_text(text, encoding="utf-8", newline="\n")
-        print(f"Встроенная копия: {bundled} (паков: {len(manifest['packs'])})")
+        if write_if_changed(bundled, text):
+            print(f"Обновлён встроенный каталог: {bundled} (пакетов: {len(manifest['packs'])})")
     resources = ROOT / "src/app/component_manifest.json"
     if resources.is_file():
         canonical = json.dumps(json.loads(resources.read_text(encoding="utf-8")), ensure_ascii=False, indent=2) + "\n"
-        resources.write_text(canonical, encoding="utf-8", newline="\n")
+        write_if_changed(resources, canonical)
         (out_path.parent / f"ilt-component-manifest-{version}.json").write_text(canonical, encoding="utf-8", newline="\n")
     return 0
 
