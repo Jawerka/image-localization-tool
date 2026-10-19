@@ -1,6 +1,6 @@
 {
   "schema": 2,
-  "app": "1.0.2",
+  "app": "1.0.5",
   "packs": [
     {
       "id": "torch-cpu",

@@ -104,3 +104,34 @@ def test_sfx_stays_ink_path():
     assert np.any(mask)
     oval_fill = int(np.sum(mask > 0))
     assert oval_fill < 2500
+def test_two_tone_bubble_keeps_both_sides():
+    import cv2
+    import numpy as np
+    from src.models import TextRegion
+    from src.components.bubble_contour import bubble_interior_mask
+    rgb = np.full((160, 260, 3), 65, np.uint8)
+    inside = np.zeros((160, 260), np.uint8)
+    cv2.ellipse(inside, (130, 80), (110, 65), 0, 0, 360, 255, -1)
+    rgb[inside > 0] = (245, 240, 235)
+    right = (inside > 0) & (np.indices(inside.shape)[1] > 130)
+    rgb[right] = (218, 225, 235)
+    cv2.putText(rgb, 'TEXT', (70, 90), cv2.FONT_HERSHEY_SIMPLEX, 1, (30,30,30), 3)
+    region = TextRegion(1, (60, 45, 140, 65), bubble_bbox=(18, 13, 224, 134))
+    mask = bubble_interior_mask(rgb, region)
+    assert mask[60, 190] == 255
+    assert mask[60, 70] == 255
+    assert mask[15, 20] == 0
+
+
+def test_leak_around_open_outline_falls_back_instead_of_erasing_border():
+    import cv2
+    import numpy as np
+    from src.models import TextRegion
+    from src.components.bubble_contour import bubble_interior_mask
+    rgb=np.full((180,240,3),245,np.uint8)
+    cv2.rectangle(rgb,(20,20),(220,160),(25,25,25),4)
+    rgb[15:26,90:130]=245
+    cv2.putText(rgb,'TEST',(50,100),cv2.FONT_HERSHEY_SIMPLEX,1,(0,0,0),2)
+    r=TextRegion(1,(50,65,140,45),bubble_bbox=(10,10,220,160))
+    mask=bubble_interior_mask(rgb,r)
+    assert not np.any(mask)

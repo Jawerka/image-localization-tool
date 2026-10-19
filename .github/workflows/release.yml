@@ -74,9 +74,21 @@ jobs:
             touch "$ROOT/$folder/.keep"
           done
           cp scripts/deploy-server.sh "$ROOT/deploy.sh"
+          cp scripts/install-server-linux.sh "$ROOT/"
+          cp scripts/update-server-linux.sh "$ROOT/"
+          cp scripts/rollback-server-linux.sh "$ROOT/"
+          cp scripts/linux-deploy-common.sh "$ROOT/"
+          cp deploy/ilt.service "$ROOT/ilt.service"
+          printf '{"schema":1,"version":"%s","platform":"linux-x64","executable":"ImageLocalizationTool"}\n' "$VERSION" > "$ROOT/release.json"
           sed -i 's/\r$//' "$ROOT/deploy.sh"
-          chmod +x "$ROOT/deploy.sh"
+          sed -i 's/\r$//' "$ROOT/"*.sh
+          chmod +x "$ROOT/deploy.sh" "$ROOT/install-server-linux.sh" "$ROOT/update-server-linux.sh" "$ROOT/rollback-server-linux.sh" "$ROOT/linux-deploy-common.sh"
           tar -C dist/server -czf "dist/ImageLocalizationTool-${VERSION}-server-linux-x64.tar.gz" ImageLocalizationTool
+
+      - name: Test Linux deployment scripts with an isolated fake root
+        run: |
+          bash -n scripts/linux-deploy-common.sh scripts/install-server-linux.sh scripts/update-server-linux.sh scripts/rollback-server-linux.sh tests/linux/test_deploy_scripts.sh
+          bash tests/linux/test_deploy_scripts.sh
 
       - name: Frozen CPU and offline components
         run: |

@@ -42,6 +42,15 @@ def test_clamp_limits():
     assert settings.text_stroke_ratio == 0.5
     assert AppSettings(text_stroke_ratio=-1).text_stroke_ratio == 0
     assert settings.text_margin == 0.3
+    assert AppSettings(render_cache_limit_mb=-1).render_cache_limit_mb == 0
+    assert AppSettings(render_cache_limit_mb=9000).render_cache_limit_mb == 4096
+    assert AppSettings(render_cache_limit_mb=128).to_config().render_cache_limit_mb == 128
+    assert AppSettings(ort_intra_op_threads=-1).ort_intra_op_threads == 0
+    assert AppSettings(ort_intra_op_threads=999).ort_intra_op_threads == 256
+    assert AppSettings(ort_intra_op_threads=4).to_dict()["ort_intra_op_threads"] == 4
+    assert AppSettings(ort_intra_op_threads=4).to_config().ort_intra_op_threads == 4
+    assert AppSettings(device="gpu").device == "cuda"
+    assert AppSettings(device="GPU").to_config().device == "cuda"
     assert AppSettings(text_margin=-1).text_margin == 0
     assert AppSettings().text_margin == 0.08
     assert AppSettings().to_dict()["text_margin"] == 0.08
@@ -79,6 +88,17 @@ def test_missing_file_and_empty_llm_url(tmp_path):
     assert custom.llm_base_url == "http://127.0.0.1:9/v1"
 
 
+def test_ort_thread_count_persists(tmp_path):
+    path = tmp_path / "settings.json"
+    AppSettings(ort_intra_op_threads=6).save(path)
+
+    settings, warnings = AppSettings.load(path)
+
+    assert warnings == []
+    assert settings.ort_intra_op_threads == 6
+    assert settings.to_config().ort_intra_op_threads == 6
+
+
 def test_migration_without_schema_keeps_file(tmp_path):
     path = tmp_path / "settings.json"
     raw = {
@@ -97,6 +117,14 @@ def test_migration_without_schema_keeps_file(tmp_path):
     assert 8 <= settings.min_font_size <= settings.max_font_size <= 256
     assert warnings
     assert json.loads(path.read_text(encoding="utf-8"))["ui_scale"] == 999
+
+
+def test_utf8_bom_settings_is_read(tmp_path):
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({"schema": 1, "theme": "dark"}), encoding="utf-8-sig")
+    settings, warnings = AppSettings.load(path)
+    assert warnings == []
+    assert settings.theme == "dark"
 
 
 def test_newer_schema_reads_known_fields(tmp_path):

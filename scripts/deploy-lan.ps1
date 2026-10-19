@@ -7,11 +7,12 @@
   .\scripts\deploy-lan.ps1
 
 .EXAMPLE
-  .\scripts\deploy-lan.ps1 -Hosts @("192.168.88.41","192.168.88.168") -DryRun
+  .\scripts\deploy-lan.ps1 -Hosts @("192.168.88.41") -ProxyJump pve.30 -DryRun
 #>
 param(
-    [string[]] $Hosts = @("192.168.88.41", "192.168.88.168"),
+    [string[]] $Hosts = @("192.168.88.41"),
     [string] $User = "root",
+    [string] $ProxyJump = "pve.30",
     [string] $RemoteRoot = "/opt/image-localization-tool",
     [string] $Service = "ilt.service",
     [switch] $DryRun,
@@ -23,9 +24,14 @@ $ErrorActionPreference = 'Stop'
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $RepoRoot
 
+$sshOptions = @('-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'StrictHostKeyChecking=accept-new')
+if (-not [string]::IsNullOrWhiteSpace($ProxyJump)) {
+    $sshOptions += @('-J', $ProxyJump)
+}
+
 function Test-SshHost {
     param([string] $Target)
-    & ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new "${User}@${Target}" "echo ok" 2>$null
+    & ssh @sshOptions "${User}@${Target}" "echo ok" 2>$null
     return ($LASTEXITCODE -eq 0)
 }
 
@@ -82,7 +88,7 @@ try {
     }
 
     Write-Host "==> Upload to $remote"
-    & scp -o BatchMode=yes -o ConnectTimeout=15 $archive "${remote}:/tmp/ilt-deploy.tar"
+    & scp @sshOptions $archive "${remote}:/tmp/ilt-deploy.tar"
     if ($LASTEXITCODE -ne 0) {
         throw "scp failed with exit code $LASTEXITCODE"
     }
@@ -98,7 +104,7 @@ try {
         "systemctl is-active '$Service'"
     ) -join "`n"
     Write-Host "==> Extract and restart $Service"
-    $remoteOut = & ssh -o BatchMode=yes -o ConnectTimeout=15 $remote $remoteCmd 2>&1
+    $remoteOut = & ssh @sshOptions $remote $remoteCmd 2>&1
     Write-Host $remoteOut
     if ($LASTEXITCODE -ne 0) {
         throw "remote extract/restart failed with exit code $LASTEXITCODE"

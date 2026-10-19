@@ -1,6 +1,7 @@
 """Модели данных для приложения."""
 
 from dataclasses import dataclass, field
+import math
 from PIL import Image
 
 
@@ -38,8 +39,23 @@ def _as_float(value, default: float = 0.0) -> float:
         return default
 
 
+def _text_position(value) -> tuple[float, float] | None:
+    """Координаты опорной точки текста на странице; None сохраняет старый layout."""
+    if value is None:
+        return None
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
+        raise ValueError("text_position должен содержать две координаты")
+    try:
+        x, y = float(value[0]), float(value[1])
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("Некорректная позиция текста") from exc
+    if not math.isfinite(x) or not math.isfinite(y) or abs(x) > 1_000_000 or abs(y) > 1_000_000:
+        raise ValueError("Позиция текста вне допустимого диапазона")
+    return x, y
+
+
 def _default_warp() -> dict:
-    return {"kind": "none", "bend": 0.0, "quad": None, "mesh": None}
+    return {"version": 1, "kind": "none", "bend": 0.0, "quad": None, "mesh": None}
 
 
 def _copy_points(value):
@@ -73,7 +89,14 @@ def _normalize_warp(data) -> dict:
     kind = str(data.get("kind") or "none").strip().lower()
     if kind not in _WARP_KINDS:
         kind = "none"
+    try:
+        version = int(data.get("version", 1))
+    except (TypeError, ValueError, OverflowError):
+        version = 1
+    if version not in (1, 2):
+        version = 1
     bend = data.get("bend")
+    warp["version"] = version
     warp["kind"] = kind
     warp["bend"] = _as_float(0.0 if bend is None else bend)
     warp["quad"] = _copy_points(data.get("quad"))
@@ -139,6 +162,7 @@ class TextStyle:
             "rotation": self.rotation,
             "skew_x": self.skew_x,
             "warp": {
+                "version": warp["version"],
                 "kind": warp["kind"],
                 "bend": warp["bend"],
                 "quad": warp["quad"],
@@ -193,6 +217,8 @@ class TextRegion:
     edited: bool = False
     overflow: bool = False
     translation_locked: bool = False
+    document: bool = False
+    text_position: tuple[float, float] | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -212,6 +238,8 @@ class TextRegion:
             "edited": self.edited,
             "overflow": self.overflow,
             "translation_locked": self.translation_locked,
+            "document": self.document,
+            "text_position": list(self.text_position) if self.text_position is not None else None,
             "style": self.style.to_dict(),
         }
 
@@ -236,6 +264,8 @@ class TextRegion:
             edited=bool(data.get("edited", False)),
             overflow=bool(data.get("overflow", False)),
             translation_locked=bool(data.get("translation_locked", False)),
+            document=bool(data.get("document", False)),
+            text_position=_text_position(data.get("text_position")),
         )
 
 

@@ -583,6 +583,12 @@
   object-fit: fill;
 }
 
+.frame__mesh-preview {
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+}
+
 .frame__boxes {
   position: absolute;
   inset: 0;
@@ -613,6 +619,12 @@
 .box__point {
   margin: -6px 0 0 -6px;
   border-color: var(--danger);
+}
+
+.box__point.is-group-selected {
+  border-color: var(--primary);
+  background: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 28%, transparent);
 }
 
 .style-state[hidden] {

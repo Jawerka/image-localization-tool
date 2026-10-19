@@ -1,6 +1,7 @@
 /* Просмотрщик: масштаб, шторка, рамки, кисть и ластик. */
 
 import { imageUrl } from "./api.js";
+import { MeshPreviewRenderer } from "./mesh_preview_renderer.js";
 import {
   brushModeFromButton,
   editorSessionToWire,
@@ -26,6 +27,7 @@ import {
   subscribe,
 } from "./state.js";
 import { isSpaceDown } from "./keys.js";
+import { isValidMesh } from "./text_mesh.js";
 
 const TOOLS = ["select", "region", "brush", "polyline", "hand"];
 const VIEWS = ["original", "result", "compare"];
@@ -60,8 +62,16 @@ let placeholder;
 let maskLocal;
 let natural = { w: 0, h: 0 };
 let drag = null;
+let selectedWarpRegionId = "";
+let selectedWarpNodes = new Set();
+let lastWarpPointer = null;
 let previewImage = null;
 let previewUrl = "";
+let meshPreviewCanvas = null;
+let meshPreviewRenderer = null;
+let meshBaseUrl = "";
+let meshBaseImage = null;
+let meshBaseRegion = null;
 let spaceDown = false;
 let seenPageId = "";
 let scrollHome = false;
@@ -82,6 +92,11 @@ export function init() {
   maskImage = document.querySelector("[data-role='img-mask']");
   boxes = document.querySelector("[data-role='boxes']");
   previewImage = document.querySelector("[data-role='style-preview']");
+  meshPreviewCanvas = document.querySelector("[data-role='mesh-preview']");
+  meshPreviewRenderer = new MeshPreviewRenderer(meshPreviewCanvas, (message) => {
+    if (previewImage && previewImage.src) previewImage.hidden = false;
+    document.dispatchEvent(new CustomEvent("ilt-banner", { detail: { id: "mesh-renderer", text: message } }));
+  });
   bar = document.querySelector("[data-role='curtain-bar']");
   labels = document.querySelectorAll("[data-role='curtain-label']");
   progress = document.querySelector("[data-role='frame-progress']");
@@ -129,7 +144,22 @@ export function init() {
   frame.addEventListener("dblclick", onDoubleClick);
   frame.addEventListener("pointermove", onPointerMove);
   frame.addEventListener("pointerup", onPointerUp);
-  frame.addEventListener("pointercancel", onPointerUp);
+  frame.addEventListener("pointercancel", (event) => onPointerUp(event, true));
+  window.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || !drag) return;
+    if (drag.kind === "warp" && drag.meshV2) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      drag = null;
+      finishMeshDraft();
+      renderBoxes(getState());
+      return;
+    }
+    if (drag.kind !== "text-position") return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    cancelTextPositionDrag();
+  }, true);
   frame.addEventListener("pointerleave", () => {
     cursor.hidden = true;
   });
@@ -228,6 +258,52 @@ export function setStylePreview(preview) {
     previewImage.style.height = pct(previewImage.naturalHeight || 1, natural.h);
   };
   previewImage.src = preview.url;
+}
+
+export function setMeshPreviewBase(preview, region) {
+  if (meshBaseUrl && meshBaseUrl !== (preview && preview.url)) URL.revokeObjectURL(meshBaseUrl);
+  meshBaseUrl = preview && preview.url ? preview.url : "";
+  meshBaseImage = null;
+  meshBaseRegion = region || null;
+  if (!meshBaseUrl || !meshPreviewRenderer) return;
+  const image = new Image();
+  image.onload = () => {
+    if (meshBaseUrl !== preview.url) return;
+    meshBaseImage = image;
+    meshPreviewRenderer.setLayer(image);
+  };
+  image.src = meshBaseUrl;
+}
+
+export function clearMeshPreviewBase() {
+  if (meshBaseUrl) URL.revokeObjectURL(meshBaseUrl);
+  meshBaseUrl = "";
+  meshBaseImage = null;
+  meshBaseRegion = null;
+  meshPreviewRenderer?.hide();
+}
+
+function drawMeshDraft(region, mesh) {
+  if (!meshBaseImage || !meshBaseRegion || !meshPreviewRenderer) return false;
+  if (!sameId(meshBaseRegion.id, region.id) || meshBaseImage.naturalWidth < 1) return false;
+  const anchorBox = region.bubble_bbox || region.bbox;
+  const style = region.style || {};
+  const result = meshPreviewRenderer.render({
+    mesh,
+    bbox: region.bbox,
+    origin: [meshBaseRegion.originX, meshBaseRegion.originY],
+    rotation: Number(style.rotation) || 0,
+    textPosition: region.text_position,
+    anchor: [anchorBox[0] + anchorBox[2] / 2, anchorBox[1] + anchorBox[3] / 2],
+    pageSize: [natural.w, natural.h],
+  });
+  if (result && previewImage) previewImage.hidden = true;
+  return result;
+}
+
+function finishMeshDraft() {
+  meshPreviewRenderer?.hide();
+  if (previewImage && previewImage.src) previewImage.hidden = false;
 }
 
 export function nudgeBrush(delta) {
@@ -600,6 +676,10 @@ function onWheel(event) {
 
 function renderBoxes(state) {
   boxes.hidden = !state.showBoxes;
+  if (!sameId(selectedWarpRegionId, state.selectedRegionId)) {
+    selectedWarpRegionId = state.selectedRegionId || "";
+    selectedWarpNodes = new Set();
+  }
   if (!state.showBoxes || !natural.w) {
     boxes.innerHTML = "";
     return;
@@ -637,11 +717,21 @@ function warpHandles(region) {
   if (warp.kind === "perspective") points = Array.isArray(warp.quad) ? warp.quad : defaultQuad(w, h);
   else if (warp.kind === "mesh") points = Array.isArray(warp.mesh) ? warp.mesh : defaultMesh(w, h);
   else return "";
-  return points.map((point, index) => {
+  return `<svg class="box__grid" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">${warpLines(points, warp.kind)}</svg>` + points.map((point, index) => {
     const left = w ? (Number(point[0]) / w) * 100 : 0;
     const top = h ? (Number(point[1]) / h) * 100 : 0;
-    return `<button type="button" class="box__point" data-style-handle="point" data-index="${index}" style="left:${left}%;top:${top}%" aria-label="Точка ${index + 1}"></button>`;
+    const selected = sameId(selectedWarpRegionId, region.id) && selectedWarpNodes.has(index);
+    return `<button type="button" class="box__point${selected ? " is-group-selected" : ""}" data-style-handle="point" data-index="${index}" style="left:${left}%;top:${top}%" aria-pressed="${selected}" aria-label="Точка ${index + 1}"></button>`;
   }).join("");
+}
+
+/** Связи управляющих точек: четыре строки и столбца либо контур перспективы. */
+function warpLines(points, kind) {
+  const lines = kind === "mesh"
+    ? [...Array.from({ length: 4 }, (_, r) => points.slice(r * 4, r * 4 + 4)),
+       ...Array.from({ length: 4 }, (_, c) => [points[c], points[c + 4], points[c + 8], points[c + 12]])]
+    : [[...points, points[0]]];
+  return lines.map((line) => `<polyline points="${line.map((p) => `${Number(p[0]) || 0},${Number(p[1]) || 0}`).join(" ")}"/>`).join("");
 }
 
 function defaultQuad(w, h) {
@@ -756,6 +846,28 @@ function onPointerDown(event) {
     const region = findRegion(state.document, state.selectedRegionId);
     const point = imagePoint(event);
     if (region && point) {
+      if (styleNode.dataset.styleHandle === "point") {
+        lastWarpPointer = {
+          regionId: region.id,
+          index: Number(styleNode.dataset.index),
+          clientX: event.clientX,
+          clientY: event.clientY,
+          at: performance.now(),
+        };
+      }
+      if (styleNode.dataset.styleHandle === "point" && event.detail >= 2) {
+        resetWarpPoint(region, Number(styleNode.dataset.index));
+        lastWarpPointer = null;
+        event.preventDefault();
+        return;
+      }
+      if (styleNode.dataset.styleHandle === "point" && (event.ctrlKey || event.metaKey)
+        && region.style?.warp?.kind === "mesh" && Number(region.style.warp.version) >= 2) {
+        toggleWarpNodeSelection(region, Number(styleNode.dataset.index));
+        renderBoxes(state);
+        event.preventDefault();
+        return;
+      }
       beginStyleDrag(styleNode, region, point);
       frame.setPointerCapture(event.pointerId);
       return;
@@ -764,6 +876,23 @@ function onPointerDown(event) {
   const hit = state.showBoxes ? hitTest(event) : null;
   if (hit) {
     selectRegion(hit.region.id);
+    if (sameId(state.textMoveRegionId, hit.region.id)) {
+      const bbox = hit.region.bbox;
+      const anchorBox = hit.region.bubble_bbox || bbox;
+      const anchor = Array.isArray(hit.region.text_position) && hit.region.text_position.length === 2
+        ? hit.region.text_position.map(Number)
+        : [anchorBox[0] + anchorBox[2] / 2, anchorBox[1] + anchorBox[3] / 2];
+      drag = {
+        kind: "text-position",
+        id: hit.region.id,
+        start: point,
+        origin: anchor,
+        final: anchor.slice(),
+        moved: false,
+      };
+      frame.setPointerCapture(event.pointerId);
+      return;
+    }
     drag = {
       kind: hit.handle ? "resize" : "move",
       handle: hit.handle,
@@ -817,6 +946,20 @@ function onPointerMove(event) {
     showDraft(drag.final);
     return;
   }
+  if (drag.kind === "text-position") {
+    const point = imagePoint(event);
+    if (!point) return;
+    let dx = point[0] - drag.start[0];
+    let dy = point[1] - drag.start[1];
+    if (event.shiftKey && Math.abs(dx) >= Math.abs(dy)) dy = 0;
+    else if (event.shiftKey) dx = 0;
+    drag.final = [drag.origin[0] + dx, drag.origin[1] + dy];
+    drag.moved = Math.abs(dx) >= 0.5 || Math.abs(dy) >= 0.5;
+    if (previewImage && !previewImage.hidden) {
+      previewImage.style.transform = `translate(${dx / natural.w * frame.clientWidth}px, ${dy / natural.h * frame.clientHeight}px)`;
+    }
+    return;
+  }
   if (drag.kind === "curtain") {
     moveCurtain(event);
     drag.moved = true;
@@ -852,8 +995,8 @@ function onPointerMove(event) {
   let w = sw;
   let h = sh;
   if (drag.kind === "move") {
-    x += dx;
-    y += dy;
+    x += event.shiftKey && Math.abs(dy) > Math.abs(dx) ? 0 : dx;
+    y += event.shiftKey && Math.abs(dx) >= Math.abs(dy) ? 0 : dy;
   } else {
     if (drag.handle.includes("e")) w = sw + dx;
     if (drag.handle.includes("s")) h = sh + dy;
@@ -869,16 +1012,45 @@ function onPointerMove(event) {
   drag.final = clampBox([x, y, w, h], natural.w, natural.h);
   drag.moved = true;
   moveBox(drag.id, drag.final);
+  if (drag.kind === "move" && previewImage && !previewImage.hidden) {
+    previewImage.style.transform = `translate(${(drag.final[0] - sx) / natural.w * frame.clientWidth}px, ${(drag.final[1] - sy) / natural.h * frame.clientHeight}px)`;
+  }
 }
 
-function onPointerUp(event) {
+function onPointerUp(event, cancelled = false) {
   const done = drag;
   drag = null;
   stage.classList.remove("is-panning");
   syncPanCursor();
-  if (done && (done.kind === "rotate" || done.kind === "warp")) renderBoxes(getState());
+  if (done && (done.kind === "rotate" || (done.kind === "warp" && (!done.meshV2 || cancelled || done.invalid)))) {
+    renderBoxes(getState());
+  }
   cursor.hidden = true;
   if (!done) return;
+  if (done.kind === "warp" && done.meshV2) {
+    finishMeshDraft();
+    if (!cancelled && done.moved && !done.invalid) {
+      editDocument((document) => {
+        const region = findRegion(document, done.id);
+        if (!region) return;
+        const warp = { ...(region.style?.warp || {}), kind: "mesh", version: 2, mesh: done.meshPoints };
+        region.style = { ...(region.style || {}), warp };
+      });
+    }
+    return;
+  }
+  if (done.kind === "text-position") {
+    if (!cancelled && done.moved) {
+      editDocument((document) => {
+        const region = findRegion(document, done.id);
+        if (!region) return;
+        region.text_position = done.final;
+        region.edited = true;
+      });
+    }
+    if (previewImage) previewImage.style.transform = "";
+    return;
+  }
   if (done.kind === "stroke" && done.points.length) {
     const mode = done.mode === "erase" ? "erase" : "paint";
     const radius = getState().brushSize || 12;
@@ -907,6 +1079,7 @@ function onPointerUp(event) {
     }
   }
   if ((done.kind === "move" || done.kind === "resize") && done.moved) {
+    if (previewImage) previewImage.style.transform = "";
     editDocument((document) => {
       const region = document.regions.find((item) => sameId(item.id, done.id));
       if (!region) return;
@@ -919,6 +1092,13 @@ function onPointerUp(event) {
     else patch({ curtain: readCurtain(event) });
   }
   rememberCenter();
+}
+
+function cancelTextPositionDrag() {
+  if (!drag || drag.kind !== "text-position") return;
+  drag = null;
+  if (previewImage) previewImage.style.transform = "";
+  renderBoxes(getState());
 }
 
 function moveCurtain(event) {
@@ -952,13 +1132,42 @@ function beginStyleDrag(node, region, point) {
     };
     return;
   }
+  const meshV2 = Boolean(region.style?.warp?.kind === "mesh" && Number(region.style.warp.version) >= 2);
+  const meshPoints = Array.isArray(region.style?.warp?.mesh)
+    ? region.style.warp.mesh.map((item) => [Number(item[0]), Number(item[1])])
+    : defaultMesh(region.bbox[2], region.bbox[3]);
+  const index = Number(node.dataset.index);
+  const selectedIndices = meshV2 && sameId(selectedWarpRegionId, region.id)
+    && selectedWarpNodes.size > 1 && selectedWarpNodes.has(index)
+    ? [...selectedWarpNodes]
+    : [index];
+  selectedWarpRegionId = region.id;
+  selectedWarpNodes = new Set(selectedIndices);
   drag = {
     kind: "warp",
     id: region.id,
-    index: Number(node.dataset.index),
+    index,
     bbox: region.bbox.slice(),
+    warpBase: region.style && region.style.warp && typeof region.style.warp === "object"
+      ? structuredClone(region.style.warp)
+      : { kind: "none", bend: 0, quad: null, mesh: null },
+    meshV2,
+    meshBasePoints: meshPoints.map((item) => item.slice()),
+    meshPoints,
+    selectedIndices,
+    start: point.slice(),
     moved: false,
   };
+}
+
+function toggleWarpNodeSelection(region, index) {
+  if (index < 0 || index >= 16) return;
+  if (!sameId(selectedWarpRegionId, region.id)) {
+    selectedWarpRegionId = region.id;
+    selectedWarpNodes = new Set();
+  }
+  if (selectedWarpNodes.has(index)) selectedWarpNodes.delete(index);
+  else selectedWarpNodes.add(index);
 }
 
 function pointerAngle(point, bbox) {
@@ -971,24 +1180,66 @@ function moveWarpPoint(point, symmetric) {
   if (!drag || drag.kind !== "warp") return;
   const [bx, by, bw, bh] = drag.bbox;
   const local = [point[0] - bx, point[1] - by];
+  const current = findRegion(getState().document, drag.id);
+  if (!current) return;
+  const oldWarp = current.style && current.style.warp && typeof current.style.warp === "object"
+    ? current.style.warp
+    : { kind: "none", bend: 0, quad: null, mesh: null };
+  const mesh = oldWarp.kind === "mesh";
+  const key = mesh ? "mesh" : "quad";
+  const count = mesh ? 16 : 4;
+  let deltaX = 0;
+  let deltaY = 0;
+  let points = Array.isArray(oldWarp[key])
+    ? oldWarp[key].map((item) => [Number(item[0]) || 0, Number(item[1]) || 0])
+    : (mesh ? defaultMesh(bw, bh) : defaultQuad(bw, bh));
+  const index = drag.index;
+  if (index < 0 || index >= Math.min(count, points.length)) return;
+  if (drag.meshV2) {
+    deltaX = point[0] - drag.start[0];
+    deltaY = point[1] - drag.start[1];
+    points = drag.meshBasePoints.map((item) => item.slice());
+    const indices = drag.selectedIndices.length ? drag.selectedIndices : [index];
+    for (const selectedIndex of indices) {
+      points[selectedIndex] = [drag.meshBasePoints[selectedIndex][0] + deltaX, drag.meshBasePoints[selectedIndex][1] + deltaY];
+    }
+    if (symmetric && indices.length === 1) {
+      const opposite = meshOpposite(index);
+      points[opposite] = [bw - points[index][0], bh - points[index][1]];
+    }
+  } else {
+    points[index] = local;
+  }
+  if (symmetric && !drag.meshV2) {
+    const opposite = mesh ? meshOpposite(index) : (index + 2) % 4;
+    points[opposite] = [bw - local[0], bh - local[1]];
+  }
+  if (mesh && !isValidMesh(points)) {
+    if (!drag.invalid) {
+      document.dispatchEvent(new CustomEvent("ilt-banner", {
+        detail: { id: "mesh-invalid", text: "Узел создаёт вырожденную ячейку. Верните его в допустимую область." },
+      }));
+    }
+    drag.invalid = true;
+    return;
+  }
+  drag.invalid = false;
+  if (drag.meshV2) {
+    drag.meshPoints = points;
+    drag.moved = Math.abs(deltaX) >= 0.5 || Math.abs(deltaY) >= 0.5;
+    for (let nodeIndex = 0; nodeIndex < points.length; nodeIndex += 1) {
+      placeWarpNode(drag.id, nodeIndex, points[nodeIndex], bw, bh);
+    }
+    const grid = boxes.querySelector(`[data-box-id="${cssEscape(drag.id)}"] .box__grid`);
+    if (grid) grid.innerHTML = warpLines(points, "mesh");
+    const previewRegion = findRegion(getState().document, drag.id);
+    if (previewRegion) drawMeshDraft(previewRegion, points);
+    return;
+  }
   editDocument((document) => {
     const region = findRegion(document, drag.id);
     if (!region) return;
-    const warp = region.style && region.style.warp && typeof region.style.warp === "object"
-      ? { ...region.style.warp }
-      : { kind: "none", bend: 0, quad: null, mesh: null };
-    const mesh = warp.kind === "mesh";
-    const key = mesh ? "mesh" : "quad";
-    const count = mesh ? 16 : 4;
-    let points = Array.isArray(warp[key]) ? warp[key].map((item) => [Number(item[0]) || 0, Number(item[1]) || 0]) : null;
-    if (!points || points.length !== count) points = mesh ? defaultMesh(bw, bh) : defaultQuad(bw, bh);
-    const index = drag.index;
-    if (index < 0 || index >= points.length) return;
-    points[index] = local;
-    if (symmetric) {
-      const opposite = mesh ? meshOpposite(index) : (index + 2) % 4;
-      points[opposite] = [bw - local[0], bh - local[1]];
-    }
+    const warp = { ...oldWarp };
     warp[key] = points;
     region.style = { ...(region.style || {}), warp };
   }, { coalesce: "warp" });
@@ -997,6 +1248,12 @@ function moveWarpPoint(point, symmetric) {
   if (symmetric) {
     const opposite = (regionWarpKind(drag.id) === "mesh") ? meshOpposite(drag.index) : (drag.index + 2) % 4;
     placeWarpNode(drag.id, opposite, [bw - local[0], bh - local[1]], bw, bh);
+  }
+  const region = findRegion(getState().document, drag.id);
+  const grid = boxes.querySelector(`[data-box-id="${cssEscape(drag.id)}"] .box__grid`);
+  if (grid && region) {
+    const warp = region.style.warp;
+    grid.innerHTML = warpLines(warp.kind === "mesh" ? warp.mesh : warp.quad, warp.kind);
   }
 }
 
@@ -1033,12 +1290,25 @@ function onDoubleClick(event) {
     return;
   }
   const node = styleHandle(event);
-  if (!node || node.dataset.styleHandle !== "point") return;
+  if (node && node.dataset.styleHandle !== "point") return;
+  const recent = lastWarpPointer
+    && performance.now() - lastWarpPointer.at < 700
+    && Math.hypot(event.clientX - lastWarpPointer.clientX, event.clientY - lastWarpPointer.clientY) < 14
+    ? lastWarpPointer
+    : null;
+  if (!node && !recent) return;
   event.preventDefault();
-  drag = null;
-  const index = Number(node.dataset.index);
-  const region = findRegion(getState().document, getState().selectedRegionId);
+  const candidate = node
+    ? { regionId: getState().selectedRegionId, index: Number(node.dataset.index) }
+    : recent;
+  lastWarpPointer = null;
+  const region = findRegion(getState().document, candidate.regionId);
   if (!region) return;
+  resetWarpPoint(region, candidate.index);
+}
+
+function resetWarpPoint(region, index) {
+  drag = null;
   const [, , bw, bh] = region.bbox;
   const mesh = region.style && region.style.warp && region.style.warp.kind === "mesh";
   const defaults = mesh ? defaultMesh(bw, bh) : defaultQuad(bw, bh);

@@ -1,10 +1,12 @@
 """Тесты утилит paths."""
 
+import os
 import sys
 from pathlib import Path
 
 from src.utils.paths import (
     bundle_root,
+    components_root,
     get_output_path,
     install_root,
     project_root,
@@ -36,3 +38,30 @@ class TestPaths:
         monkeypatch.delenv("ILT_INSTALL_ROOT", raising=False)
         monkeypatch.delattr(sys, "frozen", raising=False)
         assert install_root() == project_root()
+
+    def _frozen_app(self, tmp_path, monkeypatch, with_legacy: bool) -> tuple[Path, Path | None]:
+        app = tmp_path / "app"
+        app.mkdir()
+        legacy = tmp_path / "local" / "ImageLocalizationTool" / "components"
+        if with_legacy:
+            legacy.mkdir(parents=True)
+        monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+        monkeypatch.setattr(sys, "frozen", True, raising=False)
+        monkeypatch.setattr("src.utils.paths.install_root", lambda: app)
+        monkeypatch.delenv("ILT_COMPONENT_ROOT", raising=False)
+        monkeypatch.delenv("ILT_COMPONENT_PREVIOUS_ROOT", raising=False)
+        return app, legacy if with_legacy else None
+
+    def test_frozen_components_live_next_to_program(self, tmp_path, monkeypatch):
+        app, _legacy = self._frozen_app(tmp_path, monkeypatch, with_legacy=False)
+        assert components_root() == app
+        assert "ILT_COMPONENT_PREVIOUS_ROOT" not in os.environ
+
+    def test_frozen_components_read_legacy_user_store(self, tmp_path, monkeypatch):
+        app, legacy = self._frozen_app(tmp_path, monkeypatch, with_legacy=True)
+        assert components_root() == app
+        assert Path(os.environ["ILT_COMPONENT_PREVIOUS_ROOT"]) == legacy
+
+    def test_components_root_explicit_override_wins(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("ILT_COMPONENT_ROOT", str(tmp_path / "chosen"))
+        assert components_root() == tmp_path / "chosen"

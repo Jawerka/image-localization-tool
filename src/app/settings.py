@@ -226,11 +226,13 @@ class AppSettings:
     device: str = "auto"
     glossary_path: str = ""
     detector_conf: float = 0.3
+    ort_intra_op_threads: int = 0
     text_stroke_ratio: float = 0.08
     text_margin: float = 0.08
     layout_long_side: int = 2000
     min_font_size: int = 10
     max_font_size: int = 128
+    render_cache_limit_mb: int = 256
     export_format: str = "png"
     export_jpeg_quality: int = 90
     export_conflict: str = "rename"
@@ -278,9 +280,12 @@ class AppSettings:
         self.translate_sfx = mode == "replace"
         self.auto_stylized_fonts = _as_bool(self.auto_stylized_fonts, True)
         device = _raw_text(self.device, "auto")
+        if device.casefold() == "gpu":
+            device = "cuda"
         self.device = device or "auto"
         self.glossary_path = _raw_text(self.glossary_path, "")
         self.detector_conf = _as_float(self.detector_conf, 0.3, 0.05, 0.95)
+        self.ort_intra_op_threads = _as_int(self.ort_intra_op_threads, 0, 0, 256)
         self.text_stroke_ratio = _as_float(self.text_stroke_ratio, 0.08, 0.0, 0.5)
         self.text_margin = _as_float(self.text_margin, 0.08, 0.0, 0.3)
         try:
@@ -293,6 +298,7 @@ class AppSettings:
             max_size = min_size
         self.min_font_size = min_size
         self.max_font_size = max_size
+        self.render_cache_limit_mb = _as_int(self.render_cache_limit_mb, 256, 0, 4096)
         export_format = _raw_text(self.export_format, "png").lower()
         if export_format == "jpeg":
             export_format = "jpg"
@@ -345,11 +351,13 @@ class AppSettings:
             "device": self.device,
             "glossary_path": self.glossary_path,
             "detector_conf": self.detector_conf,
+            "ort_intra_op_threads": self.ort_intra_op_threads,
             "text_stroke_ratio": self.text_stroke_ratio,
             "text_margin": self.text_margin,
             "layout_long_side": self.layout_long_side,
             "min_font_size": self.min_font_size,
             "max_font_size": self.max_font_size,
+            "render_cache_limit_mb": self.render_cache_limit_mb,
             "export_format": self.export_format,
             "export_jpeg_quality": self.export_jpeg_quality,
             "export_conflict": self.export_conflict,
@@ -396,7 +404,7 @@ class AppSettings:
         if not file_path.exists():
             return cls(), []
         try:
-            raw = file_path.read_text(encoding="utf-8")
+            raw = file_path.read_text(encoding="utf-8-sig")
             data = json.loads(raw)
         except (OSError, UnicodeError, json.JSONDecodeError):
             return cls(), [_quarantine_warning(file_path)]
@@ -448,11 +456,13 @@ class AppSettings:
         config.components_dir = self.components_dir
         config.glossary_path = self.glossary_path
         config.detector_conf = self.detector_conf
+        config.ort_intra_op_threads = self.ort_intra_op_threads
         config.text_stroke_ratio = self.text_stroke_ratio
         config.text_margin = self.text_margin
         config.layout_long_side = self.layout_long_side
         config.min_font_size = self.min_font_size
         config.max_font_size = self.max_font_size
+        config.render_cache_limit_mb = self.render_cache_limit_mb
         config.llm_base_url = self.llm_base_url
         config.llm_api_key = self.get_api_key()
         return config

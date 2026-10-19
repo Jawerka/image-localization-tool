@@ -38,6 +38,8 @@ env/
 !.cursor/skills/**
 .ruff_cache/
 AGENTS.md
+.agents/
+tasks/
 docs/PROBLEMS.md
 *.swp
 *.swo

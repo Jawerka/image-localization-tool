@@ -27,7 +27,7 @@ _HISTORICAL = {
     "line_spacing": 0.0,
     "rotation": 0.0,
     "skew_x": 0.0,
-    "warp": {"kind": "none", "bend": 0.0, "quad": None, "mesh": None},
+    "warp": {"version": 1, "kind": "none", "bend": 0.0, "quad": None, "mesh": None},
 }
 
 

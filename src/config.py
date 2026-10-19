@@ -15,6 +15,9 @@ class Config:
     # Минимальная уверенность OCR (0.0 - 1.0), для RapidOCR
     min_confidence: float = 0.5
 
+    # Потоки ONNX Runtime внутри одной операции; 0 — автонастройка ORT.
+    ort_intra_op_threads: int = 0
+
     # Минимальный размер шрифта
     min_font_size: int = 10
 
@@ -54,8 +57,11 @@ class Config:
     components_dir: str = ""
     download_retries: int = 3
     download_timeout: int = 30
+    download_prefetch_workers: int = 3
     download_disk_reserve_mb: int = 64
     download_cache_limit_mb: int = 4096
+    # Общий предел RAM для декодированных страниц и ответов preview.
+    render_cache_limit_mb: int = 256
     glossary_path: str = ""
     detector_conf: float = 0.3
     # Ореол цвета фона вокруг перевода. 0 — без ореола.

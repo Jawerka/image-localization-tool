@@ -61,7 +61,7 @@ New-Item -ItemType Directory -Path $stage -Force | Out-Null
 # Copy the app without personal state: top-level models/runtime/data stay empty.
 # /XD with a full path only: a bare name excludes directories at any depth
 # and would drop desktop\data (Flutter assets), cv2\data, rapidocr\models.
-$excludedDirs = @('models', 'runtime', 'data', '.resources', '.downloads', '.builtin') |
+$excludedDirs = @('models', 'runtime', 'data', '.resources', '.downloads', '.builtin', 'components') |
     ForEach-Object { Join-Path $DistDir $_ }
 $robocopyArgs = @(
     $DistDir, $stage, '/E', '/XD') + $excludedDirs + @(
@@ -71,6 +71,14 @@ $robocopyArgs = @(
 $code = $LASTEXITCODE
 if ($code -ge 8) {
     throw "robocopy failed with exit code $code"
+}
+
+# Enforce the portable packaging contract after copying: discard the local
+# top-level model payload, while keeping nested sidecar runtime assets such as
+# sidecar\_internal\rapidocr\models.
+$topLevelModels = Join-Path $stage 'models'
+if (Test-Path -LiteralPath $topLevelModels) {
+    Remove-Item -LiteralPath $topLevelModels -Recurse -Force
 }
 
 # Guard against losing nested directories: without Flutter assets the host will not start.
@@ -84,6 +92,25 @@ foreach ($folder in @('data', 'models', 'runtime')) {
     $path = Join-Path $stage $folder
     New-Item -ItemType Directory -Path $path -Force | Out-Null
     New-Item -ItemType File -Path (Join-Path $path '.keep') -Force | Out-Null
+}
+
+# User data is never part of a portable release. Updates move these directories
+# from the active installation into the staged release during activation.
+$manifest = [ordered]@{
+    schema = 1
+    version = $version
+    platform = 'windows-x64'
+    host = 'desktop/ImageLocalizationTool.exe'
+    sidecar = 'sidecar/ImageLocalizationTool.exe'
+    web = 'web/index.html'
+}
+$manifest | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $stage 'release.json') -Encoding utf8
+foreach ($scriptName in @('update-windows.ps1', 'rollback-windows.ps1', 'windows-update-common.ps1')) {
+    $source = Join-Path $PSScriptRoot $scriptName
+    if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+        throw "Windows updater source missing: $source"
+    }
+    Copy-Item -LiteralPath $source -Destination (Join-Path $stage $scriptName) -Force
 }
 
 $zip = Join-Path $OutputDir "ImageLocalizationTool-$version-windows-x64-portable.zip"

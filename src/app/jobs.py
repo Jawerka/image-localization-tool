@@ -11,6 +11,7 @@ import copy
 import json
 import queue
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -81,6 +82,8 @@ class Job:
     settings: dict = field(default_factory=dict)
     payload: dict = field(default_factory=dict)
     needs_llm: bool = False
+    queued_monotonic: float = field(default_factory=time.monotonic, repr=False, compare=False)
+    queue_wait_seconds: float = field(default=0.0, repr=False, compare=False)
 
     def to_dict(self) -> dict:
         return {
@@ -374,6 +377,7 @@ class JobQueue:
                 outgoing.append(("batch", job))
         for _lane, job in outgoing:
             try:
+                job.queue_wait_seconds = max(0.0, time.monotonic() - job.queued_monotonic)
                 self.worker.submit(job)
             except Exception as exc:
                 if job.id == self._inflight_batch:

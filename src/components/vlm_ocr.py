@@ -352,9 +352,15 @@ class VlmOcr:
             min(width, x + box_w + pad),
             min(height, y + box_h + pad),
         ))
+        document_hint=(
+            "This is printed text from a document or screenshot. Transcribe every visible "
+            "line literally, including Cyrillic. Ordinary paragraphs are narration, "
+            "not sign or noise. Use sign only for isolated names, brands or URLs. "
+        ) if region.document else ""
         try:
             payload = self.client.chat_json(
                 prompt=(
+                    document_hint+
                     "Read the text in this crop. Return the original text and its type "
                     "(dialogue, narration, title, sfx, sign, noise). "
                     "If the crop is a speech or thought balloon, type is dialogue even "
@@ -365,8 +371,14 @@ class VlmOcr:
                 schema=CROP_SCHEMA,
                 schema_name="crop_ocr",
                 images=[crop],
-                max_tokens=512,
+                max_tokens=2048 if region.document else 512,
             )
+            if region.document and not str(payload.get("text") or "").strip() and region.confidence>=self.reread_confidence:
+                crop.thumbnail((1200,1200),Image.Resampling.LANCZOS)
+                payload=self.client.chat_json(
+                    prompt=document_hint+"Read the text carefully. Return all original words in reading order, without translation.",
+                    schema=CROP_SCHEMA,schema_name="crop_ocr",images=[crop],max_tokens=2048,
+                )
         except Exception as exc:
             logger.warning(f"Crop reread failed for region {region.id}: {exc}")
             return region.text
@@ -377,6 +389,11 @@ class VlmOcr:
         elif not region.text:
             region.block_type = "noise"
         _clamp_balloon_type(region)
+        if region.document:
+            if region.block_type=="sign" and len(region.text.split())>=6:
+                region.block_type="narration"
+            if not region.text and region.confidence>=self.reread_confidence:
+                self.warnings.append(f"OCR не прочитал документный блок {region.id}")
         return region.text
 
     def _reread_empty(self, image: Image.Image, regions: list[TextRegion]) -> None:

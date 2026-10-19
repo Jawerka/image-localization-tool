@@ -93,3 +93,52 @@ def test_rerender_uses_saved_translation(tmp_path):
     assert (debug / "03_mask.png").exists()
     assert (debug / "04_clean.jpg").exists()
     assert (debug / "05_result.jpg").exists()
+    assert {"load", "segment", "inpaint", "typeset"}.issubset(result.timings)
+    assert all(result.timings[key] >= 0 for key in ("load", "segment", "inpaint", "typeset"))
+
+
+def test_incremental_typeset_pipeline_matches_full_render(tmp_path):
+    config = Config(inpainter_backend="opencv")
+    config.layout_long_side = 0
+    pipeline = PagePipeline(config)
+    clean = Image.new("RGB", (320, 180), (244, 238, 230))
+    previous = TextRegion(
+        id=1, bbox=(35, 40, 100, 45), text="ONE", translation="ONE",
+        block_type="narration",
+    )
+    previous_result, _ = pipeline.typeset_image(
+        clean.copy(), [TextRegion.from_dict(previous.to_dict())], "en", warnings=[],
+    )
+    previous_bounds = dict(pipeline.typesetter._last_region_bounds)
+    current = TextRegion.from_dict(previous.to_dict())
+    current.translation = "TWO"
+    incremental_result, _ = pipeline.typeset_image(
+        clean.copy(), [TextRegion.from_dict(current.to_dict())], "en", warnings=[],
+        incremental={
+            "previous_regions": [TextRegion.from_dict(previous.to_dict())],
+            "previous_result": previous_result,
+            "previous_bounds": previous_bounds,
+            "changed_region_ids": [1],
+        },
+    )
+    assert pipeline._last_typeset_details["mode"] == "partial"
+    full_result, _ = pipeline.typeset_image(
+        clean.copy(), [TextRegion.from_dict(current.to_dict())], "en", warnings=[],
+    )
+    assert incremental_result.tobytes() == full_result.tobytes()
+    config.layout_long_side = 1000
+    scaled_result, _ = pipeline.typeset_image(
+        clean.copy(), [TextRegion.from_dict(current.to_dict())], "en", warnings=[],
+        incremental={
+            "previous_regions": [TextRegion.from_dict(previous.to_dict())],
+            "previous_result": previous_result,
+            "previous_bounds": previous_bounds,
+            "changed_region_ids": [1],
+        },
+    )
+    assert pipeline._last_typeset_details["mode"] == "full"
+    assert scaled_result.size == clean.size
+    assert all(
+        bounds is None or (bounds[2] <= clean.width and bounds[3] <= clean.height)
+        for bounds in pipeline.typesetter._last_region_bounds.values()
+    )

@@ -19,13 +19,14 @@ import queue
 import re
 import secrets
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path, PurePosixPath
 from urllib.parse import parse_qs, unquote, urlparse
 
 from src.app import __version__, model_manager, runtime
 from src.app.dialogs import DialogBridge
-from src.app.document import PageDocument, diff_plan
+from src.app.document import PageDocument, diff_plan, typeset_changed_region_ids
 from src.app.events import LLM_STATUS, WorkerEvent
 from src.app.ingest import NoImagesError, archive_images, is_archive
 from src.app.jobs import JobQueue
@@ -38,7 +39,7 @@ from src.app.portable_project import (
 )
 from src.app.store import ProjectStore, VersionConflict
 from src.app.worker import demote_restored_running, queue_has_unfinished
-from src.utils.paths import install_root
+from src.utils.paths import components_root, install_root
 
 logger = logging.getLogger("ilt.app.server")
 
@@ -195,6 +196,8 @@ class AppState:
         self._models_inflight: set[str] = set()
         self._preparation_manager = None
         self._component_gate = threading.RLock()
+        self._render_cache = None
+        self._render_cache_limit = None
 
     def preparation_manager(self):
         """Полный снимок доступен после SSE-reconnect и перезапуска приложения."""
@@ -229,6 +232,49 @@ class AppState:
         self._pump = threading.Thread(target=self._pump_loop, name="ilt-events", daemon=True)
         self._pump.start()
         self._start_llm_probe()
+
+    def migrate_local_components(self) -> list[str]:
+        """Перенести прежние компоненты внутрь папки портативной программы."""
+        from src.app import downloads
+        from src.app.preparation import migrate_legacy_components
+
+        previous = os.environ.get("ILT_COMPONENT_PREVIOUS_ROOT", "").strip()
+        if not previous:
+            return []
+        target = components_root()
+        if os.path.normcase(os.path.abspath(str(target))) != os.path.normcase(os.path.abspath(str(install_root()))):
+            return []
+        try:
+            with downloads.installer_lock():
+                return migrate_legacy_components(target, Path(previous))
+        except Exception:
+            logger.exception("Не удалось перенести компоненты в папку программы")
+            return []
+
+    def revalidate_components(self) -> bool:
+        """После обновления приложения проверить установленные компоненты без загрузки.
+
+        Запускается только когда всё недостающее уже лежит на диске и требует
+        лишь повторной проверки/активации. Скачивание само не начинается.
+        """
+        from src.app import downloads, preparation
+
+        self.migrate_local_components()
+        manager = self.preparation_manager()
+        if manager.busy() or self.queue.busy():
+            return False
+        try:
+            preview = preparation.plan(self.settings.to_dict())
+            pending = [item for item in preview.get("items") or [] if not item.get("ready")]
+            if not pending or any(int(item.get("install_bytes") or 0) > 0 for item in pending):
+                return False
+            manager.start(self.settings.to_dict())
+            return True
+        except downloads.BusyError:
+            return False
+        except Exception:
+            logger.exception("Не удалось запустить повторную проверку компонентов")
+            return False
 
     def _start_llm_probe(self) -> None:
         """Проверить LLM в фоне. Пустой адрес — сразу «нет», без баннера до ответа."""
@@ -592,7 +638,7 @@ def _api(state: AppState, method: str, path: str, body: dict, query: dict | None
         return _Result({"ok": True})
     if path == "/api/dialog/reveal":
         _need_method(method, "POST")
-        return _Result(_reveal(state))
+        return _Result(_reveal(state, body))
     if path == "/api/settings":
         _need_method(method, "PUT")
         return _Result({"settings": _update_settings(state, body)})
@@ -774,7 +820,8 @@ def _bootstrap(state: AppState) -> dict:
     else:
         llm_view = {"ok": True, "models": [str(item) for item in llm.get("models") or []]}
     info = model_manager.status(state.settings.models_dir)
-    ready = all(bool((info.get(name) or {}).get("present")) for name in ("detector", "lama", "font"))
+    required = ["detector", "font"] + ([] if state.settings.inpainter_backend == "opencv" else ["lama"])
+    ready = all(bool((info.get(name) or {}).get("present")) for name in required)
     return {
         "version": __version__,
         "settings": state.settings.to_dict(),
@@ -792,6 +839,7 @@ def _bootstrap(state: AppState) -> dict:
         "paths": {
             "settings": str(state.settings_path),
             "data": str(state.store.root),
+            "components": str(components_root()),
         },
         "package": _package_status(state),
     }
@@ -860,8 +908,19 @@ def _put_document(state: AppState, page_id: str, body: dict) -> dict:
     _require_page(state, page_id)
     project_id = state.project_id or ""
     previous = state.store.read_document(project_id, page_id)
+    previous_status = state.store.page_status(project_id, page_id)
     updated = PageDocument.from_dict(raw)
     plan = diff_plan(previous, updated)
+    changed_region_ids = typeset_changed_region_ids(previous, updated)
+    can_incrementally_compose = (
+        plan == "typeset"
+        and previous_status.get("status") in ("done", "offline")
+        and state.store.result_provenance_is_current(
+            project_id,
+            page_id,
+            previous.version,
+        )
+    )
     try:
         saved = state.store.write_document(
             project_id,
@@ -881,6 +940,10 @@ def _put_document(state: AppState, page_id: str, body: dict) -> dict:
                 "plan": plan,
                 "document": saved.to_dict(),
                 "base_version": int(saved.version),
+                **({
+                    "previous_document": previous.to_dict(),
+                    "changed_region_ids": changed_region_ids,
+                } if can_incrementally_compose else {}),
             },
         )
     _mark_package_dirty(state)
@@ -912,7 +975,13 @@ def _page_action(state: AppState, page_id: str, body: dict) -> dict:
         raise ValueError("Неизвестное действие")
     region_id = _region_id(body.get("region_id"))
     _require_page(state, page_id)
-    job = _submit(state, action, page_id, {"region_id": region_id})
+    payload = {"region_id": region_id}
+    if "base_version" in body:
+        base_version = body["base_version"]
+        if isinstance(base_version, bool) or not isinstance(base_version, int) or base_version < 0:
+            raise ValueError("Некорректная base_version")
+        payload["base_version"] = base_version
+    job = _submit(state, action, page_id, payload)
     return {"job_id": job.id}
 
 
@@ -937,6 +1006,7 @@ def _translate(state: AppState, body: dict) -> dict:
         page_id = str(body.get("page_id") or "")
         if not any(str(page.get("id") or "") == page_id for page in pages):
             raise _HttpError(404, "Не найдено")
+        _require_prepared_worker(state)
         if not _page_has_result(state, page_id, skip):
             _mark_queued(state, [page_id])
         job = _submit(state, "translate_page", page_id, {"page_id": page_id, "skip_ready": skip})
@@ -944,6 +1014,7 @@ def _translate(state: AppState, body: dict) -> dict:
     if scope == "all":
         if not pages:
             raise ValueError("В проекте нет страниц")
+        _require_prepared_worker(state)
         ids = [str(page.get("id") or "") for page in pages]
         queued = [page_id for page_id in ids if not _page_has_result(state, page_id, skip)]
         if queued:
@@ -961,6 +1032,26 @@ def _translate(state: AppState, body: dict) -> dict:
         job = _submit(state, "translate_all", "", payload)
         return {"job_id": job.id}
     raise ValueError("Неизвестная область перевода")
+
+
+def _require_prepared_worker(state: AppState) -> None:
+    """Не менять статусы страниц, пока production worker не готов к переводу."""
+    from src.app.worker import ProcessWorker
+
+    if not isinstance(state.queue.worker, ProcessWorker):
+        return
+    manager = state.preparation_manager()
+    if manager.busy():
+        raise _HttpError(409, "Идёт проверка или подготовка компонентов. Дождитесь завершения и повторите перевод.")
+    from src.app.preparation import plan
+
+    prepared = plan(state.settings.to_dict())
+    if prepared["state"] != "ready":
+        pending = [item for item in prepared["items"] if not item["ready"]]
+        titles = ", ".join(item["title"] for item in pending)
+        action = ("Требуется проверка или активация" if all(item["install_bytes"] == 0 for item in pending)
+                  else "Требуется подготовка")
+        raise _HttpError(409, f"{action}: {titles}. Откройте «Настройки → Компоненты» и нажмите «Подготовить компоненты».")
 
 
 def _page_has_result(state: AppState, page_id: str, skip_ready: bool) -> bool:
@@ -1096,8 +1187,20 @@ def _export(state: AppState, body: dict) -> dict:
     return {"job_id": job.id}
 
 
-def _reveal(state: AppState) -> dict:
+def _reveal(state: AppState, body: dict | None = None) -> dict:
+    body = body or {}
+    kind = str(body.get("kind") or "")
     target = state.reveal_path
+    if kind == "models":
+        from src.utils.paths import models_dir
+
+        target = models_dir(state.settings.models_dir or None)
+    elif kind == "components":
+        from src.utils.paths import components_root
+
+        target = components_root()
+    elif kind:
+        raise ValueError("Неизвестный раздел")
     if target is None and state.project_id:
         target = state.store.project_dir(state.project_id)
     if target is None:
@@ -1404,13 +1507,6 @@ def _remember_project(state: AppState, project_id: str) -> None:
 def _remove_pages(state: AppState, body: dict) -> dict:
     if not state.project_id:
         raise ValueError("Нет открытого проекта")
-    if kind in ("translate_page", "translate_all"):
-        from src.app.worker import ProcessWorker
-        if isinstance(state.queue.worker, ProcessWorker):
-            from src.app.preparation import plan
-            prepared = plan(state.settings.to_dict())
-            if prepared["state"] != "ready":
-                raise _HttpError(409, "Сначала подготовьте компоненты в настройках приложения")
     raw = body.get("page_ids")
     if not isinstance(raw, list):
         raise ValueError("Нужен список page_ids")
@@ -1857,23 +1953,85 @@ def _render_font_png(path: str, text: str) -> bytes:
 
 
 def _preview_region(state: AppState, page_id: str, body: dict) -> _Result:
+    started = time.perf_counter()
     region_id = _region_id(body.get("region_id"))
     record = _require_page(state, page_id)
     document = state.store.read_document(state.project_id or "", page_id)
     region = next((item for item in document.regions if item.id == region_id), None)
     if region is None:
         raise _HttpError(400, "Регион не найден")
+    # Черновик используется только для образца: документ проекта не меняется.
+    if "draft" in body:
+        from src.models import TextRegion
+
+        draft = body["draft"]
+        if not isinstance(draft, dict):
+            raise _HttpError(400, "Некорректный черновик региона")
+        try:
+            values = region.to_dict()
+            for key in ("text", "translation", "bbox", "style", "text_position"):
+                if key in draft:
+                    values[key] = draft[key]
+            region = TextRegion.from_dict(values)
+            if len(region.bbox) != 4:
+                raise ValueError("bbox")
+            if region.bbox[2] <= 0 or region.bbox[3] <= 0:
+                raise ValueError("bbox")
+        except (TypeError, ValueError, KeyError, OverflowError, AttributeError) as exc:
+            raise _HttpError(400, "Некорректный черновик региона") from exc
+    mode = str(body.get("mode") or "exact").strip().lower()
+    if mode not in {"exact", "base-layer"}:
+        raise _HttpError(400, "Неизвестный режим предпросмотра")
+    source_path, source_fingerprint = _page_image_fingerprint(state, page_id, record)
+    settings = state.settings
+    from src.app.render_cache import cache_key
+
+    preview_key = cache_key({
+        "kind": "preview-v1",
+        "page_id": page_id,
+        "page_version": document.version,
+        "source": source_fingerprint,
+        "mode": mode,
+        "region": region.to_dict(),
+        "renderer": {
+            "min_font_size": settings.min_font_size,
+            "max_font_size": settings.max_font_size,
+            "target_lang": settings.target_lang,
+            "text_stroke_ratio": settings.text_stroke_ratio,
+            "text_margin": settings.text_margin,
+        },
+    })
+    cache = _render_cache(state)
+    cached = cache.get(preview_key)
+    cached_body = cached if isinstance(cached, tuple) and cached[0] == "preview" else None
     try:
-        png, origin_x, origin_y = _typeset_crop(state, page_id, record, region)
+        if cached_body is not None:
+            _kind, png, origin_x, origin_y = cached_body
+        else:
+            if mode == "base-layer":
+                png, origin_x, origin_y = _typeset_base_layer(state, page_id, record, region)
+            else:
+                png, origin_x, origin_y = _typeset_crop(state, page_id, record, region)
+            cache.put(preview_key, ("preview", png, origin_x, origin_y), len(png))
     except _HttpError:
         raise
     except Exception as exc:
         logger.exception("Предпросмотр региона")
         raise _HttpError(400, "Не удалось нарисовать образец") from exc
+    revision = body.get("revision", 0)
+    try:
+        revision = max(0, min(2_147_483_647, int(revision)))
+    except (TypeError, ValueError, OverflowError):
+        revision = 0
     return _Result(
         body=png,
         content_type="image/png",
-        headers={"X-Offset-X": str(origin_x), "X-Offset-Y": str(origin_y)},
+        headers={
+            "X-Offset-X": str(origin_x),
+            "X-Offset-Y": str(origin_y),
+            "X-Preview-Revision": str(revision),
+            "X-Preview-Duration-Ms": str(max(0, round((time.perf_counter() - started) * 1000))),
+        },
     )
 
 
@@ -1881,19 +2039,52 @@ def _open_page_rgb(state: AppState, page_id: str, record: dict):
     """Чистая страница, если она уже есть, иначе оригинал."""
     from PIL import Image
 
+    path, fingerprint = _page_image_fingerprint(state, page_id, record)
+    from src.app.render_cache import cache_key
+
+    key = cache_key({"kind": "page-rgb-v1", "page_id": page_id, "source": fingerprint})
+    cache = _render_cache(state)
+    cached = cache.get(key)
+    if cached is not None and getattr(cached, "mode", None) == "RGB":
+        return cached.copy()
+    try:
+        with Image.open(path) as image:
+            image.load()
+            rgb = image.convert("RGB")
+            cache.put(key, rgb.copy(), rgb.width * rgb.height * 3)
+            return rgb
+    except _HttpError:
+        raise
+    except Exception as exc:
+        raise _HttpError(400, "Не удалось открыть изображение") from exc
+
+
+def _render_cache(state: AppState):
+    """Вернуть кэш текущего лимита; изменение настройки сбрасывает прежний пул."""
+    from src.app.render_cache import ByteLRU
+
+    limit = max(0, int(getattr(state.settings, "render_cache_limit_mb", 256) or 0)) * 1024 * 1024
+    with state._component_gate:
+        if state._render_cache is None or state._render_cache_limit != limit:
+            state._render_cache = ByteLRU(limit)
+            state._render_cache_limit = limit
+        return state._render_cache
+
+
+def _page_image_fingerprint(state: AppState, page_id: str, record: dict) -> tuple[Path, dict]:
+    """Разрешить чистую/исходную страницу и fingerprint для кэш-инвалидации."""
     project_id = state.project_id or ""
     clean = state.store.image_path(project_id, page_id, "clean")
     path = clean if clean.is_file() else Path(str(record.get("source_path") or ""))
     if not path.is_file():
         raise _HttpError(400, "Нет изображения страницы")
     try:
-        with Image.open(path) as image:
-            image.load()
-            return image.convert("RGB")
-    except _HttpError:
-        raise
-    except Exception as exc:
-        raise _HttpError(400, "Не удалось открыть изображение") from exc
+        stat = path.stat()
+        resolved = str(path.resolve())
+        fingerprint = {"path": resolved, "size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
+    except OSError as exc:
+        raise _HttpError(400, "Не удалось прочитать изображение") from exc
+    return path, fingerprint
 
 
 def _typeset_crop(state: AppState, page_id: str, record: dict, region) -> tuple[bytes, int, int]:
@@ -1914,17 +2105,61 @@ def _typeset_crop(state: AppState, page_id: str, record: dict, region) -> tuple[
         stroke_ratio=float(getattr(settings, "text_stroke_ratio", 0) or 0),
         margin_ratio=float(getattr(settings, "text_margin", 0) or 0),
     )
-    rendered, _overflow = setter.render(image.copy(), [region_copy], force=True)
+    layer, layer_origin, _overflow = setter.render_layer(image, [region_copy], force=True)
     x, y, width, height = (int(value) for value in region.bbox)
-    page_w, page_h = rendered.size
+    x = min(x, layer_origin[0])
+    y = min(y, layer_origin[1])
+    right = max(region.bbox[0] + region.bbox[2], layer_origin[0] + layer.width)
+    bottom = max(region.bbox[1] + region.bbox[3], layer_origin[1] + layer.height)
+    width = right - x
+    height = bottom - y
+    page_w, page_h = image.size
     x0 = max(0, min(page_w - 1, x))
     y0 = max(0, min(page_h - 1, y))
     x1 = max(x0 + 1, min(page_w, x + max(width, 1)))
     y1 = max(y0 + 1, min(page_h, y + max(height, 1)))
-    crop = rendered.crop((x0, y0, x1, y1))
+    crop = image.crop((x0, y0, x1, y1)).convert("RGBA")
+    crop.alpha_composite(layer, dest=(layer_origin[0] - x0, layer_origin[1] - y0))
+    crop = crop.convert("RGB")
     buffer = BytesIO()
     crop.save(buffer, format="PNG")
     return buffer.getvalue(), x0, y0
+
+
+def _typeset_base_layer(state: AppState, page_id: str, record: dict, region) -> tuple[bytes, int, int]:
+    """Вернуть исходную RGBA-текстуру без фона, mesh и поворота для локального preview."""
+    from copy import deepcopy
+    from io import BytesIO
+
+    from src.components.typesetter import Typesetter
+
+    image = _open_page_rgb(state, page_id, record)
+    region_copy = deepcopy(region)
+    if not str(region_copy.translation or "").strip():
+        region_copy.translation = str(region_copy.text or "").strip() or "А"
+    region_copy.text_position = None
+    region_copy.style.rotation = 0.0
+    region_copy.style.warp = {
+        "version": 2,
+        "kind": "none",
+        "bend": 0.0,
+        "quad": None,
+        "mesh": None,
+    }
+    settings = state.settings
+    setter = Typesetter(
+        min_font_size=int(getattr(settings, "min_font_size", 10) or 10),
+        max_font_size=int(getattr(settings, "max_font_size", 128) or 128),
+        lang=str(getattr(settings, "target_lang", "ru") or "ru"),
+        stroke_ratio=float(getattr(settings, "text_stroke_ratio", 0) or 0),
+        margin_ratio=float(getattr(settings, "text_margin", 0) or 0),
+    )
+    layer, (origin_x, origin_y), _overflow = setter.render_layer(
+        image.copy(), [region_copy], force=True
+    )
+    buffer = BytesIO()
+    layer.save(buffer, format="PNG", optimize=True)
+    return buffer.getvalue(), int(origin_x), int(origin_y)
 
 
 def _apply_sfx_style(state: AppState, page_id: str, region_raw: str) -> dict:

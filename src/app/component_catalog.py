@@ -133,7 +133,7 @@ def language_dirs() -> list[Path]:
 def ocr_params() -> dict:
     component = by_id("rapidocr")
     if not ready(component):
-        raise RuntimeError("Нужно подготовить оффлайн-распознавание в настройках приложения")
+        raise RuntimeError("Нужно подготовить оффлайн-распознавание: Настройки → Компоненты")
     folder = directory(component)
     return {"Det.model_path": str(folder / "PP-OCRv6_det_small.onnx"),
             "Rec.model_path": str(folder / "PP-OCRv6_rec_small.onnx"),

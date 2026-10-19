@@ -64,7 +64,7 @@ class TranslatorService:
             
             if not model_found:
                 logger.warning(f"Model {source_lang}->{target_lang} not installed")
-                self._error = f"Нужно подготовить оффлайн-перевод {source_lang} → {target_lang} в настройках приложения"
+                self._error = f"Нужно подготовить оффлайн-перевод {source_lang} → {target_lang}: Настройки → Компоненты"
                 logger.error(self._error)
                 return False
             

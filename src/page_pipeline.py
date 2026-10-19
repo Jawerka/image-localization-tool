@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import time
 from pathlib import Path
 from typing import Callable
@@ -399,6 +400,7 @@ class PagePipeline:
         progress_callback: ProgressCallback | None = None,
         cancel_check: CancelCheck | None = None,
         _skip_layout_scale: bool = False,
+        incremental: dict | None = None,
     ) -> tuple[Image.Image, list[int]]:
         """Вёрстка переводов. Второй результат — id регионов, которые не влезли."""
         report = _bind_report(progress_callback, cancel_check)
@@ -415,7 +417,27 @@ class PagePipeline:
         report(85, "Вёрстка", "typeset")
         self.typesetter.lang = target_lang
         started = time.perf_counter()
-        rendered, overflow = self._typeset(work, regions, target_lang, warnings)
+        incremental_details = None
+        if incremental and layout_scale == 1.0:
+            assign_stylized_fonts(
+                regions,
+                enabled=bool(getattr(self.config, "auto_stylized_fonts", True)),
+            )
+            rendered, overflow, incremental_details = self.typesetter.render_incremental(
+                work,
+                regions,
+                incremental["previous_regions"],
+                incremental["previous_result"],
+                incremental["previous_bounds"],
+                incremental["changed_region_ids"],
+                force=True,
+            )
+            warnings[:] = [item for item in warnings if not item.startswith("Текст не влез полностью:")]
+            if overflow:
+                warnings.append(f"Текст не влез полностью: {overflow}")
+        else:
+            rendered, overflow = self._typeset(work, regions, target_lang, warnings)
+        self._last_typeset_details = incremental_details or {"mode": "full"}
         self._step_timings["typeset"] = time.perf_counter() - started
         overflow_ids = set(overflow)
         for region in regions:
@@ -423,6 +445,15 @@ class PagePipeline:
         if layout_scale != 1.0:
             rendered = rendered.resize(cleaned.size, Image.Resampling.LANCZOS)
             _scale_regions(regions, 1.0 / layout_scale)
+            self.typesetter._last_region_bounds = {
+                region_id: (
+                    max(0, int(math.floor(bounds[0] / layout_scale))),
+                    max(0, int(math.floor(bounds[1] / layout_scale))),
+                    min(cleaned.width, int(math.ceil(bounds[2] / layout_scale))),
+                    min(cleaned.height, int(math.ceil(bounds[3] / layout_scale))),
+                ) if bounds is not None else None
+                for region_id, bounds in self.typesetter._last_region_bounds.items()
+            }
         return rendered, overflow
 
     def retypeset(
@@ -463,6 +494,7 @@ class PagePipeline:
 
     def rerender(self, regions_json: str | Path, debug_dir: str | Path | None = None) -> PageResult:
         """Повторная очистка и вёрстка после правки regions.json."""
+        started = time.perf_counter()
         path = Path(regions_json)
         payload = json.loads(path.read_text(encoding="utf-8"))
         source = Path(payload["source_path"])
@@ -470,6 +502,7 @@ class PagePipeline:
             neighbour = path.parent / source.name
             source = neighbour if neighbour.exists() else source
         image = _load_image(source)
+        load_time = time.perf_counter() - started
         regions = [TextRegion.from_dict(item) for item in payload.get("regions") or []]
         strokes = [MaskStroke.from_dict(item) for item in payload.get("strokes") or []]
         warnings = list(payload.get("warnings") or [])
@@ -491,7 +524,12 @@ class PagePipeline:
             str(payload.get("reading_direction") or "ltr"),
             warnings,
             ["load", "segment", "inpaint", "typeset"],
-            {},
+            {
+                "load": load_time,
+                "segment": self._step_timings.get("segment", 0.0),
+                "inpaint": self._step_timings.get("inpaint", 0.0),
+                "typeset": self._step_timings.get("typeset", 0.0),
+            },
         )
         if debug:
             rendered.save(debug / "05_result.jpg", quality=90)
@@ -507,7 +545,8 @@ class PagePipeline:
             return region
         if not isinstance(self.ocr, RapidOcr):
             self._llm_down = True
-            self.ocr = RapidOcr(min_confidence=self.config.min_confidence)
+            self.ocr = RapidOcr(min_confidence=self.config.min_confidence,
+                                intra_op_threads=self.config.ort_intra_op_threads)
             self.ocr_name = "rapid"
         self.ocr.read_crop(image, region)
         return region
@@ -605,8 +644,11 @@ class PagePipeline:
         if self.detector is None:
             from src.utils.paths import resolve_model
 
-            self.detector = BubbleDetector(conf=self.config.detector_conf, model_path=resolve_model(
-                "ogkalu-detector-v4-s_int8.onnx", self.config.models_dir or None))
+            self.detector = BubbleDetector(
+                conf=self.config.detector_conf,
+                intra_op_threads=self.config.ort_intra_op_threads,
+                model_path=resolve_model("ogkalu-detector-v4-s_int8.onnx", self.config.models_dir or None),
+            )
         return self.detector.detect(image)
 
     def _client(self) -> LlmClient:
@@ -637,7 +679,8 @@ class PagePipeline:
         except Exception as exc:
             logger.warning(f"OCR failed, RapidOCR fallback: {exc}")
             warnings.append(f"OCR переключён на RapidOCR: {exc}")
-            self.ocr = RapidOcr(min_confidence=self.config.min_confidence)
+            self.ocr = RapidOcr(min_confidence=self.config.min_confidence,
+                                intra_op_threads=self.config.ort_intra_op_threads)
             self.ocr_name = "rapid"
             self._llm_down = True
             return self.ocr.recognize(image, regions, reading_order=self.config.reading_order)
@@ -650,7 +693,8 @@ class PagePipeline:
                 self.ocr_name = "custom"
             return
         if self.config.ocr_backend == "rapid" or self._llm_down:
-            self.ocr = RapidOcr(min_confidence=self.config.min_confidence)
+            self.ocr = RapidOcr(min_confidence=self.config.min_confidence,
+                                intra_op_threads=self.config.ort_intra_op_threads)
             self.ocr_name = "rapid"
             return
         client = self._client()
@@ -661,7 +705,8 @@ class PagePipeline:
             return
         self._llm_down = True
         warnings.append("Сервер LLM недоступен, используется RapidOCR + Argos")
-        self.ocr = RapidOcr(min_confidence=self.config.min_confidence)
+        self.ocr = RapidOcr(min_confidence=self.config.min_confidence,
+                            intra_op_threads=self.config.ort_intra_op_threads)
         self.ocr_name = "rapid"
 
     def _translate(self, image, regions, source_lang, target_lang, warnings: list[str]):
@@ -781,6 +826,8 @@ class PagePipeline:
             enabled=bool(getattr(self.config, "auto_stylized_fonts", True)),
         )
         rendered, overflow = self.typesetter.render(image, regions, force=True)
+        # Повторная вёрстка заменяет результат своей проверки, а не накапливает его.
+        warnings[:] = [item for item in warnings if not item.startswith("Текст не влез полностью:")]
         if overflow:
             warnings.append(f"Текст не влез полностью: {overflow}")
         return rendered, overflow

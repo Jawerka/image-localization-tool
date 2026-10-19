@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Сравнение mesh renderer</title>
+<style>
+  body{font:14px system-ui,sans-serif;margin:24px;background:#17191d;color:#eee}
+  main{max-width:900px;margin:auto} .canvases{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  canvas{width:100%;height:auto;background:repeating-conic-gradient(#333 0 25%,#222 0 50%) 50%/20px 20px}
+  pre{white-space:pre-wrap;background:#222;padding:12px;border-radius:8px}
+</style>
+<main>
+  <h1>Mesh preview: PixiJS / минимальный WebGL</h1>
+  <p>Одинаковая RGBA-текстура и геометрия. Benchmark загружает PixiJS 8.21.0 из CDN; сеть нужна только для этого исследовательского файла.</p>
+  <div class="canvases"><section><h2>WebGL</h2><canvas id="plain" width="800" height="400"></canvas></section><section><h2>PixiJS MeshPlane</h2><div id="pixi"></div></section></div>
+  <button id="run">Запустить 180 кадров</button><pre id="result">Ожидает запуска.</pre>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/pixi.js@8.21.0/dist/pixi.min.js"></script>
+<script type="module" src="benchmark.js"></script>
