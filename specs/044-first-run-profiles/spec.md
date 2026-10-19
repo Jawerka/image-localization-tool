@@ -4,7 +4,7 @@
 **Created**: 2026-10-18
 **Status**: Blocked-acceptance
 
-> Web first-run profile is implemented; clean-profile acceptance and Flutter parity remain.
+> Flutter local/server/offline profiles are implemented; clean-profile acceptance remains.
 
 **Input**: Make first-run local/server/offline preparation clear, preserve the default fallback, and show resource volume before preparation.
 

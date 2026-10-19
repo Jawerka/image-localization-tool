@@ -33,6 +33,10 @@ class _RegionStyleSectionState extends State<RegionStyleSection> {
   final _widthFocus = FocusNode();
   final _rotation = TextEditingController();
   final _rotationFocus = FocusNode();
+  final _positionX = TextEditingController();
+  final _positionY = TextEditingController();
+  final _positionXFocus = FocusNode();
+  final _positionYFocus = FocusNode();
 
   static const _warps = [
     ('none', 'Нет'),
@@ -70,6 +74,12 @@ class _RegionStyleSectionState extends State<RegionStyleSection> {
     _rotationFocus.addListener(() {
       if (!_rotationFocus.hasFocus) _commitRotation();
     });
+    _positionXFocus.addListener(() {
+      if (!_positionXFocus.hasFocus) _commitPosition();
+    });
+    _positionYFocus.addListener(() {
+      if (!_positionYFocus.hasFocus) _commitPosition();
+    });
   }
 
   @override
@@ -81,9 +91,12 @@ class _RegionStyleSectionState extends State<RegionStyleSection> {
     _stroke.dispose();
     _strokeFocus.dispose();
     _width.dispose();
-    _widthFocus.dispose();
     _rotation.dispose();
     _rotationFocus.dispose();
+    _positionX.dispose();
+    _positionY.dispose();
+    _positionXFocus.dispose();
+    _positionYFocus.dispose();
     super.dispose();
   }
 
@@ -100,6 +113,7 @@ class _RegionStyleSectionState extends State<RegionStyleSection> {
     final auto = (style['font_size'] as num?)?.round() ?? 0;
     final family = viewer.fontFamilyFor('${style['font_id'] ?? ''}');
     final rotation = region.rotation;
+    final position = viewer.textAnchorFor(region);
     final warp = style['warp'] is Map
         ? (style['warp'] as Map).cast<String, dynamic>()
         : const <String, dynamic>{};
@@ -118,6 +132,8 @@ class _RegionStyleSectionState extends State<RegionStyleSection> {
           : rotation.toStringAsFixed(1),
       _rotationFocus,
     );
+    _sync(_positionX, '${position.dx.round()}', _positionXFocus);
+    _sync(_positionY, '${position.dy.round()}', _positionYFocus);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -289,6 +305,40 @@ class _RegionStyleSectionState extends State<RegionStyleSection> {
             ),
           ),
         ),
+        InspectorField(
+          label: 'Позиция текста',
+          child: Row(
+            children: [
+              Expanded(
+                child: InspectorInput(
+                  key: const Key('style-text-position-x'),
+                  controller: _positionX,
+                  focusNode: _positionXFocus,
+                  numeric: true,
+                  onSubmitted: (_) => _commitPosition(),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: InspectorInput(
+                  key: const Key('style-text-position-y'),
+                  controller: _positionY,
+                  focusNode: _positionYFocus,
+                  numeric: true,
+                  onSubmitted: (_) => _commitPosition(),
+                ),
+              ),
+              IconButton(
+                key: const Key('style-text-position-reset'),
+                tooltip: 'Сбросить позицию текста',
+                visualDensity: VisualDensity.compact,
+                iconSize: 16,
+                onPressed: () => viewer.resetTextPosition(_id),
+                icon: const Icon(Icons.restart_alt),
+              ),
+            ],
+          ),
+        ),
         InspectorLabel('Искривление'),
         Wrap(
           spacing: 4,
@@ -402,9 +452,9 @@ class _RegionStyleSectionState extends State<RegionStyleSection> {
     final rgb = style['fill_rgb'];
     final mean = rgb is List && rgb.length >= 3
         ? ((rgb[0] as num? ?? 0) +
-                (rgb[1] as num? ?? 0) +
-                (rgb[2] as num? ?? 0)) /
-            3
+                  (rgb[1] as num? ?? 0) +
+                  (rgb[2] as num? ?? 0)) /
+              3
         : 0;
     return dark ? mean <= 127.5 : mean > 127.5;
   }
@@ -455,8 +505,9 @@ class _RegionStyleSectionState extends State<RegionStyleSection> {
             borderSide: BorderSide(color: IltPalette.of(context).border),
           ),
         ),
-        style:
-            Theme.of(context).textTheme.bodySmall?.copyWith(fontFamily: family),
+        style: Theme.of(
+          context,
+        ).textTheme.bodySmall?.copyWith(fontFamily: family),
         dropdownColor: IltPalette.of(context).surface2,
         items: [
           for (final (value, label, itemFamily) in options)
@@ -530,6 +581,25 @@ class _RegionStyleSectionState extends State<RegionStyleSection> {
   void _commitRotation() {
     final value = num.tryParse(_rotation.text.replaceAll(',', '.'));
     widget.viewer.setRegionRotation(_id, (value ?? 0).toDouble());
+  }
+
+  void _commitPosition() {
+    final x = num.tryParse(_positionX.text.replaceAll(',', '.'));
+    final y = num.tryParse(_positionY.text.replaceAll(',', '.'));
+    if (x == null || y == null) {
+      final current = widget.viewer.textAnchorFor(widget.region);
+      _positionX.text = '${current.dx.round()}';
+      _positionY.text = '${current.dy.round()}';
+      return;
+    }
+    final size = widget.viewer.imageSize;
+    final dx = size.width > 0
+        ? x.toDouble().clamp(0, size.width).toDouble()
+        : x.toDouble();
+    final dy = size.height > 0
+        ? y.toDouble().clamp(0, size.height).toDouble()
+        : y.toDouble();
+    widget.viewer.setTextPosition(_id, Offset(dx, dy));
   }
 
   String _sizeText(Map<String, dynamic> style) {

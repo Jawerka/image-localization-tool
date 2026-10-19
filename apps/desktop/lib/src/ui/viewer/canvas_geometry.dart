@@ -47,10 +47,8 @@ RegionHit? hitTestRegion({
 }
 
 /// Центр ручки поворота: 22 экранных px над верхней гранью (12 px кружок + 10).
-Offset rotateHandleCenter(Rect bbox, double scale) => Offset(
-      bbox.center.dx,
-      bbox.top - 22 / scale,
-    );
+Offset rotateHandleCenter(Rect bbox, double scale) =>
+    Offset(bbox.center.dx, bbox.top - 22 / scale);
 
 /// Попадание в ручку поворота.
 bool hitRotateHandle(Rect bbox, Offset scenePoint, double scale) =>
@@ -58,15 +56,15 @@ bool hitRotateHandle(Rect bbox, Offset scenePoint, double scale) =>
 
 /// Центры ручек изменения размера (8 точек).
 List<(String, Offset)> resizeHandlePoints(Rect bbox) => [
-      ('nw', bbox.topLeft),
-      ('n', Offset(bbox.center.dx, bbox.top)),
-      ('ne', bbox.topRight),
-      ('e', Offset(bbox.right, bbox.center.dy)),
-      ('se', bbox.bottomRight),
-      ('s', Offset(bbox.center.dx, bbox.bottom)),
-      ('sw', bbox.bottomLeft),
-      ('w', Offset(bbox.left, bbox.center.dy)),
-    ];
+  ('nw', bbox.topLeft),
+  ('n', Offset(bbox.center.dx, bbox.top)),
+  ('ne', bbox.topRight),
+  ('e', Offset(bbox.right, bbox.center.dy)),
+  ('se', bbox.bottomRight),
+  ('s', Offset(bbox.center.dx, bbox.bottom)),
+  ('sw', bbox.bottomLeft),
+  ('w', Offset(bbox.left, bbox.center.dy)),
+];
 
 /// Новый bbox при переносе/изменении размера (без клампа — клампит вызывающий).
 Rect applyHandleDrag({
@@ -113,15 +111,19 @@ List<Offset> warpPointsFor(Region region) {
   final kind = '${warp['kind'] ?? 'none'}';
   if (kind == 'perspective') {
     final raw = warp['quad'];
-    final points = _pointList(raw, 4) ??
-        Region.defaultQuad(bbox.width, bbox.height);
-    return [for (final point in points) bbox.topLeft + Offset(point[0], point[1])];
+    final points =
+        _pointList(raw, 4) ?? Region.defaultQuad(bbox.width, bbox.height);
+    return [
+      for (final point in points) bbox.topLeft + Offset(point[0], point[1]),
+    ];
   }
   if (kind == 'mesh') {
     final raw = warp['mesh'];
     final points =
         _pointList(raw, 16) ?? Region.defaultMesh(bbox.width, bbox.height);
-    return [for (final point in points) bbox.topLeft + Offset(point[0], point[1])];
+    return [
+      for (final point in points) bbox.topLeft + Offset(point[0], point[1]),
+    ];
   }
   return const [];
 }
@@ -145,6 +147,31 @@ int warpOppositeIndex(int index, {required bool mesh}) {
   final row = index ~/ 4;
   final col = index % 4;
   return (3 - row) * 4 + (3 - col);
+}
+
+/// Индексы двух треугольников для каждой ячейки сетки 4×4.
+List<int> meshPreviewIndices() {
+  final indices = <int>[];
+  for (var row = 0; row < 3; row++) {
+    for (var col = 0; col < 3; col++) {
+      final a = row * 4 + col;
+      final b = a + 1;
+      final c = a + 5;
+      final d = a + 4;
+      indices.addAll([a, b, c, a, c, d]);
+    }
+  }
+  return indices;
+}
+
+/// Текстурные координаты вершин 4×4 для изображения [width]×[height].
+List<Offset> meshTextureCoordinates(int width, int height) {
+  final maxX = math.max(2, width - 1);
+  final maxY = math.max(2, height - 1);
+  return [
+    for (var row = 0; row < 4; row++)
+      for (var col = 0; col < 4; col++) Offset(col * maxX / 3, row * maxY / 3),
+  ];
 }
 
 /// Сцена под локальной точкой вьюпорта.

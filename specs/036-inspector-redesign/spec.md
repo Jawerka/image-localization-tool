@@ -4,7 +4,7 @@
 **Created**: 2026-10-18
 **Status**: Blocked-acceptance
 
-> Web implementation is complete; Flutter inspector parity is required for the 1.0.5 release.
+> Flutter inspector parity is implemented; real Flutter EXE acceptance remains for 1.0.5.
 
 **Input**: Улучшить UI, особенно правые блоки работы с текстом и стилями.
 

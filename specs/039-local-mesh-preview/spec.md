@@ -4,7 +4,7 @@
 **Created**: 2026-10-18  
 **Status**: Blocked-acceptance
 
-> Web renderer is implemented; WebView2/GPU measurement and Flutter mesh preview remain.
+> Flutter draft mesh preview is implemented; WebView2/GPU measurement and visual acceptance remain.
 
 **Input**: Во время редактирования mesh пользователь должен видеть деформацию без ожидания полного серверного preview; после жеста результат должен совпасть с экспортом.
 

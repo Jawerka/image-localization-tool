@@ -29,6 +29,7 @@ class ViewerState extends ChangeNotifier {
   String? _pageId;
   PageDocument? _document;
   String? _selectedRegionId;
+  String? _textMoveRegionId;
 
   String _tool = 'select';
   String _view = 'result';
@@ -97,6 +98,7 @@ class ViewerState extends ChangeNotifier {
   String? get pageId => _pageId;
   PageDocument? get document => _document;
   String? get selectedRegionId => _selectedRegionId;
+  bool isTextMoveActive(String regionId) => _textMoveRegionId == regionId;
   String get tool => _tool;
   String get view => _view;
   double get curtain => _curtain;
@@ -198,6 +200,7 @@ class ViewerState extends ChangeNotifier {
     _pageId = null;
     _document = null;
     _selectedRegionId = null;
+    _textMoveRegionId = null;
     _imageSize = ui.Size.zero;
     _loading = false;
     _cancelLeave(false);
@@ -268,6 +271,7 @@ class ViewerState extends ChangeNotifier {
     _pageId = next;
     _document = null;
     _selectedRegionId = null;
+    _textMoveRegionId = null;
     _imageSize = ui.Size.zero;
     _errorText = null;
     _loading = next != null;
@@ -474,8 +478,62 @@ class ViewerState extends ChangeNotifier {
   void selectRegion(String? id) {
     if (_selectedRegionId == id) return;
     _selectedRegionId = id;
+    if (_textMoveRegionId != id) _textMoveRegionId = null;
     _schedulePreview();
     _notify();
+  }
+
+  /// Включить/выключить режим перемещения только текста (038).
+  void toggleTextMove(String regionId) {
+    _textMoveRegionId = _textMoveRegionId == regionId ? null : regionId;
+    _notify();
+  }
+
+  /// Якорь текста: `text_position`, иначе центр баллона/рамки.
+  Offset textAnchorFor(Region region) {
+    final explicit = region.textPosition;
+    if (explicit != null) return explicit;
+    return (region.bubbleBbox ?? region.bbox).center;
+  }
+
+  /// Записать независимую позицию текста, не меняя bbox и маску.
+  void setTextPosition(String regionId, Offset position) {
+    editDocument(
+      (document) {
+        final region = document.findRegion(regionId);
+        if (region == null) return;
+        region.textPosition = position;
+        region.edited = true;
+      },
+      deferApply: true,
+      coalesce: 'textpos:$regionId',
+    );
+    _schedulePreview();
+  }
+
+  void resetTextPosition(String regionId) {
+    editDocument((document) {
+      final region = document.findRegion(regionId);
+      if (region == null) return;
+      region.textPosition = null;
+      region.edited = true;
+    }, deferApply: true);
+    _schedulePreview();
+  }
+
+  /// Сдвиг текста стрелками: 1 px, Shift — 10 px.
+  void nudgeTextPosition(String direction, {bool shift = false}) {
+    final id = _selectedRegionId;
+    if (id == null) return;
+    final region = _document?.findRegion(id);
+    if (region == null) return;
+    final step = shift ? 10.0 : 1.0;
+    final origin = textAnchorFor(region);
+    final dx = direction == 'right'
+        ? step
+        : (direction == 'left' ? -step : 0.0);
+    final dy = direction == 'down' ? step : (direction == 'up' ? -step : 0.0);
+    setTextPosition(id, origin.translate(dx, dy));
   }
 
   /// Сессия жестов и матрица (живёт рядом, но уведомляет только канвас).
@@ -527,6 +585,7 @@ class ViewerState extends ChangeNotifier {
       _document = next;
       _deferredApply = true;
       _pendingBody[pageId] = deepCopyMap(next.data);
+      _schedulePreview();
       _notify();
       return true;
     }
@@ -535,6 +594,7 @@ class ViewerState extends ChangeNotifier {
     _deferredBaselineKey = '';
     _pendingBody[pageId] = deepCopyMap(next.data);
     _scheduleSave(pageId, debounceMs);
+    _schedulePreview();
     _notify();
     return true;
   }
@@ -598,8 +658,7 @@ class ViewerState extends ChangeNotifier {
     final next = PageDocument(deepCopyMap(snapshot));
     final key = next.contentKey();
     final hadBaseline = _deferredBaselineKey.isNotEmpty;
-    final pending =
-        hadBaseline && key != _deferredBaselineKey;
+    final pending = hadBaseline && key != _deferredBaselineKey;
     _document = next;
     _deferredApply = pending;
     _pruneSelection();
@@ -732,14 +791,12 @@ class ViewerState extends ChangeNotifier {
     return null;
   }
 
-  void _acceptSave(
-    String pageId,
-    Map<String, dynamic> response,
-    int fallback,
-  ) {
+  void _acceptSave(String pageId, Map<String, dynamic> response, int fallback) {
     final version = _readVersion(response, fallback);
     _acked[pageId] = version;
-    if (_pageId == pageId && _document != null && !_pendingBody.containsKey(pageId)) {
+    if (_pageId == pageId &&
+        _document != null &&
+        !_pendingBody.containsKey(pageId)) {
       final document = response['document'];
       if (document is Map) {
         _document = PageDocument.fromJson(document.cast<String, dynamic>());
@@ -775,8 +832,9 @@ class ViewerState extends ChangeNotifier {
       session.clearLasso();
       return false;
     }
-    final mode =
-        session.lassoMode == Stroke.eraseFill ? Stroke.eraseFill : Stroke.fill;
+    final mode = session.lassoMode == Stroke.eraseFill
+        ? Stroke.eraseFill
+        : Stroke.fill;
     editDocument(
       (document) => document.addStroke(
         Stroke(
@@ -800,17 +858,14 @@ class ViewerState extends ChangeNotifier {
   void createRegion(Rect rect) {
     final clamped = clampBox(rect, _imageSize.width, _imageSize.height);
     var createdId = '';
-    editDocument(
-      (document) {
-        final id = document.nextRegionId();
-        createdId = '$id';
-        final region = blankRegion(id, clamped);
-        region['order'] = document.regions.length;
-        final list = document.data['regions'];
-        if (list is List) list.add(region);
-      },
-      deferApply: true,
-    );
+    editDocument((document) {
+      final id = document.nextRegionId();
+      createdId = '$id';
+      final region = blankRegion(id, clamped);
+      region['order'] = document.regions.length;
+      final list = document.data['regions'];
+      if (list is List) list.add(region);
+    }, deferApply: true);
     if (createdId.isEmpty) return;
     if (!_showBoxes) setShowBoxes(true);
     selectRegion(createdId);
@@ -836,75 +891,63 @@ class ViewerState extends ChangeNotifier {
 
   void commitRegionRect(String regionId, Rect rect) {
     final clamped = clampBox(rect, _imageSize.width, _imageSize.height);
-    editDocument(
-      (document) {
-        final region = document.findRegion(regionId);
-        if (region == null) return;
-        region.bbox = clamped;
-        region.edited = true;
-      },
-      deferApply: true,
-    );
+    editDocument((document) {
+      final region = document.findRegion(regionId);
+      if (region == null) return;
+      region.bbox = clamped;
+      region.edited = true;
+    }, deferApply: true);
   }
 
   void commitRegionRotation(String regionId, double angle) {
-    editDocument(
-      (document) {
-        final region = document.findRegion(regionId);
-        if (region == null) return;
-        region.rotation = angle;
-        region.edited = true;
-      },
-      deferApply: true,
-    );
+    editDocument((document) {
+      final region = document.findRegion(regionId);
+      if (region == null) return;
+      region.rotation = angle;
+      region.edited = true;
+    }, deferApply: true);
   }
 
   /// Записать точки искажения (координаты листа) в стиль региона.
   void commitWarpPoints(String regionId, List<Offset> scenePoints) {
-    editDocument(
-      (document) {
-        final region = document.findRegion(regionId);
-        if (region == null) return;
-        final bbox = region.bbox;
-        final mesh = region.warp?['kind'] == 'mesh';
-        final warp = <String, dynamic>{...?region.warp};
-        warp['kind'] = mesh ? 'mesh' : 'perspective';
-        warp[mesh ? 'mesh' : 'quad'] = [
-          for (final point in scenePoints)
-            [point.dx - bbox.left, point.dy - bbox.top],
-        ];
-        region.setWarp(warp);
-        region.edited = true;
-      },
-      deferApply: true,
-    );
+    editDocument((document) {
+      final region = document.findRegion(regionId);
+      if (region == null) return;
+      final bbox = region.bbox;
+      final mesh = region.warp?['kind'] == 'mesh';
+      final warp = <String, dynamic>{...?region.warp};
+      warp['kind'] = mesh ? 'mesh' : 'perspective';
+      warp[mesh ? 'mesh' : 'quad'] = [
+        for (final point in scenePoints)
+          [point.dx - bbox.left, point.dy - bbox.top],
+      ];
+      region.setWarp(warp);
+      region.edited = true;
+    }, deferApply: true);
   }
 
   /// Сбросить точку искажения к дефолту (двойной клик по точке).
   void resetWarpPoint(String regionId, int index) {
-    editDocument(
-      (document) {
-        final region = document.findRegion(regionId);
-        if (region == null) return;
-        final bbox = region.bbox;
-        final mesh = region.warp?['kind'] == 'mesh';
-        final defaults = mesh
-            ? Region.defaultMesh(bbox.width, bbox.height)
-            : Region.defaultQuad(bbox.width, bbox.height);
-        if (index < 0 || index >= defaults.length) return;
-        final warp = <String, dynamic>{...?region.warp};
-        final key = mesh ? 'mesh' : 'quad';
-        final current = _pointCopy(warp[key], defaults);
-        current[index] = List<double>.of(defaults[index]);
-        warp[key] = current;
-        if ('${warp['kind'] ?? 'none'}' == 'none') {
-          warp['kind'] = mesh ? 'mesh' : 'perspective';
-        }
-        region.setWarp(warp);
-        region.edited = true;
-      },
-      deferApply: true,
-    );
+    editDocument((document) {
+      final region = document.findRegion(regionId);
+      if (region == null) return;
+      final bbox = region.bbox;
+      final mesh = region.warp?['kind'] == 'mesh';
+      final defaults = mesh
+          ? Region.defaultMesh(bbox.width, bbox.height)
+          : Region.defaultQuad(bbox.width, bbox.height);
+      if (index < 0 || index >= defaults.length) return;
+      final warp = <String, dynamic>{...?region.warp};
+      final key = mesh ? 'mesh' : 'quad';
+      final current = _pointCopy(warp[key], defaults);
+      current[index] = List<double>.of(defaults[index]);
+      warp[key] = current;
+      if ('${warp['kind'] ?? 'none'}' == 'none') {
+        warp['kind'] = mesh ? 'mesh' : 'perspective';
+      }
+      region.setWarp(warp);
+      region.edited = true;
+    }, deferApply: true);
   }
 
   List<List<double>> _pointCopy(Object? raw, List<List<double>> defaults) {
@@ -934,41 +977,67 @@ class ViewerState extends ChangeNotifier {
     final id = _selectedRegionId;
     if (id == null) return;
     final step = shift ? 10.0 : 1.0;
-    editDocument(
-      (document) {
-        final region = document.findRegion(id);
-        if (region == null) return;
-        var rect = region.bbox;
-        if (alt) {
-          if (direction == 'right') rect = Rect.fromLTWH(rect.left, rect.top, rect.width + step, rect.height);
-          if (direction == 'left') rect = Rect.fromLTWH(rect.left, rect.top, rect.width - step, rect.height);
-          if (direction == 'down') rect = Rect.fromLTWH(rect.left, rect.top, rect.width, rect.height + step);
-          if (direction == 'up') rect = Rect.fromLTWH(rect.left, rect.top, rect.width, rect.height - step);
-        } else {
-          final dx = direction == 'right' ? step : (direction == 'left' ? -step : 0.0);
-          final dy = direction == 'down' ? step : (direction == 'up' ? -step : 0.0);
-          rect = rect.translate(dx, dy);
+    editDocument((document) {
+      final region = document.findRegion(id);
+      if (region == null) return;
+      var rect = region.bbox;
+      if (alt) {
+        if (direction == 'right') {
+          rect = Rect.fromLTWH(
+            rect.left,
+            rect.top,
+            rect.width + step,
+            rect.height,
+          );
         }
-        region.bbox = clampBox(rect, _imageSize.width, _imageSize.height);
-        region.edited = true;
-      },
-      deferApply: true,
-    );
+        if (direction == 'left') {
+          rect = Rect.fromLTWH(
+            rect.left,
+            rect.top,
+            rect.width - step,
+            rect.height,
+          );
+        }
+        if (direction == 'down') {
+          rect = Rect.fromLTWH(
+            rect.left,
+            rect.top,
+            rect.width,
+            rect.height + step,
+          );
+        }
+        if (direction == 'up') {
+          rect = Rect.fromLTWH(
+            rect.left,
+            rect.top,
+            rect.width,
+            rect.height - step,
+          );
+        }
+      } else {
+        final dx = direction == 'right'
+            ? step
+            : (direction == 'left' ? -step : 0.0);
+        final dy = direction == 'down'
+            ? step
+            : (direction == 'up' ? -step : 0.0);
+        rect = rect.translate(dx, dy);
+      }
+      region.bbox = clampBox(rect, _imageSize.width, _imageSize.height);
+      region.edited = true;
+    }, deferApply: true);
   }
 
   /// Удалить выделенный регион (Delete).
   void deleteSelectedRegion() {
     final id = _selectedRegionId;
     if (id == null) return;
-    editDocument(
-      (document) {
-        final list = document.data['regions'];
-        if (list is List) {
-          list.removeWhere((item) => item is Map && '${item['id']}' == id);
-        }
-      },
-      deferApply: true,
-    );
+    editDocument((document) {
+      final list = document.data['regions'];
+      if (list is List) {
+        list.removeWhere((item) => item is Map && '${item['id']}' == id);
+      }
+    }, deferApply: true);
     selectRegion(null);
   }
 
@@ -1062,10 +1131,10 @@ class ViewerState extends ChangeNotifier {
   }
 
   List<Map<String, dynamic>> _parseStyles(Object? raw) => [
-        if (raw is List)
-          for (final item in raw)
-            if (item is Map) item.cast<String, dynamic>(),
-      ];
+    if (raw is List)
+      for (final item in raw)
+        if (item is Map) item.cast<String, dynamic>(),
+  ];
 
   /// Сохранить стиль выделенного региона в стили проекта.
   Future<bool> saveProjectStyle() async {
@@ -1119,36 +1188,33 @@ class ViewerState extends ChangeNotifier {
   }
 
   bool setRegionText(String id, String text) => _editRegionField(
-        id,
-        (region) => region.data['text'] = text,
-        coalesce: 'text:$id',
-        debounceMs: 500,
-      );
+    id,
+    (region) => region.data['text'] = text,
+    coalesce: 'text:$id',
+    debounceMs: 500,
+  );
 
   bool setRegionTranslation(String id, String text) => _editRegionField(
-        id,
-        (region) {
-          region.data['translation'] = text;
-          region.data['translation_locked'] = text.trim().isNotEmpty;
-        },
-        coalesce: 'translation:$id',
-        debounceMs: 500,
-      );
+    id,
+    (region) {
+      region.data['translation'] = text;
+      region.data['translation_locked'] = text.trim().isNotEmpty;
+    },
+    coalesce: 'translation:$id',
+    debounceMs: 500,
+  );
 
   bool setRegionSpeaker(String id, String text) => _editRegionField(
-        id,
-        (region) => region.data['speaker'] = text,
-        coalesce: 'speaker:$id',
-        debounceMs: 500,
-      );
+    id,
+    (region) => region.data['speaker'] = text,
+    coalesce: 'speaker:$id',
+    debounceMs: 500,
+  );
 
-  bool setRegionType(String id, String type) => _editRegionField(
-        id,
-        (region) {
-          region.data['type'] = type;
-          region.data['block_type'] = type;
-        },
-      );
+  bool setRegionType(String id, String type) => _editRegionField(id, (region) {
+    region.data['type'] = type;
+    region.data['block_type'] = type;
+  });
 
   // ---- инспектор: стиль (черновик до «Готово») ------------------------------
 
@@ -1173,8 +1239,10 @@ class ViewerState extends ChangeNotifier {
 
   Map<String, dynamic> _warpCopy(Map<String, dynamic> style) =>
       style['warp'] is Map
-          ? Map<String, dynamic>.from((style['warp'] as Map).cast<String, dynamic>())
-          : <String, dynamic>{};
+      ? Map<String, dynamic>.from(
+          (style['warp'] as Map).cast<String, dynamic>(),
+        )
+      : <String, dynamic>{};
 
   /// Кегль: 0 (пусто) — авто; иначе кламп в границы настроек.
   bool setRegionFontSize(String id, int? value) {
@@ -1189,165 +1257,138 @@ class ViewerState extends ChangeNotifier {
   }
 
   bool toggleRegionUppercase(String id) => _patchRegionStyle(
-        id,
-        (style, _) => style['uppercase'] = !(style['uppercase'] == true),
-        coalesce: 'uppercase:$id',
-      );
+    id,
+    (style, _) => style['uppercase'] = !(style['uppercase'] == true),
+    coalesce: 'uppercase:$id',
+  );
 
   /// Чернила: чёрный/белый — фиксированный цвет заливки.
-  bool setRegionInk(String id, {required bool white}) => _patchRegionStyle(
-        id,
-        (style, _) {
-          style['fill_rgb'] = white ? [255, 255, 255] : [0, 0, 0];
-          style['fill_locked'] = true;
-        },
-        coalesce: 'ink:$id',
-      );
+  bool setRegionInk(String id, {required bool white}) =>
+      _patchRegionStyle(id, (style, _) {
+        style['fill_rgb'] = white ? [255, 255, 255] : [0, 0, 0];
+        style['fill_locked'] = true;
+      }, coalesce: 'ink:$id');
 
   bool setRegionFontId(String id, String fontId) => _patchRegionStyle(
-        id,
-        (style, _) => style['font_id'] = fontId,
-        coalesce: 'fontid:$id',
-      );
+    id,
+    (style, _) => style['font_id'] = fontId,
+    coalesce: 'fontid:$id',
+  );
 
-  bool setRegionFillRgb(String id, List<int> rgb) => _patchRegionStyle(
-        id,
-        (style, _) {
-          style['fill_rgb'] = List<int>.of(rgb);
-          style['fill_locked'] = true;
-        },
-        coalesce: 'fill:$id',
-      );
+  bool setRegionFillRgb(String id, List<int> rgb) =>
+      _patchRegionStyle(id, (style, _) {
+        style['fill_rgb'] = List<int>.of(rgb);
+        style['fill_locked'] = true;
+      }, coalesce: 'fill:$id');
 
-  bool setRegionStrokeRgb(String id, List<int> rgb) => _patchRegionStyle(
-        id,
-        (style, _) {
-          style['stroke_rgb'] = List<int>.of(rgb);
-          style['stroke_mode'] = 'custom';
-        },
-        coalesce: 'stroke:$id',
-      );
+  bool setRegionStrokeRgb(String id, List<int> rgb) =>
+      _patchRegionStyle(id, (style, _) {
+        style['stroke_rgb'] = List<int>.of(rgb);
+        style['stroke_mode'] = 'custom';
+      }, coalesce: 'stroke:$id');
 
   bool setRegionStrokeWidth(String id, num width) {
     final value = width > 0 ? width.toDouble() : 0.0;
-    return _patchRegionStyle(
-      id,
-      (style, _) {
-        style['stroke_width'] = value;
-        if (value > 0) style['stroke_mode'] = 'custom';
-      },
-      coalesce: 'strokew:$id',
-    );
+    return _patchRegionStyle(id, (style, _) {
+      style['stroke_width'] = value;
+      if (value > 0) style['stroke_mode'] = 'custom';
+    }, coalesce: 'strokew:$id');
   }
 
   bool setRegionRotation(String id, double degrees) => _patchRegionStyle(
-        id,
-        (style, _) => style['rotation'] = degrees,
-        coalesce: 'rotate:$id',
-      );
+    id,
+    (style, _) => style['rotation'] = degrees,
+    coalesce: 'rotate:$id',
+  );
 
   /// Пресет искривления (зеркало `applyCardWarp` веба).
-  bool setRegionWarpPreset(String id, String preset) => _patchRegionStyle(
-        id,
-        (style, region) {
-          final warp = _warpCopy(style);
-          final bend = warp['bend'];
-          final current = bend is num ? bend.toDouble() : 0.0;
-          final bw = region.bbox.width <= 0 ? 100.0 : region.bbox.width;
-          final bh = region.bbox.height <= 0 ? 100.0 : region.bbox.height;
-          switch (preset) {
-            case 'none':
-              warp
-                ..['kind'] = 'none'
-                ..['bend'] = 0.0
-                ..['quad'] = null
-                ..['mesh'] = null;
-            case 'arc-up':
-              warp
-                ..['kind'] = 'arc'
-                ..['bend'] = 0.35;
-            case 'arc-down':
-              warp
-                ..['kind'] = 'arc'
-                ..['bend'] = -0.35;
-            case 'ring':
-              warp['kind'] = 'ring';
-              warp['bend'] = current == 0 ? 0.35 : current;
-            case 'wave':
-              warp
-                ..['kind'] = 'wave'
-                ..['bend'] = 0.35;
-            case 'flag':
-              warp['kind'] = 'flag';
-              warp['bend'] = current == 0 ? 0.25 : current;
-            case 'perspective':
-              warp['kind'] = 'perspective';
-              final quad = warp['quad'];
-              warp['quad'] = quad is List && quad.length == 4
-                  ? quad
-                  : Region.defaultQuad(bw, bh);
-              warp['mesh'] = null;
-            case 'mesh':
-              warp['kind'] = 'mesh';
-              final mesh = warp['mesh'];
-              warp['mesh'] = mesh is List && mesh.length == 16
-                  ? mesh
-                  : Region.defaultMesh(bw, bh);
-              warp['quad'] = null;
-          }
-          style['warp'] = warp;
-        },
-        coalesce: 'warppreset:$id',
-      );
+  bool setRegionWarpPreset(String id, String preset) =>
+      _patchRegionStyle(id, (style, region) {
+        final warp = _warpCopy(style);
+        final bend = warp['bend'];
+        final current = bend is num ? bend.toDouble() : 0.0;
+        final bw = region.bbox.width <= 0 ? 100.0 : region.bbox.width;
+        final bh = region.bbox.height <= 0 ? 100.0 : region.bbox.height;
+        switch (preset) {
+          case 'none':
+            warp
+              ..['kind'] = 'none'
+              ..['bend'] = 0.0
+              ..['quad'] = null
+              ..['mesh'] = null;
+          case 'arc-up':
+            warp
+              ..['kind'] = 'arc'
+              ..['bend'] = 0.35;
+          case 'arc-down':
+            warp
+              ..['kind'] = 'arc'
+              ..['bend'] = -0.35;
+          case 'ring':
+            warp['kind'] = 'ring';
+            warp['bend'] = current == 0 ? 0.35 : current;
+          case 'wave':
+            warp
+              ..['kind'] = 'wave'
+              ..['bend'] = 0.35;
+          case 'flag':
+            warp['kind'] = 'flag';
+            warp['bend'] = current == 0 ? 0.25 : current;
+          case 'perspective':
+            warp['kind'] = 'perspective';
+            final quad = warp['quad'];
+            warp['quad'] = quad is List && quad.length == 4
+                ? quad
+                : Region.defaultQuad(bw, bh);
+            warp['mesh'] = null;
+          case 'mesh':
+            warp['kind'] = 'mesh';
+            final mesh = warp['mesh'];
+            warp['mesh'] = mesh is List && mesh.length == 16
+                ? mesh
+                : Region.defaultMesh(bw, bh);
+            warp['quad'] = null;
+        }
+        style['warp'] = warp;
+      }, coalesce: 'warppreset:$id');
 
-  bool setRegionWarpBend(String id, double bend) => _patchRegionStyle(
-        id,
-        (style, _) {
-          final warp = _warpCopy(style);
-          warp.putIfAbsent('kind', () => 'none');
-          warp.putIfAbsent('quad', () => null);
-          warp.putIfAbsent('mesh', () => null);
-          warp['bend'] = bend.clamp(-1, 1).toDouble();
-          style['warp'] = warp;
-        },
-        coalesce: 'warp:$id',
-      );
+  bool setRegionWarpBend(String id, double bend) =>
+      _patchRegionStyle(id, (style, _) {
+        final warp = _warpCopy(style);
+        warp.putIfAbsent('kind', () => 'none');
+        warp.putIfAbsent('quad', () => null);
+        warp.putIfAbsent('mesh', () => null);
+        warp['bend'] = bend.clamp(-1, 1).toDouble();
+        style['warp'] = warp;
+      }, coalesce: 'warp:$id');
 
   /// «Сбросить стили»: поворот и искривление; остальные поля не трогаются.
-  bool resetRegionStyle(String id) => _patchRegionStyle(
-        id,
-        (style, _) {
-          style['rotation'] = 0.0;
-          final warp = _warpCopy(style);
-          warp
-            ..['kind'] = 'none'
-            ..['bend'] = 0.0
-            ..['quad'] = null
-            ..['mesh'] = null;
-          style['warp'] = warp;
-        },
-        coalesce: 'resetstyle:$id',
-      );
+  bool resetRegionStyle(String id) => _patchRegionStyle(id, (style, _) {
+    style['rotation'] = 0.0;
+    final warp = _warpCopy(style);
+    warp
+      ..['kind'] = 'none'
+      ..['bend'] = 0.0
+      ..['quad'] = null
+      ..['mesh'] = null;
+    style['warp'] = warp;
+  }, coalesce: 'resetstyle:$id');
 
   /// Наложить стиль проекта/буфера на регион (warp — слиянием).
   bool applyStyleToRegion(String id, Map<String, dynamic> incoming) =>
-      _patchRegionStyle(
-        id,
-        (style, _) {
-          for (final entry in incoming.entries) {
-            if (entry.value == null) continue;
-            if (entry.key == 'warp' && entry.value is Map) {
-              style['warp'] = {
-                ..._warpCopy(style),
-                ...(entry.value as Map).cast<String, dynamic>(),
-              };
-              continue;
-            }
-            style[entry.key] = deepCopy(entry.value);
+      _patchRegionStyle(id, (style, _) {
+        for (final entry in incoming.entries) {
+          if (entry.value == null) continue;
+          if (entry.key == 'warp' && entry.value is Map) {
+            style['warp'] = {
+              ..._warpCopy(style),
+              ...(entry.value as Map).cast<String, dynamic>(),
+            };
+            continue;
           }
-        },
-        coalesce: 'styleapply:$id',
-      );
+          style[entry.key] = deepCopy(entry.value);
+        }
+      }, coalesce: 'styleapply:$id');
 
   /// Копировать стиль выделенного региона в буфер сессии.
   void copyStyle() {
@@ -1397,26 +1438,21 @@ class ViewerState extends ChangeNotifier {
   }
 
   /// «Не переводить»: флаг сохраняется сразу (зеркало веба).
-  bool toggleRegionSkip(String id) => editDocument(
-        (document) {
-          final region = document.findRegion(id);
-          if (region == null) return;
-          region.skip = !region.skip;
-          region.edited = true;
-        },
-      );
+  bool toggleRegionSkip(String id) => editDocument((document) {
+    final region = document.findRegion(id);
+    if (region == null) return;
+    region.skip = !region.skip;
+    region.edited = true;
+  });
 
   /// Удалить регион из черновика (из карточки или Del).
   bool deleteRegion(String id) {
-    final changed = editDocument(
-      (document) {
-        final list = document.data['regions'];
-        if (list is List) {
-          list.removeWhere((item) => item is Map && '${item['id']}' == id);
-        }
-      },
-      deferApply: true,
-    );
+    final changed = editDocument((document) {
+      final list = document.data['regions'];
+      if (list is List) {
+        list.removeWhere((item) => item is Map && '${item['id']}' == id);
+      }
+    }, deferApply: true);
     if (changed && _selectedRegionId == id) selectRegion(null);
     return changed;
   }
@@ -1505,7 +1541,8 @@ class ViewerState extends ChangeNotifier {
       _notify();
       return;
     }
-    final key = '$pageId|${region.id}|${jsonEncode(region.data['style'] ?? const <String, dynamic>{})}';
+    final key =
+        '$pageId|${region.id}|${jsonEncode([region.data['style'] ?? const <String, dynamic>{}, region.data['bbox'], region.data['text'], region.data['translation'], region.data['text_position']])}';
     if (key == _previewKey && _stylePreviewStatus != 'idle') return;
     _previewKey = key;
     _previewToken++;
@@ -1521,10 +1558,24 @@ class ViewerState extends ChangeNotifier {
     final api = _api;
     if (api == null) return;
     final token = ++_previewToken;
+    final region = _document?.findRegion(regionId);
+    if (region == null) {
+      _stylePreviewStatus = 'idle';
+      _stylePreviewMessage = '';
+      _notify();
+      return;
+    }
+    final draft = <String, dynamic>{
+      'text': region.data['text'],
+      'translation': region.data['translation'],
+      'bbox': region.data['bbox'],
+      'style': region.data['style'],
+      'text_position': region.data['text_position'],
+    };
     try {
       final response = await api.postBytes(
         '/api/pages/$pageId/preview-region',
-        {'region_id': regionId},
+        {'region_id': regionId, 'draft': draft},
       );
       final codec = await ui.instantiateImageCodec(response.bytes);
       final frame = await codec.getNextFrame();
@@ -1666,6 +1717,8 @@ class CanvasSession extends ChangeNotifier {
   double? previewRotation;
   String? previewWarpId;
   List<ui.Offset>? previewWarpPoints;
+  String? previewTextId;
+  Offset? previewTextOffset;
   Offset? lassoHover;
 
   ViewTransform get transform => _transform;
@@ -1738,10 +1791,11 @@ class CanvasSession extends ChangeNotifier {
       'fit' => ViewTransform.fit(_imageSize, _viewport),
       'fit-width' => ViewTransform.fitWidth(_imageSize, _viewport),
       _ => ViewTransform(
-          scale: (_zoomMode as num)
-              .toDouble()
-              .clamp(ViewTransform.minScale, ViewTransform.maxScale),
+        scale: (_zoomMode as num).toDouble().clamp(
+          ViewTransform.minScale,
+          ViewTransform.maxScale,
         ),
+      ),
     };
     var target = next.clamped(
       _imageSize,
@@ -1753,11 +1807,11 @@ class CanvasSession extends ChangeNotifier {
     if (left != null && top != null) {
       _pendingScrollLeft = null;
       _pendingScrollTop = null;
-      target = ViewTransform(scale: next.scale, tx: -left, ty: -top).clamped(
-        _imageSize,
-        _viewport,
-        verticalMargin: _verticalMargin,
-      );
+      target = ViewTransform(
+        scale: next.scale,
+        tx: -left,
+        ty: -top,
+      ).clamped(_imageSize, _viewport, verticalMargin: _verticalMargin);
     }
     _transform = target;
     notifyListeners();
@@ -1784,27 +1838,21 @@ class CanvasSession extends ChangeNotifier {
       return;
     }
     _transform = focal == null
-        ? ViewTransform(scale: next).clamped(
-            _imageSize,
-            _viewport,
-            verticalMargin: _verticalMargin,
-          )
-        : _transform.zoomAt(next, focal).clamped(
-            _imageSize,
-            _viewport,
-            verticalMargin: _verticalMargin,
-          );
+        ? ViewTransform(
+            scale: next,
+          ).clamped(_imageSize, _viewport, verticalMargin: _verticalMargin)
+        : _transform
+              .zoomAt(next, focal)
+              .clamped(_imageSize, _viewport, verticalMargin: _verticalMargin);
     notifyListeners();
     onChanged();
   }
 
   void panBy(ui.Offset delta) {
     if (_imageSize.isEmpty) return;
-    final next = _transform.translated(delta).clamped(
-          _imageSize,
-          _viewport,
-          verticalMargin: _verticalMargin,
-        );
+    final next = _transform
+        .translated(delta)
+        .clamped(_imageSize, _viewport, verticalMargin: _verticalMargin);
     if (next == _transform) return;
     _transform = next;
     notifyListeners();
@@ -1848,6 +1896,12 @@ class CanvasSession extends ChangeNotifier {
     notifyListeners();
   }
 
+  void setPreviewText(String? regionId, Offset? offset) {
+    previewTextId = regionId;
+    previewTextOffset = offset;
+    notifyListeners();
+  }
+
   void setLassoHover(ui.Offset? point) {
     lassoHover = point;
     notifyListeners();
@@ -1860,6 +1914,8 @@ class CanvasSession extends ChangeNotifier {
     previewRotation = null;
     previewWarpId = null;
     previewWarpPoints = null;
+    previewTextId = null;
+    previewTextOffset = null;
     notifyListeners();
   }
 

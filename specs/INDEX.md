@@ -17,13 +17,13 @@
 |---|---|
 | 030 | `T024`: приёмка cu128 на Windows (cu130 уже принят в 033; оба профиля остаются в runtime). |
 | 032 | `T025`: installer smoke. `T027` (v1.0.1) исторический и заменён 1.0.2/1.0.5. |
-| 036 | Flutter parity инспектора; web-версия закрыта (10/10). |
+| 036 | Реальная приёмка Flutter EXE; Flutter parity инспектора реализован, web закрыт (10/10). |
 | 037 | Firefox и живой Reddit; синтетический Chromium закрыт (4/4). |
-| 038 | Flutter parity `text_position`; web/backend закрыты (7/7). |
-| 039 | `T001` WebView2/GPU memory и Flutter mesh preview; web renderer закрыт (7/8). |
-| 044 | `T011` чистая подготовка профиля и Flutter parity первого запуска; web закрыт (12/13). |
+| 038 | Реальная приёмка Flutter EXE; `text_position` и жест перемещения реализованы, web/backend закрыты (7/7). |
+| 039 | `T001` WebView2/GPU memory и визуальная приёмка; Flutter draft mesh preview реализован, web закрыт (7/8). |
+| 044 | `T011` чистая подготовка + реальная приёмка Flutter EXE; профили local/server/offline реализованы (12/13). |
 | 045 | `T010` чистый Linux/systemd и CT113; реализация и fake-root сценарии закрыты (9/10). |
-| 048 | `T004`/`T005` и Flutter-вкладки; web-вкладки закрыты (3/5). |
+| 048 | `T004`/`T005`; Flutter-вкладки реализованы, web закрыт (3/5). |
 
 `023 T016` переведён в `deferred` (jank-профиль, не блокер). `031 T020` заменён решением по CUDA в 030/033. `001` — исторический baseline-аудит, не текущий долг.
 
@@ -66,19 +66,19 @@
 | 033-reliable-component-delivery | backend + deploy | accepted | [tasks](033-reliable-component-delivery/tasks.md) 28/28 | Windows/CUDA/Linux приёмка записана |
 | 034-readable-balloon-layout | backend | implemented | [tasks](034-readable-balloon-layout/tasks.md) 8/8; [results](../docs/BALLOON_LAYOUT_RESULTS.md) | — |
 | 035-rectangular-text-layout | backend | implemented | [tasks](035-rectangular-text-layout/tasks.md) 9/9; [results](../docs/RECTANGULAR_LAYOUT_RESULTS.md) | — |
-| 036-inspector-redesign | web → Flutter | blocked-acceptance | [tasks](036-inspector-redesign/tasks.md) 10/10; [research](036-inspector-redesign/research.md) | Flutter parity инспектора |
+| 036-inspector-redesign | web → Flutter | blocked-acceptance | [tasks](036-inspector-redesign/tasks.md) 10/10; Flutter parity реализован | Реальная приёмка Flutter EXE |
 | 037-extension-overlay | extension | blocked-acceptance | [tasks](037-extension-overlay/tasks.md) 4/4; [research](037-extension-overlay/plan.md) | Firefox и живой Reddit |
-| 038-text-placement | web + backend → Flutter | blocked-acceptance | [tasks](038-text-placement/tasks.md) 7/7; [research](038-text-placement/plan.md) | Flutter parity `text_position` |
-| 039-local-mesh-preview | web → Flutter | blocked-acceptance | [tasks](039-local-mesh-preview/tasks.md) 7/8; [research](039-local-mesh-preview/research.md) | `T001` WebView2/GPU memory + Flutter mesh preview |
+| 038-text-placement | web + backend → Flutter | blocked-acceptance | [tasks](038-text-placement/tasks.md) 7/7; Flutter `text_position` реализован | Реальная приёмка Flutter EXE |
+| 039-local-mesh-preview | web → Flutter | blocked-acceptance | [tasks](039-local-mesh-preview/tasks.md) 7/8; Flutter draft mesh preview реализован | `T001` WebView2/GPU memory + визуальная приёмка |
 | 040-bounded-prefetch | backend | implemented | [tasks](040-bounded-prefetch/tasks.md) 7/7 | — |
 | 041-performance-instrumentation | backend | implemented | [tasks](041-performance-instrumentation/tasks.md) 6/6; [research](041-performance-instrumentation/research.md) | — |
 | 042-bounded-render-cache | backend | implemented | [tasks](042-bounded-render-cache/tasks.md) 7/7 | — |
 | 043-preview-compose | backend | implemented | [tasks](043-preview-compose/tasks.md) 3/3; [research](043-preview-compose/research.md) | — |
-| 044-first-run-profiles | web → Flutter | blocked-acceptance | [tasks](044-first-run-profiles/tasks.md) 12/13; [research](044-first-run-profiles/research.md) | `T011` чистая подготовка + Flutter parity |
+| 044-first-run-profiles | web → Flutter | blocked-acceptance | [tasks](044-first-run-profiles/tasks.md) 12/13; профили local/server/offline в Flutter | `T011` чистая подготовка + реальная приёмка Flutter EXE |
 | 045-linux-service-deployment | deploy | blocked-acceptance | [tasks](045-linux-service-deployment/tasks.md) 9/10; [research](045-linux-service-deployment/research.md) | `T010` Linux/systemd/CT113 |
 | 046-windows-staged-update | deploy | implemented | [tasks](046-windows-staged-update/tasks.md) 11/11; [research](046-windows-staged-update/research.md) | Linux/installer GUI остаются в 032/045 |
 | 047-incremental-typeset-composition | backend | implemented | [tasks](047-incremental-typeset-composition/tasks.md) 20/20; [research](047-incremental-typeset-composition/research.md) | — |
-| 048-sidebar-tabs | web → Flutter | in-progress | [tasks](048-sidebar-tabs/tasks.md) 3/5; [research](048-sidebar-tabs/research.md) | `T004`/`T005` и Flutter-вкладки |
+| 048-sidebar-tabs | web → Flutter | in-progress | [tasks](048-sidebar-tabs/tasks.md) 3/5; Flutter-вкладки реализованы | `T004`/`T005` |
 
 ## Правило приёмки
 
