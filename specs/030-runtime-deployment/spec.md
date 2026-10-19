@@ -4,7 +4,9 @@
 
 **Created**: 2026-10-11
 
-**Status**: Draft
+**Status**: Blocked-acceptance
+
+> Open gate: T024 cu128 acceptance. cu130 acceptance is recorded in 033; both runtime profiles remain available.
 
 **Input**: План «универсальный релиз 1.0.0 с развёртыванием (ComfyUI-подход)»: база без torch/Argos-стека, тяжёлые рантаймы — отдельными `.7z`-ассетами в `<install_root>/runtime/`, скачиваются кнопкой в мастере/настройках или через CLI `--deploy`. CUDA-пак cu128 (RTX 20–50, драйвер ≥ 570). AMD/Intel в 1.0.0 — только CPU. После установки CUDA-пака `device=auto` сам выбирает CUDA (снять frozen→cpu shortcut, fallback cuda→cpu оставить). Argos-рантайм — отдельным паком; языковые модели Argos качает сам в `data/argos-packages` (портативно).
 

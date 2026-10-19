@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-10
 
-**Status**: Draft
+**Status**: Implemented
 
 **Input**: User description: "Portable project as a ZIP containing JSON markup and page images; Save / Load / Close; drag-reorder pages in the left preview list; persist order via numbered filename prefixes like 0001_ in the package. Integrate via Spec Kit / SDD."
 

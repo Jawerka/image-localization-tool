@@ -2,6 +2,7 @@
 
 **Branch**: `009-deploy-extension-inno`  
 **Created**: 2026-10-09  
+**Status**: Implemented
 **Input**: Inventory 16/18 — script to deploy unpacked Chromium extension beside apps; clear Inno Setup presence check so installer builds are intentional, not surprise skips.
 
 ## User Stories

@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-10
 
-**Status**: Draft
+**Status**: Implemented
 
 **Input**: User description: "Dialogue cleanup shows rectangular corners outside the speech bubble and a visible outlined ring inside near the stroke. Improve bubble interior contour so the retouch mask stays inside the real outline and reaches near the inner edge (no large leftover ring)."
 

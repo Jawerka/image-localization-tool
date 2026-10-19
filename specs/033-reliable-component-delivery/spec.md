@@ -2,7 +2,7 @@
 
 **Feature Branch**: `033-reliable-component-delivery`
 **Created**: 2026-10-14
-**Status**: Accepted for implementation
+**Status**: Accepted
 **Input**: Подготовить проект по `docs/DOWNLOAD_DELIVERY_PLAN.md` и приложенному пользователем плану.
 
 ## User Scenarios & Testing

@@ -1,7 +1,7 @@
 # Feature Specification: Прямоугольные текстовые блоки
 **Feature Branch**: `codex/035-rectangular-text-layout`
 **Created**: 2026-10-18
-**Status**: Approved for implementation by user request
+**Status**: Implemented
 **Input**: Исследовать и улучшить перевод скриншотов dwSuivL и 080_4, текст должен помещаться примерно в исходных рамках; проверить 1005, 001_eng, 002_eng обновлённым алгоритмом.
 ## User Scenarios & Testing
 ### User Story 1 — Читаемый перевод скриншота (Priority: P1)

@@ -9,7 +9,7 @@
 ## Technical Context
 
 **Language/Version**: Python 3.10–3.13 (проектный диапазон), браузерный JavaScript ES modules  
-**Primary Dependencies**: FastAPI, существующий preparation coordinator, WebView2/web UI  
+**Primary Dependencies**: Python stdlib `http.server` (`ThreadingHTTPServer`), существующий preparation coordinator, WebView2/web UI  
 **Storage**: существующий локальный Config и состояние preparation; новые сущности хранения не вводятся  
 **Testing**: pytest API/UI tests, Node syntax check  
 **Target Platform**: Windows desktop/WebView2 и браузерный интерфейс приложения  

@@ -25,6 +25,7 @@ $version = (& $Python -c 'from scripts.smoke_dist import read_app_version; print
 if (-not $Tag) { $Tag = "v$version" }
 $manifest = "dist\ilt-runtime-manifest-$version.json"
 $components = "dist\ilt-component-manifest-$version.json"
+$notesFile = "docs\RELEASE_NOTES_$version.md"
 if ($DryRun) {
     Checked { & $Python 'scripts\build-runtime-manifest.py' } 'validate fixed catalog'
     Copy-Item -LiteralPath 'src\app\component_manifest.json' -Destination $components -Force
@@ -34,6 +35,9 @@ if ($DryRun) {
     exit 0
 }
 if ($Prepare) {
+    if (-not (Test-Path -LiteralPath $notesFile)) { throw "Missing release notes: $notesFile" }
+    $dirtyBefore = (& git status --porcelain --untracked-files=all | Out-String).Trim()
+    if ($dirtyBefore) { throw 'Working tree is dirty before release prepare; commit or stash first.' }
     Checked { & $Python 'scripts\build-runtime-manifest.py' } 'final catalogs before packaging'
     Copy-Item -LiteralPath 'src\app\component_manifest.json' -Destination $components -Force
     Checked { & $Python 'scripts\check_release.py' --manifest $manifest --components $components --anonymous } 'anonymous dependency gate'
@@ -62,7 +66,7 @@ if ($Prepare) {
     $ErrorActionPreference = $probeEap
     if ($viewExit -eq 0 -and $existing -eq 'false') { throw 'This release is already public; use a new version.' }
     if ($viewExit -ne 0) {
-        Checked { & gh release create $Tag --draft --target $commit --title $version --notes-file "docs\RELEASE_NOTES_$version.md" } 'create draft'
+        Checked { & gh release create $Tag --draft --target $commit --title $version --notes-file $notesFile } 'create draft'
     }
     $dispatchTime = (Get-Date).ToUniversalTime().AddSeconds(-2)
     Checked { & gh workflow run 'release.yml' --ref $branch -f "tag=$Tag" -f "source_ref=$commit" } 'Linux CI from exact source'

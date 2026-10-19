@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-10
 
-**Status**: Draft
+**Status**: Implemented
 
 **Input**: Port shell v2 from `web/mockups/next` into live `web/`: CSS/HTML plus JS wiring for floating dock, collapsible panels, popovers; preserve or sync `data-role` for e2e/JS tests; generate `tokens.json` from live tokens; parity map for keys/gestures; Flutter out of scope.
 

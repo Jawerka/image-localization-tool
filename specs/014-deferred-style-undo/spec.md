@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-10
 
-**Status**: Draft
+**Status**: Implemented
 
 **Input**: User description: "Expand Done so style settings in the right panel also wait for confirmation. Mask edits before Done must undo/redo one step at a time (Ctrl+Z / UI arrows), not wipe the whole pre-Done session."
 

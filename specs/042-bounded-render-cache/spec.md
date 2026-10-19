@@ -2,7 +2,7 @@
 
 **Feature Branch**: `codex/042-bounded-render-cache`
 **Created**: 2026-10-18
-**Status**: Ready
+**Status**: Implemented
 **Input**: Кэшировать повторно используемые страницы и текстовые preview с лимитом памяти и точной инвалидизацией.
 
 ## User Scenarios & Testing

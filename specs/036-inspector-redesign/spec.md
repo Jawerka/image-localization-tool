@@ -2,7 +2,10 @@
 
 **Feature Branch**: `codex/036-inspector-redesign`
 **Created**: 2026-10-18
-**Status**: Ready
+**Status**: Blocked-acceptance
+
+> Web implementation is complete; Flutter inspector parity is required for the 1.0.5 release.
+
 **Input**: Улучшить UI, особенно правые блоки работы с текстом и стилями.
 
 ## User Scenarios & Testing

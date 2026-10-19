@@ -36,7 +36,7 @@
 
 - [x] T018 Сборка базы: setup **154.1 МБ** (≤ 220)
 - [x] T019 Сборка CPU-пака win + установка в `runtime/` + frozen-сайдкар `torch_ready=true`
-- [ ] T020 CUDA-пак win собран; GPU-проверка LaMa на RTX 5060 (см. 030 T024)
+- [~] T020 CUDA-пак win собран; GPU-проверка LaMa на RTX 5060 (см. 030 T024) (superseded by 033/current release)
 - [x] T021 Portable/server smoke: распаковка в чистый каталог; `--deploy cpu` кладёт пак внутрь каталога
 - [x] T022 Полный pytest + flutter — зелёные
 

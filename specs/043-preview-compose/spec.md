@@ -2,7 +2,7 @@
 
 **Feature Branch**: `043-preview-compose`
 **Created**: 2026-10-18
-**Status**: Ready
+**Status**: Implemented
 **Input**: Reduce preview composition memory while preserving full-render pixels.
 
 ## User Scenarios & Testing

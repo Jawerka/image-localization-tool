@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-10
 
-**Status**: Draft
+**Status**: Implemented
 
 **Input**: Manual translation must autosave (not wait for Done) and always paint in the box even when OCR/VLM failed or original text is empty.
 

@@ -140,6 +140,9 @@ def build() -> None:
     chromium = _load_manifest(EXT_DIR / "manifest.chromium.json")
     firefox = _load_manifest(EXT_DIR / "manifest.firefox.json")
     _check_manifests(chromium, firefox)
+    version = read_app_version(ROOT)
+    chromium["version"] = version
+    firefox["version"] = version
 
     chromium_dir = DIST_DIR / "chromium"
     firefox_dir = DIST_DIR / "firefox"
@@ -151,7 +154,6 @@ def build() -> None:
     _write_manifest(firefox_dir, firefox)
     _write_icons(chromium_dir / "icons", firefox_dir / "icons", EXT_DIR / "icons")
 
-    version = read_app_version(ROOT)
     DIST_DIR.mkdir(parents=True, exist_ok=True)
     _zip_tree(chromium_dir, DIST_DIR / f"ilt-extension-chromium-{version}.zip")
     _zip_tree(firefox_dir, DIST_DIR / f"ilt-extension-firefox-{version}.zip")

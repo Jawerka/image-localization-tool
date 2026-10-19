@@ -4,7 +4,9 @@
 
 **Created**: 2026-10-11
 
-**Status**: Draft
+**Status**: Superseded
+
+> Superseded by 032/033 and the current 1.0.5 release checklist.
 
 **Input**: План «универсальный релиз 1.0.0 с развёртыванием (ComfyUI-подход)»: база (Flutter-хост + sidecar без torch/Argos + web + fonts), паки отдельными `.7z`-ассетами, portable/server zip, Linux-бинарник в CI, расширения chromium/firefox, `SHA256SUMS.txt`, `ilt-runtime-manifest-1.0.0.json`. Инсталлятор Inno с `lzma2/ultra64`. Тег `v1.0.0`: старый черновик и remote-тег удаляются, финальный тег ставится на итоговый коммит.
 

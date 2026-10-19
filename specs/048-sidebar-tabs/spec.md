@@ -2,7 +2,10 @@
 
 **Feature Branch**: `048-sidebar-tabs`
 **Created**: 2026-10-19
-**Status**: Draft
+**Status**: In Progress
+
+> Web tabs are implemented; T004/T005 and Flutter tabs parity remain.
+
 **Input**: User description: "Слева давай очередь переделаем по вкладку, т.е. одна вкладка \"Страницы\" и вторая вкладка \"Очередь\""
 
 ## User Scenarios & Testing

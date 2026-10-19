@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-09
 
-**Status**: Draft
+**Status**: Implemented
 
 **Input**: User description: "Закрыть подтверждённые пробелы baseline-контракта: диалог в облачке не sfx, RapidOCR free-text→sign, кольцо LaMa без захвата соседнего текста; убрать устаревшие пункты про кнопку расширения из PROBLEMS.md. Flutter и прочий wishlist вне скоупа."
 

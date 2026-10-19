@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-18
 
-**Status**: Ready
+**Status**: Implemented
 
 **Input**: Roadmap task T22 requires a Windows update path that stages a candidate, validates it, preserves user data, and restores the previous working release if health validation fails.
 

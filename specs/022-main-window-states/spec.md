@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-10
 
-**Status**: Draft
+**Status**: Implemented
 
 **Input**: Plan: Flutter host ports `web/mockups/next` screens. This feature fixes the 022–025 split: **022 = main window container states** (empty, editor, chapter in batch), **023 = viewer/scene** (after a mandatory jank spike), **024 = inspector**, **025 = secondary screens** (settings, glossary, export, remote, style, sfx, batch-run report, first-run), dialogs and modal file flows. Mechanics: `ChangeNotifier` only, tokens checked against `web/tokens.json`, REST/SSE from 021. Scene shows a page-card placeholder here; real page rendering is 023. Inspector rail renders header + awaiting states; region cards are 024.
 

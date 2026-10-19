@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-09
 
-**Status**: Draft
+**Status**: Implemented
 
 **Input**: User description: "Page editor and typesetting debt from PROBLEMS.md excluding Flutter shell: keep result during re-layout, Done for accumulated edits, blue brush preview, first layout without rotation/warp for ordinary text, rotation about text-field center, balloon fill and short-reply sizing, warp labels and mesh, style on block card, small-page scale; verify prior SFX/reset-style fixes. Flutter shell out of scope."
 

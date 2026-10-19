@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-09
 
-**Status**: Draft
+**Status**: Implemented
 
 **Input**: User description: "Inspector card UI stability across full HTML rebuild (preserve open/focus/scroll for card details); automated e2e for local mask draft while editing and «Готово» (deferApply commit). Closes tech-debt C11–C13. Flutter out of scope."
 
