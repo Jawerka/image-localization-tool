@@ -24,7 +24,8 @@ def source_digest(root: Path) -> str:
     for name in ("src", "scripts", "web", "extension", "locks", "assets", "installer", ".github/workflows", "apps/desktop/lib", "apps/desktop/windows"):
         folder = root / name
         paths += [p for p in folder.rglob("*") if p.is_file() and "__pycache__" not in p.parts
-                  and "node_modules" not in p.parts and p.suffix not in (".pyc", ".log")]
+                  and "node_modules" not in p.parts and "ephemeral" not in p.parts
+                  and p.suffix not in (".pyc", ".log")]
     paths += list(root.glob("requirements*.txt"))
     paths += [root / "apps/desktop/pubspec.yaml", root / "apps/desktop/pubspec.lock"]
     paths.append(root / "ImageLocalizationTool.spec")
