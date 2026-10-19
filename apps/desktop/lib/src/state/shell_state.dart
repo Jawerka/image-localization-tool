@@ -284,6 +284,8 @@ class ShellState extends ChangeNotifier {
             secondary.applyPreparationProgress(payload);
           case 'job.finished':
             secondary.applyJobFinished(payload);
+          case 'job.failed':
+            secondary.applyJobFailed(payload);
           case 'worker.failed':
             final message =
                 '${payload['message'] ?? payload['error'] ?? payload['reason'] ?? ''}'

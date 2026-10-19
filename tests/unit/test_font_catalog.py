@@ -17,6 +17,7 @@ from src.components.font_catalog import (
     FONT_ROLE_SFX_TECH,
     FONT_ROLE_SHOUT,
     FONT_ROLE_STENCIL,
+    FONT_ROLE_TITLE,
     assign_stylized_fonts,
     categorize,
     find_font,
@@ -103,7 +104,7 @@ def test_role_font_id_matches_docs_plan():
         )
         == FONT_ROLE_DIALOGUE
     )
-    assert role_font_id(TextRegion(id=5, bbox=(0, 0, 1, 1), text="TITLE", block_type="title")) == FONT_ROLE_SHOUT
+    assert role_font_id(TextRegion(id=5, bbox=(0, 0, 1, 1), text="TITLE", block_type="title")) == FONT_ROLE_TITLE
     assert role_font_id(TextRegion(id=6, bbox=(0, 0, 1, 1), text="DANGER", block_type="sign")) == FONT_ROLE_STENCIL
     assert role_font_id(TextRegion(id=7, bbox=(0, 0, 1, 1), text="note", block_type="sign")) == FONT_ROLE_HANDWRITTEN
     assert role_font_id(TextRegion(id=8, bbox=(0, 0, 1, 1), text="beep", block_type="noise")) == FONT_ROLE_PIXEL
@@ -117,6 +118,7 @@ def test_assign_stylized_fonts_trial_and_kill_switch(tmp_path):
         (FONT_ROLE_SFX_COMEDY, "Unsightly"),
         (FONT_ROLE_SFX_TECH, "Liber Struct"),
         (FONT_ROLE_HANDWRITTEN, "First Time Writing"),
+        (FONT_ROLE_TITLE, "Jupiteroid Light"),
         (FONT_ROLE_SHOUT, "Blaec"),
         (FONT_ROLE_STENCIL, "Operation Napalm"),
         (FONT_ROLE_DIALOGUE, "Heroika"),
@@ -135,17 +137,19 @@ def test_assign_stylized_fonts_trial_and_kill_switch(tmp_path):
     locked = TextRegion(id=6, bbox=(0, 0, 10, 10), text="X", block_type="sfx")
     locked.style.font_id = "Custom"
     edited = TextRegion(id=7, bbox=(0, 0, 10, 10), text="Y", block_type="sfx", edited=True)
+    title = TextRegion(id=8, bbox=(0, 0, 10, 10), text="Chapter", block_type="title")
 
-    assign_stylized_fonts([sfx, laugh, free, caps, bubble, locked, edited], faces=faces)
+    assign_stylized_fonts([sfx, laugh, free, caps, bubble, locked, edited, title], faces=faces)
     assert sfx.style.font_id == FONT_ROLE_SFX
     assert laugh.style.font_id == FONT_ROLE_SFX_COMEDY
     assert free.style.font_id == FONT_ROLE_HANDWRITTEN
     assert caps.style.font_id == FONT_ROLE_STENCIL
     assert bubble.style.font_id == FONT_ROLE_DIALOGUE
+    assert title.style.font_id == FONT_ROLE_TITLE
     assert locked.style.font_id == "Custom"
     assert edited.style.font_id == ""
 
-    plain = TextRegion(id=8, bbox=(0, 0, 10, 10), text="Z", block_type="sfx")
+    plain = TextRegion(id=9, bbox=(0, 0, 10, 10), text="Z", block_type="sfx")
     assign_stylized_fonts([plain], enabled=False, faces=faces)
     assert plain.style.font_id == ""
 

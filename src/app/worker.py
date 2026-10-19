@@ -13,11 +13,12 @@ import os
 import queue
 import threading
 import time
+from contextlib import nullcontext
 from pathlib import Path
 
 from PIL import Image
 
-from src.app.document import PageDocument
+from src.app.document import PageDocument, diff_plan
 from src.app.events import (
     JOB_CANCELLED,
     JOB_FAILED,
@@ -29,12 +30,13 @@ from src.app.events import (
     WORKER_RESTARTING,
     WorkerEvent,
 )
-from src.app.jobs import BATCH_KINDS, Job, skip_ready
+from src.app.jobs import BATCH_KINDS, REGION_KINDS, Job, skip_ready
 from src.app.store import ProjectStore, VersionConflict
 from src.errors import PipelineCancelled
 from src.models import TextRegion
 
 _TERMINAL = frozenset({JOB_FINISHED, JOB_FAILED, JOB_CANCELLED})
+_EXPORT_WAIT_SECONDS = 60.0
 logger = logging.getLogger("ilt.app.worker")
 
 
@@ -66,14 +68,15 @@ class _Runtime:
         self.lama_lock = threading.Lock()
         self.llm_lock = threading.Lock()
         self.typeset_lock = threading.Lock()
+        # Результат и его provenance меняются вместе; экспорт копирует под этим замком.
+        self.result_lock = threading.Lock()
         self.cancel_all = False
         self.cancelled_ids: set[str] = set()
-        self.running = {"batch": False, "edit": False}
+        self.running = {"batch": False, "edit": False, "export": False}
         # Задание уже снято с очереди полосы, но ещё не начато (ждёт паузу).
-        self.held = {"batch": None, "edit": None}
+        self.held = {"batch": None, "edit": None, "export": None}
         self.pipeline = None
         self.clients_sig = None
-        self.page_id = ""
         # Снят — можно брать следующее задание. Пауза его очищает.
         self.run_gate = threading.Event()
         self.run_gate.set()
@@ -115,6 +118,17 @@ class _Runtime:
             jobs = [job for job in self.held.values() if isinstance(job, dict)]
         return any(self.should_skip(str(job.get("id") or "")) for job in jobs)
 
+    def busy_page_ids(self, exclude: str = "") -> set[str]:
+        """Страницы заданий, которые ещё держат другие полосы."""
+        with self.lock:
+            jobs = [job for job in self.held.values() if isinstance(job, dict)]
+        found: set[str] = set()
+        for job in jobs:
+            if exclude and str(job.get("id") or "") == exclude:
+                continue
+            found.update(_status_page_ids(job))
+        return found
+
     def emit(self, event: WorkerEvent) -> None:
         try:
             self.event_queue.put(event.to_dict())
@@ -145,7 +159,7 @@ class _Runtime:
             self.held[lane] = None
             self.cancelled_ids.discard(job_id)
             pending = any(self.held.values())
-            busy = self.running["batch"] or self.running["edit"] or pending
+            busy = self.running["batch"] or self.running["edit"] or self.running["export"] or pending
             if not busy and not self.cancelled_ids:
                 self.cancel_all = False
                 self.cancel_event.clear()
@@ -451,7 +465,10 @@ class ProcessWorker:
         self._commands.put({"cmd": "cancel", "job_id": job_id})
         if self._wait_idle(3.0, job_id):
             return
-        self._restart_stuck(resubmit_edits=job_id is not None)
+        self._restart_stuck(
+            resubmit_edits=job_id is not None,
+            cancelled_id=job_id,
+        )
 
     def _abandon_inflight(self, error: str) -> None:
         """Процесс умер: закрыть задания и отпустить слот очереди."""
@@ -487,6 +504,15 @@ class ProcessWorker:
             if not self._wait_idle(0.1, None):
                 raise RuntimeError("Дождитесь завершения обработки перед сменой компонентов")
             self._stop_process()
+        elif process is not None:
+            # Процесс умер между заданиями: listener мог не успеть закрыть
+            # inflight. Новый процесс поднимаем до событий об ошибке, иначе
+            # обработчик события может рекурсивно вызвать submit.
+            self._stop_process()
+            self._runtime_signature = signature
+            self._start()
+            self._abandon_inflight("Процесс воркера завершился")
+            return
         self._runtime_signature = signature
         self._start()
 
@@ -566,21 +592,43 @@ class ProcessWorker:
             time.sleep(0.05)
         return False
 
-    def _restart_stuck(self, *, resubmit_edits: bool = True) -> None:
+    def _restart_stuck(
+        self,
+        *,
+        resubmit_edits: bool = True,
+        cancelled_id: str | None = None,
+    ) -> None:
         with self._lock:
             pending = list(self._inflight.values())
             self._inflight.clear()
-        edits = [item for item in pending if item.get("kind") not in BATCH_KINDS]
-        batches = [item for item in pending if item.get("kind") in BATCH_KINDS]
-        # Полный «Стоп» уже выкинул правки из очереди. Возвращать их нельзя.
-        dropped = batches if resubmit_edits else pending
-        kept = edits if resubmit_edits else []
+        dropped: list[dict] = []
+        kept: list[dict] = []
+        selected = str(cancelled_id or "")
+        for item in pending:
+            if selected and str(item.get("id") or "") == selected:
+                dropped.append(item)
+            elif item.get("kind") in BATCH_KINDS:
+                dropped.append(item)
+            elif resubmit_edits:
+                kept.append(item)
+            else:
+                # Полный «Стоп» уже выкинул правки из очереди. Возвращать их нельзя.
+                dropped.append(item)
+        busy_pages = {
+            page_id
+            for item in kept
+            for page_id in _status_page_ids(item)
+        }
         self._stop_process()
         for item in dropped:
-            for page_id in _close_stuck_pages(
-                item, current_id="", error="", fail_current=False, running_status="idle",
-            ):
-                self._emit(WorkerEvent(PAGE_UPDATED, _page_update(_store(item), item, page_id)))
+            store = None
+            try:
+                store = _store(item)
+            except Exception:
+                pass
+            if store is not None:
+                for page_id in _settle_cancelled_pages(item, busy=busy_pages):
+                    self._emit(WorkerEvent(PAGE_UPDATED, _page_update(store, item, page_id)))
             cancelled = WorkerEvent(JOB_CANCELLED, _dict_ids(item))
             self._emit(cancelled)
             _notify_page_done(self, item, cancelled)
@@ -588,6 +636,20 @@ class ProcessWorker:
             return
         if not self.policy.allow(time.time()):
             for item in kept:
+                store = None
+                try:
+                    store = _store(item)
+                except Exception:
+                    pass
+                if store is not None:
+                    for page_id in _close_stuck_pages(
+                        item,
+                        current_id="",
+                        error="Воркер не перезапущен",
+                        fail_current=False,
+                        running_status="error",
+                    ):
+                        self._emit(WorkerEvent(PAGE_UPDATED, _page_update(store, item, page_id)))
                 failed = WorkerEvent(
                     JOB_FAILED,
                     {**_dict_ids(item), "error": "Воркер не перезапущен"},
@@ -630,6 +692,7 @@ def worker_main(command_queue, event_queue, parent_pid: int) -> None:
     ctx = _Runtime(event_queue)
     batch_queue: queue.Queue = queue.Queue()
     edit_queue: queue.Queue = queue.Queue()
+    export_queue: queue.Queue = queue.Queue()
     threading.Thread(
         target=_lane_loop,
         args=("batch", batch_queue, ctx),
@@ -642,6 +705,12 @@ def worker_main(command_queue, event_queue, parent_pid: int) -> None:
         name="ilt-edits",
         daemon=True,
     ).start()
+    threading.Thread(
+        target=_lane_loop,
+        args=("export", export_queue, ctx),
+        name="ilt-export",
+        daemon=True,
+    ).start()
     while True:
         command = command_queue.get()
         if not isinstance(command, dict):
@@ -651,6 +720,7 @@ def worker_main(command_queue, event_queue, parent_pid: int) -> None:
             ctx.request_stop()
             batch_queue.put(None)
             edit_queue.put(None)
+            export_queue.put(None)
             return
         if kind == "pause":
             ctx.pause_lane()
@@ -659,11 +729,16 @@ def worker_main(command_queue, event_queue, parent_pid: int) -> None:
             ctx.resume_lane()
             continue
         if kind == "cancel":
-            _cancel_lanes(ctx, batch_queue, edit_queue, command.get("job_id"))
+            _cancel_lanes(ctx, batch_queue, edit_queue, export_queue, command.get("job_id"))
             continue
         if kind == "submit":
             job = command.get("job") or {}
-            target = batch_queue if job.get("kind") in BATCH_KINDS else edit_queue
+            if job.get("kind") in BATCH_KINDS:
+                target = batch_queue
+            elif job.get("kind") == "export":
+                target = export_queue
+            else:
+                target = edit_queue
             target.put(job)
 
 
@@ -708,7 +783,13 @@ def _lane_loop(lane: str, work_queue: queue.Queue, ctx: _Runtime) -> None:
             ctx.finish_job(lane, job_id)
 
 
-def _cancel_lanes(ctx: _Runtime, batch_queue: queue.Queue, edit_queue: queue.Queue, job_id) -> None:
+def _cancel_lanes(
+    ctx: _Runtime,
+    batch_queue: queue.Queue,
+    edit_queue: queue.Queue,
+    export_queue: queue.Queue,
+    job_id,
+) -> None:
     selected = None if job_id is None else str(job_id)
     with ctx.lock:
         if selected is None:
@@ -718,12 +799,22 @@ def _cancel_lanes(ctx: _Runtime, batch_queue: queue.Queue, edit_queue: queue.Que
         ctx.cancel_event.set()
     removed = _pull_queued(batch_queue, selected)
     removed.extend(_pull_queued(edit_queue, selected))
+    removed.extend(_pull_queued(export_queue, selected))
     for job in removed:
         ctx.cancelled_ids.discard(str(job.get("id") or ""))
         ctx.emit(WorkerEvent(JOB_CANCELLED, _dict_ids(job)))
     with ctx.lock:
         pending = any(ctx.held.values())
-        busy = ctx.running["batch"] or ctx.running["edit"] or pending
+        held = {
+            str(job.get("id") or "")
+            for job in ctx.held.values()
+            if isinstance(job, dict)
+        }
+        # Задание, которого нет ни в очередях, ни в работе, не должно
+        # оставлять id в cancelled_ids: иначе cancel_all заклинит воркер.
+        if selected is not None and selected not in held and not removed:
+            ctx.cancelled_ids.discard(selected)
+        busy = ctx.running["batch"] or ctx.running["edit"] or ctx.running["export"] or pending
         if not busy and not ctx.cancelled_ids:
             ctx.cancel_all = False
             ctx.cancel_event.clear()
@@ -750,11 +841,12 @@ def _pull_queued(work_queue: queue.Queue, job_id: str | None) -> list[dict]:
 
 
 def _dispatch(job: dict, ctx: _Runtime) -> None:
-    ctx.page_id = str(job.get("page_id") or "")
+    page_id = str(job.get("page_id") or "")
     ctx.emit(WorkerEvent(JOB_STARTED, {
         **_dict_ids(job),
         "queue_wait_seconds": max(0.0, float(job.get("queue_wait_seconds") or 0.0)),
     }))
+    result: dict | None = None
     try:
         kind = job.get("kind")
         if kind in BATCH_KINDS:
@@ -764,19 +856,22 @@ def _dispatch(job: dict, ctx: _Runtime) -> None:
         elif kind in ("recognize", "retranslate", "shorten"):
             _run_region(job, ctx)
         elif kind == "export":
-            _run_export(job, ctx)
+            result = _run_export(job, ctx)
         else:
             raise RuntimeError(f"Неизвестное задание: {kind}")
     except PipelineCancelled:
         _report_stuck_pages(job, ctx, error="", fail_current=False)
-        ctx.emit(WorkerEvent(JOB_CANCELLED, _dict_ids(job, ctx.page_id or None)))
+        ctx.emit(WorkerEvent(JOB_CANCELLED, _dict_ids(job, page_id or None)))
         return
     except Exception as exc:
         _log_failure(exc)
         _report_stuck_pages(job, ctx, error=str(exc), fail_current=True)
-        ctx.emit(WorkerEvent(JOB_FAILED, {**_dict_ids(job, ctx.page_id or None), "error": str(exc)}))
+        ctx.emit(WorkerEvent(JOB_FAILED, {**_dict_ids(job, page_id or None), "error": str(exc)}))
         return
-    ctx.emit(WorkerEvent(JOB_FINISHED, _dict_ids(job, ctx.page_id or None)))
+    finished = _dict_ids(job, page_id or None)
+    if result:
+        finished.update(result)
+    ctx.emit(WorkerEvent(JOB_FINISHED, finished))
 
 
 def _run_translate(job: dict, ctx: _Runtime) -> None:
@@ -794,9 +889,13 @@ def _run_translate(job: dict, ctx: _Runtime) -> None:
 
 def _translate_page(job: dict, ctx: _Runtime, store: ProjectStore, page: dict) -> None:
     page_id = str(page.get("page_id") or job.get("page_id") or "")
-    ctx.page_id = page_id
     source = _source_for(store, job, page, page_id)
     project_id = str(job.get("project_id") or "")
+    try:
+        # Версия до анализа: ручная правка во время обработки должна победить.
+        base_version = store.read_document(project_id, page_id).version
+    except (FileNotFoundError, OSError, ValueError):
+        base_version = None
     store.update_status(project_id, page_id, status="running", progress=0, stage="load", error="")
     image = _open_rgb(source)
     progress = _progress(ctx, store, job, page_id)
@@ -819,6 +918,8 @@ def _translate_page(job: dict, ctx: _Runtime, store: ProjectStore, page: dict) -
     with ctx.llm_lock:
         _pipe, config, analyzed = analyze()
 
+    if check():
+        raise PipelineCancelled()
     document = PageDocument(
         version=1,
         regions=list(analyzed.regions),
@@ -840,15 +941,31 @@ def _translate_page(job: dict, ctx: _Runtime, store: ProjectStore, page: dict) -
             source,
             image=image,
             snapshot=True,
-            base_version=None,
+            base_version=base_version,
         )
         return
-    store.save_image(project_id, page_id, "result", image)
-    store.save_image(project_id, page_id, "thumb", image)
-    _commit(store, job, document, page_id, snapshot=True, base_version=None)
-    _finish_status(store, job, document, page_id)
+    if check():
+        raise PipelineCancelled()
+    saved = _commit_fresh(
+        store, job, document, page_id, snapshot=True, base_version=base_version,
+    )
+    if saved is None:
+        return
+    with _result_lock(ctx):
+        # Текста нет: чистый фон — сам оригинал, старые clean и маска не годятся.
+        store.save_image(project_id, page_id, "clean", image)
+        store.save_image(project_id, page_id, "result", image)
+        store.save_image(project_id, page_id, "thumb", image)
+        store.image_path(project_id, page_id, "mask").unlink(missing_ok=True)
+        store.record_result_provenance(
+            project_id,
+            page_id,
+            document_version=saved.version,
+            region_bounds={},
+        )
+    _finish_status(store, job, document, page_id, saved.version)
     ctx.emit(WorkerEvent(PAGE_UPDATED, _page_update(
-        store, job, page_id, plan="none", version=document.version,
+        store, job, page_id, plan="none", version=saved.version,
     )))
 
 
@@ -856,7 +973,6 @@ def _run_apply(job: dict, ctx: _Runtime) -> None:
     store = _store(job)
     payload = job.get("payload") or {}
     page_id = str(job.get("page_id") or "")
-    ctx.page_id = page_id
     plan = str(payload.get("plan") or "typeset")
     if plan not in ("clean", "typeset"):
         plan = "typeset"
@@ -886,9 +1002,16 @@ def _run_region(job: dict, ctx: _Runtime) -> None:
     store = _store(job)
     payload = job.get("payload") or {}
     page_id = str(job.get("page_id") or "")
-    ctx.page_id = page_id
     project_id = str(job.get("project_id") or "")
+    previous_status = str(payload.get("previous_status") or "")
+    check = ctx.cancel_check(str(job.get("id") or ""))
+    store.update_status(project_id, page_id, status="running", stage="region", error="")
     document = store.read_document(project_id, page_id)
+    # Клиент может не прислать версию: берём ту, что прочитали до LLM,
+    # иначе правка, сохранённая во время запроса, будет перезаписана.
+    base_version = _base_version(payload)
+    if base_version is None:
+        base_version = document.version
     region_id = int(payload["region_id"])
     region = next(item for item in document.regions if int(item.id) == region_id)
     old_text = region.text
@@ -902,7 +1025,7 @@ def _run_region(job: dict, ctx: _Runtime) -> None:
     def edit() -> None:
         pipe, config = _pipeline(ctx, job.get("settings") or {}, reset_clients=True)
         if kind == "recognize":
-            pipe.recognize_region(image, region)
+            pipe.recognize_region(image, region, cancel_check=check)
         elif kind == "retranslate":
             pipe.retranslate_region(
                 image,
@@ -910,13 +1033,21 @@ def _run_region(job: dict, ctx: _Runtime) -> None:
                 region_id,
                 "auto",
                 config.target_lang,
+                cancel_check=check,
             )
             notes.extend(getattr(pipe.translator, "warnings", []) or [])
         else:
-            pipe.shorten_region(region, config.target_lang)
+            pipe.shorten_region(
+                region, config.target_lang, cancel_check=check,
+            )
 
     with ctx.llm_lock:
+        if check():
+            raise PipelineCancelled()
         edit()
+
+    if check():
+        raise PipelineCancelled()
 
     if notes:
         document.warnings = list(document.warnings or []) + [
@@ -930,12 +1061,15 @@ def _run_region(job: dict, ctx: _Runtime) -> None:
     else:
         plan = ""
     if not plan:
+        if check():
+            raise PipelineCancelled()
         saved = _commit_fresh(
-            store, job, document, page_id, snapshot=False, base_version=_base_version(payload),
+            store, job, document, page_id, snapshot=False, base_version=base_version,
         )
         if saved is None:
             ctx.emit(WorkerEvent(PAGE_UPDATED, _page_update(store, job, page_id, plan="none")))
             return
+        restore_region_status(store, project_id, page_id, previous_status, saved)
         ctx.emit(WorkerEvent(PAGE_UPDATED, _page_update(
             store, job, page_id, plan="none", version=saved.version,
         )))
@@ -950,11 +1084,156 @@ def _run_region(job: dict, ctx: _Runtime) -> None:
         source,
         image=image,
         snapshot=False,
-        base_version=_base_version(payload),
+        base_version=base_version,
     )
 
 
-def _run_export(job: dict, ctx: _Runtime) -> None:
+def _wait_export_ready(
+    store: ProjectStore,
+    job: dict,
+    ctx: _Runtime,
+    *,
+    timeout: float,
+    pending_ok: bool = False,
+    blocked: dict[str, str] | None = None,
+) -> bool:
+    """Дождаться результата, зафиксированного в версии документа.
+
+    Экспорт идёт отдельной полосой, поэтому ожидание не держит правки.
+    Без provenance (старые страницы) годится только ``done``/``offline``:
+    иначе не отличить готовый результат от устаревшего. Окончательно
+    ошибочные страницы складываются в ``blocked``, чтобы остальные всё же
+    экспортировались; без ``blocked`` — исключение.
+    """
+    def reject(page_id: str, message: str) -> None:
+        if blocked is None:
+            raise RuntimeError(message)
+        blocked[page_id] = message
+
+    payload = job.get("payload") or {}
+    project_id = str(job.get("project_id") or "")
+    page_ids = [str(item) for item in payload.get("page_ids") or []]
+    if not page_ids:
+        return True
+    content = str(payload.get("content") or "result").lower()
+    if content not in ("result", "clean", "both"):
+        content = "result"
+    raw = payload.get("required_document_versions")
+    required: dict[str, int] = {}
+    if isinstance(raw, dict):
+        for key, value in raw.items():
+            if isinstance(value, int) and not isinstance(value, bool):
+                required[str(key)] = int(value)
+    try:
+        project = store.open_project(project_id)
+    except FileNotFoundError:
+        project = {"pages": []}
+    pages = {str(page.get("id") or ""): page for page in project.get("pages") or []}
+
+    archive = str(payload.get("archive") or "folder").lower()
+    if bool(payload.get("only_ready")) and archive in ("zip", "cbz"):
+        kept: list[str] = []
+        for page_id in page_ids:
+            record = pages.get(page_id)
+            status = record.get("status") if record is not None else None
+            if status is None:
+                try:
+                    status = store.page_status(project_id, page_id)["status"]
+                except (FileNotFoundError, OSError, ValueError):
+                    status = ""
+            if str(status).casefold() in ("done", "offline", "ready"):
+                kept.append(page_id)
+        page_ids = kept
+        if not page_ids:
+            return True
+
+    job_id = str(job.get("id") or "")
+    deadline = time.monotonic() + max(0.0, float(timeout))
+    notified: set[str] = set()
+    while True:
+        pending: list[tuple[str, str, str, dict]] = []
+        for page_id in page_ids:
+            try:
+                status = store.page_status(project_id, page_id)
+            except FileNotFoundError:
+                reject(page_id, f"Страница не найдена: {page_id}")
+                continue
+            state = str(status.get("status") or "idle")
+            name = str((pages.get(page_id) or {}).get("name") or page_id)
+            if state == "error":
+                detail = str(status.get("error") or "").strip()
+                reject(page_id, f"Страница «{name}»: {detail or 'ошибка обработки'}")
+                continue
+            if state in ("queued", "running"):
+                pending.append((page_id, name, state, status))
+                continue
+            if state == "idle":
+                reject(page_id, f"Страница не переведена: {name}")
+                continue
+            if content in ("result", "both"):
+                result_path = store.image_path(project_id, page_id, "result")
+                if not result_path.is_file():
+                    if state in ("done", "offline"):
+                        reject(page_id, f"Нет result.png: {name}")
+                        continue
+                    pending.append((page_id, name, state, status))
+                    continue
+                provenance = store.read_result_provenance(project_id, page_id)
+                if provenance is None:
+                    if state not in ("done", "offline"):
+                        pending.append((page_id, name, state, status))
+                        continue
+                elif int(provenance["document_version"]) < required.get(page_id, 0):
+                    pending.append((page_id, name, state, status))
+                    continue
+            if content in ("clean", "both"):
+                if state == "edited":
+                    pending.append((page_id, name, state, status))
+                    continue
+                clean_path = store.image_path(project_id, page_id, "clean")
+                if not clean_path.is_file():
+                    if state in ("done", "offline"):
+                        reject(page_id, f"Нет clean.png: {name}")
+                        continue
+                    pending.append((page_id, name, state, status))
+                    continue
+                clean_provenance = store.read_result_provenance(project_id, page_id)
+                if clean_provenance is None:
+                    # Старые страницы без provenance: доверяем только готовому статусу.
+                    if state not in ("done", "offline"):
+                        pending.append((page_id, name, state, status))
+                        continue
+                elif not store.clean_provenance_is_current(
+                    project_id, page_id, required.get(page_id, 0)
+                ):
+                    pending.append((page_id, name, state, status))
+                    continue
+        if not pending:
+            return True
+        if pending_ok:
+            return False
+        for page_id, _name, state, status in pending:
+            if state in ("queued", "running") and page_id not in notified:
+                notified.add(page_id)
+                ctx.emit(WorkerEvent(JOB_PROGRESS, {
+                    **_dict_ids(job, page_id),
+                    "progress": int(status.get("progress") or 0),
+                    "stage": "export-wait",
+                    "status": "running",
+                }))
+        if ctx.should_skip(job_id):
+            raise PipelineCancelled()
+        if time.monotonic() >= deadline:
+            raise RuntimeError(f"Результат ещё готовится: страница {pending[0][1]}")
+        time.sleep(0.1)
+
+
+def _result_lock(ctx: _Runtime):
+    lock = getattr(ctx, "result_lock", None)
+    return lock if lock is not None else nullcontext()
+
+
+def _run_export(job: dict, ctx: _Runtime) -> dict:
     payload = job.get("payload") or {}
     dest = payload.get("dest")
     if not dest:
@@ -965,45 +1244,89 @@ def _run_export(job: dict, ctx: _Runtime) -> None:
     quality = int(payload.get("jpeg_quality") or 90)
     content = str(payload.get("content") or "result")
     project_id = str(job.get("project_id") or "")
-    if archive in ("zip", "cbz"):
-        from src.app.export import export_archive
-
-        result = export_archive(
-            _store(job),
-            project_id,
-            page_ids,
-            Path(dest),
-            archive=archive,
-            fmt=fmt,
-            jpeg_quality=quality,
-            content=content,
-            name_template=str(payload.get("name_template") or "{chapter}/{index:03}_{stem}"),
-            only_ready=bool(payload.get("only_ready")),
+    store = _store(job)
+    skipped_errors: dict[str, str] = {}
+    job_id = str(job.get("id") or "")
+    check = ctx.cancel_check(job_id)
+    deadline = time.monotonic() + _EXPORT_WAIT_SECONDS
+    while True:
+        if ctx.should_skip(job_id):
+            raise PipelineCancelled()
+        remaining = max(0.0, deadline - time.monotonic())
+        _wait_export_ready(
+            store, job, ctx, timeout=remaining, blocked=skipped_errors,
         )
-    else:
-        from src.app.export import export_pages
+        with _result_lock(ctx):
+            if ctx.should_skip(job_id):
+                raise PipelineCancelled()
+            # Повторная проверка под тем же замком, что и запись clean/result:
+            # между ожиданием и копированием мог пройти новый рендер.
+            if not _wait_export_ready(
+                store, job, ctx, timeout=0, pending_ok=True,
+                blocked=skipped_errors,
+            ):
+                continue
+            if skipped_errors:
+                page_ids = [
+                    item for item in page_ids if item not in skipped_errors
+                ]
+            if archive in ("zip", "cbz"):
+                from src.app.export import export_archive
 
-        result = export_pages(
-            _store(job),
-            project_id,
-            page_ids,
-            Path(dest),
-            fmt,
-            quality,
-            str(payload.get("conflict") or "rename"),
-            content=content,
-        )
-    if result.errors:
-        raise RuntimeError("; ".join(result.errors))
+                result = export_archive(
+                    store,
+                    project_id,
+                    page_ids,
+                    Path(dest),
+                    archive=archive,
+                    fmt=fmt,
+                    jpeg_quality=quality,
+                    content=content,
+                    name_template=str(payload.get("name_template") or "{chapter}/{index:03}_{stem}"),
+                    only_ready=bool(payload.get("only_ready")),
+                    cancel_check=check,
+                )
+            else:
+                from src.app.export import export_pages
+
+                result = export_pages(
+                    store,
+                    project_id,
+                    page_ids,
+                    Path(dest),
+                    fmt,
+                    quality,
+                    str(payload.get("conflict") or "rename"),
+                    content=content,
+                    cancel_check=check,
+                )
+            break
+    # Часть файлов могла записаться: это не ошибка всего задания.
+    errors = list(result.errors) + list(skipped_errors.values())
+    if errors and not result.paths:
+        raise RuntimeError("; ".join(errors))
     event = {
         **_dict_ids(job),
         "plan": "export",
+        "saved": len(result.paths),
         "paths": [str(path) for path in result.paths],
     }
     skipped = getattr(result, "skipped", None)
     if archive in ("zip", "cbz"):
         event["skipped"] = list(skipped or [])
+    if errors:
+        event["errors"] = errors
     ctx.emit(WorkerEvent(PAGE_UPDATED, event))
+    finished = {
+        "saved": len(result.paths),
+        "paths": [str(path) for path in result.paths],
+        "export": True,
+    }
+    if archive in ("zip", "cbz"):
+        finished["skipped"] = list(skipped or [])
+    if errors:
+        finished["errors"] = errors
+    return finished
 
 
 def _paint(
@@ -1025,7 +1348,17 @@ def _paint(
     check = ctx.cancel_check(str(job.get("id") or ""))
     progress = _progress(ctx, store, job, page_id)
     clean_path = store.image_path(project_id, page_id, "clean")
+    result_path = store.image_path(project_id, page_id, "result")
     need_clean = plan == "clean" or not clean_path.is_file()
+    if not need_clean:
+        # clean без provenance мог остаться от прерванного рендера. Старый
+        # result при этом уже не доказывает, что фон соответствует документу.
+        try:
+            if result_path.is_file() and store.read_result_provenance(project_id, page_id) is None:
+                need_clean = True
+        except (FileNotFoundError, OSError, ValueError):
+            need_clean = True
+    mask = None
     if need_clean:
         page_image = image if image is not None else _open_rgb(source)
         with ctx.lama_lock:
@@ -1038,8 +1371,6 @@ def _paint(
                 progress_callback=progress,
                 cancel_check=check,
             )
-        _save_mask(store, project_id, page_id, mask)
-        store.save_image(project_id, page_id, "clean", cleaned)
     else:
         cleaned = _open_rgb(clean_path)
 
@@ -1078,10 +1409,14 @@ def _paint(
             cancel_check=check,
             incremental=incremental,
         )
+        # Границы принадлежат этой вёрстке: после замка их перезапишет сосед.
+        region_bounds = dict(pipe.typesetter._last_region_bounds or {})
     overflow_ids = set(overflow)
     for region in document.regions:
         region.overflow = region.id in overflow_ids
     document.warnings = warnings
+    if check():
+        raise PipelineCancelled()
     saved = _commit_fresh(
         store,
         job,
@@ -1094,15 +1429,22 @@ def _paint(
     if saved is None:
         ctx.emit(WorkerEvent(PAGE_UPDATED, _page_update(store, job, page_id, plan=plan_name)))
         return
-    store.save_image(project_id, page_id, "result", rendered)
-    store.save_image(project_id, page_id, "thumb", rendered)
-    store.record_result_provenance(
-        project_id,
-        page_id,
-        document_version=saved.version,
-        region_bounds=pipe.typesetter._last_region_bounds,
-    )
-    _finish_status(store, job, document, page_id)
+    with _result_lock(ctx):
+        # Публикуем кадры только после успешного commit: иначе чужая правка
+        # останется с clean/result от отброшенной вёрстки.
+        if mask is not None:
+            _save_mask(store, project_id, page_id, mask)
+        if need_clean:
+            store.save_image(project_id, page_id, "clean", cleaned)
+        store.save_image(project_id, page_id, "result", rendered)
+        store.save_image(project_id, page_id, "thumb", rendered)
+        store.record_result_provenance(
+            project_id,
+            page_id,
+            document_version=saved.version,
+            region_bounds=region_bounds,
+        )
+    _finish_status(store, job, saved, page_id, saved.version)
     ctx.emit(WorkerEvent(PAGE_UPDATED, _page_update(
         store, job, page_id, plan=plan_name, version=saved.version,
     )))
@@ -1182,9 +1524,10 @@ def _commit(
     base_version: int | None,
 ) -> PageDocument:
     project_id = str(job.get("project_id") or "")
+    saved = store.write_document(project_id, page_id, document, base_version=base_version)
     if snapshot:
         store.write_auto(project_id, page_id, PageDocument.from_dict(document.to_dict()))
-    return store.write_document(project_id, page_id, document, base_version=base_version)
+    return saved
 
 
 def _commit_fresh(
@@ -1196,7 +1539,7 @@ def _commit_fresh(
     snapshot: bool,
     base_version: int | None,
 ) -> PageDocument | None:
-    """Записать вёрстку. ``None`` — на диске уже более новая правка, результат отброшен."""
+    """Записать вёрстку. ``None`` — на диске уже более новая визуальная правка."""
     if base_version is None:
         return _commit(
             store, job, document, page_id, snapshot=snapshot, base_version=None,
@@ -1206,9 +1549,57 @@ def _commit_fresh(
             store, job, document, page_id, snapshot=snapshot, base_version=base_version,
         )
     except VersionConflict:
+        current = store.read_document(str(job.get("project_id") or ""), page_id)
+        if diff_plan(current, document) == "none":
+            # Пока шёл рендер, изменились только метаданные: картинка ещё годится.
+            logger.info("Правка страницы %s невизуальная, результат принят", page_id)
+            return current
         logger.info("Правка страницы %s новее вёрстки, результат отброшен", page_id)
         _release_running(store, job, page_id)
         return None
+
+
+def restore_region_status(
+    store: ProjectStore,
+    project_id: str,
+    page_id: str,
+    previous_status: str,
+    document: PageDocument,
+) -> None:
+    """Вернуть статус после region-задания без визуальных изменений.
+
+    Если рендер успел закончиться, пока шло задание, страница снова готова;
+    если поверх уже ждёт новая визуальная правка, остаётся ``edited``.
+    Тот же выбор ``done``/``offline``/``edited`` нужен серверу при отмене.
+    """
+    try:
+        has_result = store.image_path(project_id, page_id, "result").is_file()
+    except (OSError, ValueError):
+        has_result = False
+    status = previous_status
+    if has_result:
+        try:
+            provenance = store.read_result_provenance(project_id, page_id)
+            visual = store.visual_version(project_id, page_id)
+        except (FileNotFoundError, OSError, ValueError):
+            provenance = None
+            visual = 0
+        if provenance is not None and int(provenance["document_version"]) >= visual:
+            status = "offline" if _mentions_fallback(document.warnings) else "done"
+        elif provenance is None and previous_status in ("done", "offline"):
+            status = previous_status
+    if status not in ("done", "offline", "edited", "idle"):
+        status = "edited" if has_result else "idle"
+    try:
+        store.update_status(
+            project_id,
+            page_id,
+            status=status,
+            stage="",
+            error="",
+        )
+    except (FileNotFoundError, OSError, ValueError):
+        return
 
 
 def _release_running(store: ProjectStore, job: dict, page_id: str) -> None:
@@ -1239,10 +1630,23 @@ def _page_update(store: ProjectStore, job: dict, page_id: str, **extra) -> dict:
     return payload
 
 
-def _finish_status(store: ProjectStore, job: dict, document: PageDocument, page_id: str) -> None:
+def _finish_status(
+    store: ProjectStore,
+    job: dict,
+    document: PageDocument,
+    page_id: str,
+    document_version: int,
+) -> None:
     status = "offline" if _mentions_fallback(document.warnings) else "done"
+    project_id = str(job.get("project_id") or "")
+    try:
+        # Пользователь мог сохранить визуальную правку, пока шёл commit.
+        if store.visual_version(project_id, page_id) > int(document_version):
+            status = "edited"
+    except (FileNotFoundError, OSError, ValueError):
+        pass
     store.update_status(
-        str(job.get("project_id") or ""),
+        project_id,
         page_id,
         status=status,
         progress=100,
@@ -1258,10 +1662,102 @@ def _job_page_ids(job: dict) -> list[str]:
         page_id = str(page.get("page_id") or "")
         if page_id and page_id not in found:
             found.append(page_id)
+    payload = job.get("payload") or {}
+    raw = payload.get("page_ids")
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, (dict, list)):
+                continue
+            page_id = str(item or "")
+            if page_id and page_id not in found:
+                found.append(page_id)
     own = str(job.get("page_id") or "")
     if own and own not in found:
         found.append(own)
     return found
+
+
+def _status_page_ids(job: dict) -> list[str]:
+    """Страницы, чей статус задание реально меняет.
+
+    Экспорт не трогает статусы. ``skip_ready``-страницы с готовым result
+    воркер пропускает, поэтому их нельзя ни держать занятыми, ни чинить.
+    """
+    if not isinstance(job, dict) or str(job.get("kind") or "") == "export":
+        return []
+    ids = _job_page_ids(job)
+    payload = job.get("payload") or {}
+    if not payload.get("skip_ready"):
+        return ids
+    try:
+        store = _store(job)
+    except Exception:
+        return ids
+    project_id = str(job.get("project_id") or "")
+    return [page_id for page_id in ids if not _result_ready(store, project_id, page_id)]
+
+
+def _settle_cancelled_pages(job: dict, *, busy: set[str] | None = None) -> list[str]:
+    """Осесть страницы отменённого задания.
+
+    Регион возвращает прежний статус, вёрстка — ``edited``, пакет —
+    готовность по result/provenance (иначе ``idle``). Экспорт страницы
+    не меняет. Страницы, которые держит другое задание, не трогаем.
+    """
+    if not isinstance(job, dict) or str(job.get("kind") or "") == "export":
+        return []
+    try:
+        store = _store(job)
+    except Exception:
+        return []
+    project_id = str(job.get("project_id") or "")
+    kind = str(job.get("kind") or "")
+    changed: list[str] = []
+    for page_id in _status_page_ids(job):
+        if busy and page_id in busy:
+            continue
+        try:
+            current = store.page_status(project_id, page_id)
+        except (FileNotFoundError, OSError, ValueError):
+            continue
+        if current.get("status") not in ("queued", "running"):
+            continue
+        if kind in REGION_KINDS:
+            try:
+                document = store.read_document(project_id, page_id)
+            except (FileNotFoundError, OSError, ValueError):
+                continue
+            restore_region_status(
+                store,
+                project_id,
+                page_id,
+                str((job.get("payload") or {}).get("previous_status") or ""),
+                document,
+            )
+            changed.append(page_id)
+            continue
+        if kind in BATCH_KINDS:
+            try:
+                document = store.read_document(project_id, page_id)
+            except (FileNotFoundError, OSError, ValueError):
+                continue
+            restore_region_status(store, project_id, page_id, "", document)
+            changed.append(page_id)
+            continue
+        status = "edited" if kind == "apply_document" else "idle"
+        try:
+            store.update_status(
+                project_id,
+                page_id,
+                status=status,
+                progress=0,
+                stage="",
+                error="",
+            )
+        except (FileNotFoundError, OSError, ValueError):
+            continue
+        changed.append(page_id)
+    return changed
 
 
 def _close_stuck_pages(
@@ -1271,11 +1767,13 @@ def _close_stuck_pages(
     error: str,
     fail_current: bool,
     running_status: str = "error",
+    busy: set[str] | None = None,
 ) -> list[str]:
     """Снять статусы задания, которое уже не выполняется.
 
     Текущая страница становится ``error`` или ``idle``. Любая другая
-    ``running`` — ошибка, хвост ``queued`` — снова ``idle``.
+    ``running`` — ошибка, хвост ``queued`` — снова ``idle``. Страницы,
+    занятые другой полосой, не трогаем.
     """
     if not isinstance(job, dict):
         return []
@@ -1284,11 +1782,13 @@ def _close_stuck_pages(
     except Exception:
         return []
     project_id = str(job.get("project_id") or "")
-    ids = _job_page_ids(job)
+    ids = _status_page_ids(job)
     if current_id and current_id not in ids:
         ids.append(current_id)
     changed: list[str] = []
     for page_id in ids:
+        if busy and page_id in busy:
+            continue
         try:
             current = store.page_status(project_id, page_id)
         except (FileNotFoundError, OSError, ValueError):
@@ -1321,18 +1821,32 @@ def _close_stuck_pages(
 
 
 def _report_stuck_pages(job: dict, ctx: _Runtime, *, error: str, fail_current: bool) -> None:
-    current_id = ctx.page_id or str(job.get("page_id") or "")
+    if str(job.get("kind") or "") == "export":
+        return
+    if not fail_current:
+        try:
+            store = _store(job)
+        except Exception:
+            return
+        busy = ctx.busy_page_ids(str(job.get("id") or ""))
+        for page_id in _settle_cancelled_pages(job, busy=busy):
+            ctx.emit(WorkerEvent(PAGE_UPDATED, _page_update(store, job, page_id)))
+        return
+    current_id = str(job.get("page_id") or "")
     try:
         store = _store(job)
     except Exception:
         return
     running_status = "error" if fail_current else "idle"
+    busy_fn = getattr(ctx, "busy_page_ids", None)
+    busy = busy_fn(str(job.get("id") or "")) if callable(busy_fn) else set()
     for page_id in _close_stuck_pages(
         job,
         current_id=current_id,
         error=error,
         fail_current=fail_current,
         running_status=running_status,
+        busy=busy,
     ):
         ctx.emit(WorkerEvent(PAGE_UPDATED, _page_update(store, job, page_id)))
 
@@ -1345,7 +1859,7 @@ def demote_restored_running(store: ProjectStore, jobs: list[dict]) -> None:
         project_id = str(job.get("project_id") or "")
         if not project_id:
             continue
-        for page_id in _job_page_ids(job):
+        for page_id in _status_page_ids(job):
             try:
                 current = store.page_status(project_id, page_id)
             except (FileNotFoundError, OSError, ValueError):
@@ -1460,7 +1974,7 @@ def _job_ids(job: Job) -> dict:
 def queue_has_unfinished(path: str | Path) -> bool:
     """В сохранённой очереди есть ещё не взятые или оборванные задания.
 
-    Смотрит списки ``batch``, ``edits`` и ``running``. Нет файла или JSON
+    Смотрит списки ``batch``, ``edits``, ``exports`` и ``running``. Нет файла или JSON
     не читается — ``False``. Сервер показывает это при старте.
     """
     source = Path(path)
@@ -1472,7 +1986,7 @@ def queue_has_unfinished(path: str | Path) -> bool:
         return False
     if not isinstance(data, dict):
         return False
-    for key in ("batch", "edits", "running"):
+    for key in ("batch", "edits", "exports", "running"):
         items = data.get(key)
         if isinstance(items, list) and len(items) > 0:
             return True

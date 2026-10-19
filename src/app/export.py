@@ -10,6 +10,7 @@ from __future__ import annotations
 import io
 import os
 import re
+import uuid
 import zipfile
 from pathlib import Path
 from typing import NamedTuple
@@ -17,9 +18,10 @@ from typing import NamedTuple
 from PIL import Image
 
 from src.app.store import ProjectStore
+from src.errors import PipelineCancelled
 
 _CONTENT = frozenset({"result", "clean", "both"})
-_READY = frozenset({"done", "ready"})
+_READY = frozenset({"done", "offline", "ready"})
 _NOT_READY_REASON = "не готова"
 _NOT_FOUND_REASON = "страница не найдена"
 _ARCHIVE_SUFFIX = {"zip": ".zip", "cbz": ".cbz"}
@@ -56,6 +58,7 @@ def export_pages(
     jpeg_quality: int,
     conflict: str,
     content: str = "result",
+    cancel_check=None,
 ) -> ExportResult:
     """Скопировать кадры страниц в ``dest``.
 
@@ -64,7 +67,10 @@ def export_pages(
     копия получает суффикс ``-clean``. Имя файла — имя оригинала.
     ``rename`` даёт ``name-2.ext``, если имя занято. Нет нужного файла —
     страница попадает в ``errors``, остальные продолжаются.
+    ``cancel_check`` останавливает копирование между файлами; уже записанные
+    файлы остаются.
     """
+    _check_cancel(cancel_check)
     destination = Path(dest)
     if destination.exists() and not destination.is_dir():
         return ExportResult([], [f"Папка экспорта не является каталогом: {destination}"])
@@ -90,6 +96,7 @@ def export_pages(
     written: list[Path] = []
     errors: list[str] = []
     for page_id in page_ids:
+        _check_cancel(cancel_check)
         page = by_id.get(str(page_id))
         if page is None:
             errors.append(f"{page_id}: страница не найдена")
@@ -115,6 +122,7 @@ def export_pages(
             )
             if target is None:
                 continue
+            _check_cancel(cancel_check)
             _save_result(source, target, extension, quality)
             written.append(target)
     return ExportResult(written, errors)
@@ -132,6 +140,7 @@ def export_archive(
     content: str = "result",
     name_template: str = "{chapter}/{index:03}_{stem}",
     only_ready: bool = False,
+    cancel_check=None,
 ) -> ArchiveExportResult:
     """Упаковать кадры страниц в ZIP или CBZ.
 
@@ -158,8 +167,8 @@ def export_archive(
     подпапки. Сегменты ``..``, ``.`` и префикс диска (``C:``) выбрасываются
     и не поднимают путь вверх.
 
-    ``only_ready``: статус не ``done`` и не ``ready`` — страница не пишется,
-    ``reason`` ровно ``не готова``. Статус берётся из записи страницы проекта;
+    ``only_ready``: статус не ``done``, не ``offline`` и не ``ready`` — страница
+    не пишется, ``reason`` ровно ``не готова``. Статус берётся из записи страницы проекта;
     если ключа ``status`` нет — из ``store.page_status``. По умолчанию фильтр
     выключен.
 
@@ -168,7 +177,12 @@ def export_archive(
     ``нет result.png`` или ``нет clean.png`` и та же фраза в ``errors`` после
     имени, как у ``export_pages``. Неизвестная страница: ``страница не найдена``
     и в ``skipped``, и в ``errors``.
+
+    ``cancel_check`` проверяется перед кодированием и записью каждой записи.
+    Архив пишется во временный файл рядом и заменяет ``dest`` только целиком;
+    при отмене временный файл удаляется, старый архив остаётся.
     """
+    _check_cancel(cancel_check)
     destination = _archive_destination(dest, archive)
     kind = str(content or "result").lower()
     if kind not in _CONTENT:
@@ -186,6 +200,7 @@ def export_archive(
     errors: list[str] = []
     packed = 0
     for page_id in page_ids:
+        _check_cancel(cancel_check)
         page = by_id.get(str(page_id))
         if page is None:
             skipped.append(_skip(page_id, page_id, _NOT_FOUND_REASON))
@@ -222,19 +237,37 @@ def export_archive(
         errors.append(f"Путь архива является каталогом: {destination}")
         return ArchiveExportResult([], skipped, errors)
 
-    payloads = [
-        (arcname, _encode_image(source, extension, quality))
-        for arcname, source in planned
-    ]
     destination.parent.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_STORED) as archive_file:
-        for arcname, payload in payloads:
-            info = zipfile.ZipInfo(arcname)
-            info.compress_type = zipfile.ZIP_STORED
-            info.flag_bits |= 0x800
-            info.external_attr = 0o644 << 16
-            archive_file.writestr(info, payload, compress_type=zipfile.ZIP_STORED)
+    temporary = destination.with_name(
+        f".{destination.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+    )
+    try:
+        with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_STORED) as archive_file:
+            # Кодируем и пишем по одной странице: большая книга не висит в памяти.
+            for arcname, source in planned:
+                _check_cancel(cancel_check)
+                info = zipfile.ZipInfo(arcname)
+                info.compress_type = zipfile.ZIP_STORED
+                info.flag_bits |= 0x800
+                info.external_attr = 0o644 << 16
+                payload = _encode_image(source, extension, quality)
+                _check_cancel(cancel_check)
+                archive_file.writestr(info, payload, compress_type=zipfile.ZIP_STORED)
+                _check_cancel(cancel_check)
+        _check_cancel(cancel_check)
+        os.replace(temporary, destination)
+    except BaseException:
+        try:
+            temporary.unlink()
+        except OSError:
+            pass
+        raise
     return ArchiveExportResult([destination], skipped, errors)
+
+
+def _check_cancel(cancel_check) -> None:
+    if cancel_check is not None and cancel_check():
+        raise PipelineCancelled()
 
 
 def _outputs_for(kind: str) -> list[tuple[str, str]]:
@@ -258,7 +291,14 @@ def _encode_image(source: Path, extension: str, quality: int) -> bytes:
 
 
 def _save_result(source: Path, target: Path, extension: str, quality: int) -> None:
-    target.write_bytes(_encode_image(source, extension, quality))
+    """Записать кадр через временный файл: существующий не обрежется при сбое."""
+    temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temporary.write_bytes(_encode_image(source, extension, quality))
+        os.replace(temporary, target)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
 
 
 def _skip(page_id: object, name: object, reason: str) -> dict:

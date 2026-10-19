@@ -76,9 +76,13 @@ class ShellScreen extends StatelessWidget {
             if (state.secondary.lastExport != null)
               _Strip(
                 key: const Key('shell-export-strip'),
-                color: const Color(0xFF7BD389),
-                text: 'Сохранено страниц: '
-                    '${state.secondary.lastExport!.saved}',
+                color: state.secondary.lastExport!.errors.isEmpty
+                    ? const Color(0xFF7BD389)
+                    : const Color(0xFFD9A441),
+                text:
+                    'Экспортировано страниц: '
+                    '${state.secondary.lastExport!.saved}'
+                    '${state.secondary.lastExport!.errors.isEmpty ? '' : ' · ошибок: ${state.secondary.lastExport!.errors.length}'}',
                 onClose: state.secondary.clearLastExport,
               ),
             if (workspace.viewer.errorText != null)

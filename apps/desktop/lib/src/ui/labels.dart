@@ -15,6 +15,7 @@ const Map<String, String> stageLabels = {
   'inpaint': 'Очистка',
   'clean': 'Очистка',
   'typeset': 'Вёрстка',
+  'export-wait': 'Ожидание результата',
 };
 
 String stageLabel(String stage) {

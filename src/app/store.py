@@ -578,13 +578,25 @@ class ProjectStore:
         return self.page_dir(project_id, page_id) / name
 
     def save_image(self, project_id: str, page_id: str, kind: str, image: Image.Image) -> Path:
-        """Сохранить mask, clean, result или thumb. Оригинал страницы сюда не пишется."""
+        """Сохранить mask, clean, result или thumb. Оригинал страницы сюда не пишется.
+
+        Пишем во временный файл рядом и заменяем цель: сбой посреди записи
+        не оставит обрезанный clean/result.
+        """
         path = self.image_path(project_id, page_id, kind)
         path.parent.mkdir(parents=True, exist_ok=True)
-        if kind == "thumb":
-            _thumbnail(image).save(path, "JPEG", quality=85)
-            return path
-        image.save(path)
+        temporary = path.with_name(
+            f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp{path.suffix}"
+        )
+        try:
+            if kind == "thumb":
+                _thumbnail(image).save(temporary, "JPEG", quality=85)
+            else:
+                image.save(temporary)
+            _replace_file(temporary, path)
+        except BaseException:
+            temporary.unlink(missing_ok=True)
+            raise
         if kind in ("clean", "result"):
             data = self._load_page(project_id, page_id)
             _clear_result_provenance(data)
@@ -611,7 +623,40 @@ class ProjectStore:
             str(region_id): [int(value) for value in bounds] if bounds is not None else None
             for region_id, bounds in region_bounds.items()
         }
+        previous_visual = data.get("visual_version")
+        if (
+            not isinstance(previous_visual, int)
+            or isinstance(previous_visual, bool)
+            or int(previous_visual) < int(document_version)
+        ):
+            data["visual_version"] = int(document_version)
         _write_json(self._page_file(project_id, page_id), data)
+
+    def mark_visual_version(self, project_id: str, page_id: str, document_version: int) -> None:
+        """Отметить запрошенную визуальную правку; невизуальные её не двигают."""
+        data = self._load_page(project_id, page_id)
+        current = data.get("visual_version")
+        version = int(document_version)
+        if isinstance(current, int) and not isinstance(current, bool) and current >= version:
+            return
+        data["visual_version"] = version
+        _write_json(self._page_file(project_id, page_id), data)
+
+    def visual_version(self, project_id: str, page_id: str) -> int:
+        """Версия последней визуальной правки или отрисованного результата.
+
+        Невизуальная правка увеличивает версию документа, но не картинки,
+        поэтому экспорт сверяется именно с этим значением.
+        """
+        data = self._read_page(project_id, page_id)
+        value = data.get("visual_version")
+        if isinstance(value, int) and not isinstance(value, bool):
+            return int(value)
+        provenance = self.read_result_provenance(project_id, page_id)
+        if provenance is not None:
+            return int(provenance["document_version"])
+        document = data.get("document") or {}
+        return int(document.get("version") or 0)
 
     def read_result_provenance(self, project_id: str, page_id: str) -> dict | None:
         """Прочитать provenance результата; старые страницы вернут ``None``."""
@@ -643,6 +688,21 @@ class ProjectStore:
             provenance["document_version"] == int(document_version)
             and provenance["clean_sha256"] == _sha256_file(clean_path)
         )
+
+    def clean_provenance_is_current(
+        self,
+        project_id: str,
+        page_id: str,
+        min_document_version: int = 0,
+    ) -> bool:
+        """Проверить, что clean не переписан после последнего готового результата."""
+        provenance = self.read_result_provenance(project_id, page_id)
+        clean_path = self.image_path(project_id, page_id, "clean")
+        if provenance is None or not clean_path.is_file():
+            return False
+        if int(provenance["document_version"]) < int(min_document_version):
+            return False
+        return provenance["clean_sha256"] == _sha256_file(clean_path)
 
     def _page_file(self, project_id: str, page_id: str) -> Path:
         return self.page_dir(project_id, page_id) / "page.json"

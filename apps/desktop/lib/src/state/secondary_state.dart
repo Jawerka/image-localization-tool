@@ -194,11 +194,17 @@ class ExportOptions {
 
 /// Итог завершённого экспорта.
 class ExportResult {
-  const ExportResult({required this.saved, this.paths = const [], this.openAfter = false});
+  const ExportResult({
+    required this.saved,
+    this.paths = const [],
+    this.openAfter = false,
+    this.errors = const [],
+  });
 
   final int saved;
   final List<String> paths;
   final bool openAfter;
+  final List<String> errors;
 }
 
 /// Состояние вторичных экранов: модели, удалёнка, глоссарий, экспорт.
@@ -213,6 +219,9 @@ class SecondaryState extends ChangeNotifier {
   bool _glossaryLoading = false;
   ExportResult? _lastExport;
   ExportOptions? _lastOptions;
+  String? _exportJobId;
+  String? _finishedExportJobId;
+  static const Duration _exportTimeout = Duration(seconds: 75);
 
   /// Открыть папку после экспорта (ставит хост; в тестах — запись).
   void Function(String path)? onOpenFolder;
@@ -293,6 +302,8 @@ class SecondaryState extends ChangeNotifier {
     _glossary = const [];
     _lastExport = null;
     _lastOptions = null;
+    _exportJobId = null;
+    _finishedExportJobId = null;
     notifyListeners();
   }
 
@@ -307,6 +318,8 @@ class SecondaryState extends ChangeNotifier {
     _glossary = const [];
     _glossaryLoading = false;
     _lastExport = null;
+    _exportJobId = null;
+    _finishedExportJobId = null;
     notifyListeners();
   }
 
@@ -514,21 +527,97 @@ class SecondaryState extends ChangeNotifier {
     return ok;
   }
 
-  Future<void> runExport(ExportOptions options) async {
+  /// Запустить экспорт и дождаться терминального статуса своего задания.
+  ///
+  /// Опрос `/api/jobs/status` переживает обрыв SSE: событие могло потеряться,
+  /// а задание осталось в очереди сервера.
+  Future<bool> runExport(ExportOptions options) async {
+    final api = _api;
+    if (api == null) return false;
     _lastOptions = options;
-    await _guard((api) async {
-      await api.postJson('/api/jobs/export', options.toJson());
-    });
+    _errorText = null;
+    String? jobId;
+    try {
+      final data = await api.postJson('/api/jobs/export', options.toJson());
+      jobId = '${data['job_id'] ?? ''}'.trim();
+      if (jobId.isEmpty) {
+        throw StateError('Сервер не вернул идентификатор задания');
+      }
+      _exportJobId = jobId;
+      notifyListeners();
+      final deadline = DateTime.now().add(_exportTimeout);
+      while (true) {
+        final current = _api;
+        if (current == null || _exportJobId != jobId) {
+          throw StateError('Соединение с сайдкаром потеряно');
+        }
+        final snapshot =
+            await current.getJson('/api/jobs/status?job_id=$jobId');
+        final status = '${snapshot['status'] ?? ''}';
+        final raw = snapshot['result'];
+        final result =
+            raw is Map ? raw.cast<String, dynamic>() : <String, dynamic>{};
+        if (status == 'done') {
+          applyJobFinished({
+            'kind': 'export',
+            'job_id': jobId,
+            ...result,
+          });
+          return true;
+        }
+        if (status == 'error' || status == 'cancelled') {
+          final message = '${result['error'] ?? ''}'.trim();
+          throw StateError(message.isNotEmpty
+              ? message
+              : (status == 'cancelled'
+                  ? 'Экспорт отменён'
+                  : 'Экспорт завершился с ошибкой'));
+        }
+        if (DateTime.now().isAfter(deadline)) {
+          try {
+            await current.postJson('/api/jobs/cancel', {'job_id': jobId});
+          } catch (_) {
+            // Отмена не должна скрывать исходную ошибку ожидания.
+          }
+          throw StateError(
+            'Результат не дождался за ${_exportTimeout.inSeconds} секунд, '
+            'экспорт отменён.',
+          );
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 250));
+      }
+    } on ApiAuthException catch (error) {
+      _errorText = 'Ошибка авторизации: $error';
+    } on ApiException catch (error) {
+      _errorText = apiErrorMessage(error);
+    } catch (error) {
+      _errorText = '$error';
+    } finally {
+      if (_exportJobId == jobId) _exportJobId = null;
+      notifyListeners();
+    }
+    return false;
   }
 
   /// `job.finished` с результатом экспорта: сохранить итог и открыть папку.
   void applyJobFinished(Map<String, dynamic> data) {
     if ('${data['kind'] ?? ''}' != 'export' && data['saved'] == null) return;
+    final jobId = '${data['job_id'] ?? ''}'.trim();
+    if (jobId.isNotEmpty) {
+      if (jobId == _finishedExportJobId) return;
+      _finishedExportJobId = jobId;
+    }
     final options = _lastOptions;
+    final paths = [
+      for (final item in (data['paths'] as List? ?? const [])) '$item',
+    ];
     final result = ExportResult(
-      saved: (data['saved'] as num?)?.toInt() ?? 0,
-      paths: [for (final item in (data['paths'] as List? ?? const [])) '$item'],
+      saved: (data['saved'] as num?)?.toInt() ?? paths.length,
+      paths: paths,
       openAfter: options?.openAfter == true,
+      errors: [
+        for (final item in (data['errors'] as List? ?? const [])) '$item',
+      ],
     );
     _lastExport = result;
     notifyListeners();
@@ -536,5 +625,17 @@ class SecondaryState extends ChangeNotifier {
     if (result.openAfter && folder != null && folder.isNotEmpty) {
       onOpenFolder?.call(folder);
     }
+  }
+
+  /// `job.failed`: ошибка ожидаемого экспорта остаётся в диалоге.
+  void applyJobFailed(Map<String, dynamic> data) {
+    if ('${data['kind'] ?? ''}' != 'export') return;
+    final jobId = '${data['job_id'] ?? ''}'.trim();
+    if (_exportJobId != null && jobId.isNotEmpty && jobId != _exportJobId) {
+      return;
+    }
+    final message = '${data['error'] ?? data['message'] ?? ''}'.trim();
+    _errorText = message.isEmpty ? 'Экспорт завершился с ошибкой' : message;
+    notifyListeners();
   }
 }

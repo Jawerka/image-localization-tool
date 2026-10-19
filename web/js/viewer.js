@@ -168,6 +168,7 @@ export function init() {
   stage.addEventListener("scroll", rememberCenter);
   baseImage.addEventListener("load", onImageLoad);
   baseImage.addEventListener("error", onBaseError);
+  curtainImage.addEventListener("load", onOriginalLoad);
   maskImage.addEventListener("load", onMaskImageLoad);
   maskImage.addEventListener("error", () => maskImage.classList.add("is-missing"));
   window.addEventListener("resize", layout);
@@ -477,9 +478,15 @@ function setRadio(selector, value) {
 }
 
 function setSrc(image, page, kind, version) {
+  if (image === baseImage && image.dataset.pageId && image.dataset.pageId !== page.id) {
+    // Старый кадр не должен мигать на новой странице, пока грузится новый.
+    showResultGap(true);
+  }
   if (image === baseImage && kind === "result" && !isReadyStatus(page.status)) {
-    // Пока идёт повторная вёрстка — оставляем прежний результат, без пустого кадра.
-    if (baseImage.getAttribute("src") && !baseImage.hidden) {
+    // Пока идёт повторная вёрстка — оставляем прежний результат, но только
+    // если это та же страница: иначе на новой странице висел бы чужой кадр.
+    const samePage = image.dataset.pageId === page.id;
+    if (samePage && baseImage.getAttribute("src") && !baseImage.hidden) {
       showResultGap(false);
       return;
     }
@@ -488,6 +495,7 @@ function setSrc(image, page, kind, version) {
   }
   if (image === baseImage) showResultGap(false);
   const url = imageUrl(page.id, kind, version);
+  image.dataset.pageId = page.id;
   if (image.dataset.url === url) return;
   image.dataset.url = url;
   if (image === maskImage) image.classList.remove("is-missing");
@@ -583,10 +591,16 @@ function showResultGap(on) {
 
 function onBaseError() {
   const view = getState().view;
-  if (view === "result" || view === "compare") showResultGap(true);
+  if (view === "result" || view === "compare") {
+    showResultGap(true);
+    applyOriginalNatural();
+  }
 }
 
 function onImageLoad() {
+  const state = getState();
+  const page = state.pages.find((item) => item.id === state.activePageId);
+  if (page && !currentSrcIsPage(baseImage, page.id)) return;
   natural = { w: baseImage.naturalWidth || 0, h: baseImage.naturalHeight || 0 };
   patch({ imageSize: { ...natural } });
   if (scrollHome) {
@@ -596,10 +610,35 @@ function onImageLoad() {
   }
   layout();
   applyPendingScroll();
-  const state = getState();
   if (state.deferredApply || maskDraft) {
     syncMaskDraft(state, state.pages.find((item) => item.id === state.activePageId));
   }
+}
+
+/** Оригинал задаёт размер листа, даже когда result ещё не готов. */
+function onOriginalLoad() {
+  const state = getState();
+  const page = state.pages.find((item) => item.id === state.activePageId);
+  if (!page || !currentSrcIsPage(curtainImage, page.id)) return;
+  if (!baseImage.hidden && baseImage.naturalWidth) return;
+  applyOriginalNatural();
+}
+
+function currentSrcIsPage(image, pageId) {
+  const source = image.currentSrc || image.src || "";
+  return !pageId || source.includes(encodeURIComponent(pageId));
+}
+
+function applyOriginalNatural() {
+  const state = getState();
+  const page = state.pages.find((item) => item.id === state.activePageId);
+  if (!page || !currentSrcIsPage(curtainImage, page.id)) return;
+  if (!curtainImage.naturalWidth || !curtainImage.naturalHeight) return;
+  natural = { w: curtainImage.naturalWidth, h: curtainImage.naturalHeight };
+  patch({ imageSize: { ...natural } });
+  layout();
+  applyPendingScroll();
+  if (state.deferredApply || maskDraft) syncMaskDraft(state, page);
 }
 
 function fitScale() {

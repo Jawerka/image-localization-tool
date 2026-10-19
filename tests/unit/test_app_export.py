@@ -4,10 +4,12 @@ import io
 import json
 import zipfile
 
+import pytest
 from PIL import Image
 
 from src.app.export import export_archive, export_pages
 from src.app.store import ProjectStore
+from src.errors import PipelineCancelled
 
 
 def _page(tmp_path, *, with_clean: bool = False):
@@ -146,6 +148,61 @@ def test_export_clean_missing(tmp_path):
     assert fallback == [dest / "page.png"]
 
 
+def test_export_pages_stops_on_cancel_and_keeps_written_files(tmp_path):
+    store, project, page, _source = _page(tmp_path)
+    second_source = tmp_path / "in" / "second.png"
+    Image.new("RGB", (30, 20), (2, 3, 4)).save(second_source)
+    second = store.add_sources(project["id"], [second_source])[0]
+    store.save_image(
+        project["id"], second["id"], "result", Image.new("RGB", (12, 10), (5, 5, 5)),
+    )
+    dest = tmp_path / "out"
+
+    def cancel_check():
+        return (dest / "page.png").exists()
+
+    with pytest.raises(PipelineCancelled):
+        export_pages(
+            store,
+            project["id"],
+            [page["id"], second["id"]],
+            dest,
+            "png",
+            90,
+            "rename",
+            cancel_check=cancel_check,
+        )
+    assert (dest / "page.png").is_file()
+    assert not (dest / "second.png").exists()
+
+
+def test_export_archive_cancel_keeps_old_archive_and_no_temp(tmp_path):
+    store, project, by_name = _make_pages(tmp_path, {
+        "page.png": (9, 1, 1),
+        "tail.png": (1, 9, 1),
+    })
+    dest = tmp_path / "out" / "book.cbz"
+    dest.parent.mkdir()
+    dest.write_bytes(b"old")
+    checks = 0
+
+    def cancel_check():
+        nonlocal checks
+        checks += 1
+        return checks >= 7
+
+    with pytest.raises(PipelineCancelled):
+        export_archive(
+            store,
+            project["id"],
+            [by_name["page.png"]["id"], by_name["tail.png"]["id"]],
+            dest,
+            cancel_check=cancel_check,
+        )
+    assert dest.read_bytes() == b"old"
+    assert [item.name for item in dest.parent.iterdir()] == ["book.cbz"]
+
+
 def _patch_pages(store, project_id, fields_by_id):
     """Дописать поля в project.json. Хранилище само chapter/status страницы не ставит."""
     path = store.project_file(project_id)
@@ -225,22 +282,25 @@ def test_export_archive_cbz_members(tmp_path):
 
 
 def test_export_archive_only_ready(tmp_path):
-    """only_ready пишет done и ready; idle, error и пустой статус — «не готова»."""
+    """only_ready пишет done, offline и ready; остальные — «не готова»."""
     store, project, by_name = _make_pages(tmp_path, {
         "idle.png": (9, 9, 9),
         "err.png": (9, 9, 9),
         "blank.png": (9, 9, 9),
         "done.png": (2, 3, 4),
         "ready.png": (5, 6, 7),
+        "offline.png": (4, 5, 6),
     })
     idle = by_name["idle.png"]
     err = by_name["err.png"]
     blank = by_name["blank.png"]
     done = by_name["done.png"]
     ready = by_name["ready.png"]
+    offline = by_name["offline.png"]
     store.update_status(project["id"], err["id"], status="error")
     store.update_status(project["id"], blank["id"], status="done")
     store.update_status(project["id"], done["id"], status="done")
+    store.update_status(project["id"], offline["id"], status="offline")
     # Пустой status в записи проекта важнее done в page.json.
     # ready в хранилище записать нельзя — только в JSON проекта.
     _patch_pages(store, project["id"], {
@@ -252,7 +312,10 @@ def test_export_archive_only_ready(tmp_path):
     result = export_archive(
         store,
         project["id"],
-        [idle["id"], err["id"], blank["id"], done["id"], ready["id"]],
+        [
+            idle["id"], err["id"], blank["id"],
+            done["id"], ready["id"], offline["id"],
+        ],
         dest,
         only_ready=True,
     )
@@ -264,9 +327,12 @@ def test_export_archive_only_ready(tmp_path):
         {"id": blank["id"], "name": "blank.png", "reason": "не готова"},
     ]
     with zipfile.ZipFile(dest) as zf:
-        assert zf.namelist() == ["001_done.png", "002_ready.png"]
+        assert zf.namelist() == [
+            "001_done.png", "002_ready.png", "003_offline.png",
+        ]
         assert _zip_pixel(zf.read("001_done.png")) == ((12, 10), (2, 3, 4))
         assert _zip_pixel(zf.read("002_ready.png")) == ((12, 10), (5, 6, 7))
+        assert _zip_pixel(zf.read("003_offline.png")) == ((12, 10), (4, 5, 6))
         for info in zf.infolist():
             assert info.compress_type == zipfile.ZIP_STORED
 

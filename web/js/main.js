@@ -827,8 +827,10 @@ function onFinished(payload) {
   const count = payload.saved ?? payload.count ?? (Array.isArray(payload.paths) ? payload.paths.length : null);
   if (payload.kind === "export" || (count != null && payload.export)) {
     const saved = Number(count) || 0;
+    const errors = Array.isArray(payload.errors) ? payload.errors : [];
+    const suffix = errors.length ? `; не удалось: ${errors.length}` : "";
     setBanner("export", {
-      text: `Сохранено ${saved} ${savedWord(saved)}`,
+      text: `Сохранено ${saved} ${savedWord(saved)}${suffix}`,
       actions: [{ id: "reveal", label: "Открыть папку" }],
     });
   }

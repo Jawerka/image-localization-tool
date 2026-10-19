@@ -72,7 +72,7 @@ class _ExportDialogState extends State<ExportDialog> {
     final pages = _scopePages;
     if (pages.isEmpty) return;
     setState(() => _busy = true);
-    await state.secondary.runExport(
+    final ok = await state.secondary.runExport(
       ExportOptions(
         pageIds: [for (final page in pages) page.id],
         dest: _dest,
@@ -84,7 +84,7 @@ class _ExportDialogState extends State<ExportDialog> {
     );
     if (!mounted) return;
     setState(() => _busy = false);
-    if (state.secondary.errorText == null) {
+    if (ok) {
       Navigator.of(context).pop(true);
     }
   }
@@ -283,6 +283,33 @@ class _ExportDialogState extends State<ExportDialog> {
                 ),
                 child: Text(_summary, style: theme.textTheme.labelSmall),
               ),
+              if (_busy) ...[
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Результат готовится…',
+                      key: const Key('export-waiting'),
+                      style: theme.textTheme.labelSmall,
+                    ),
+                  ],
+                ),
+              ],
+              if (state.secondary.errorText != null) ...[
+                const SizedBox(height: 10),
+                Text(
+                  state.secondary.errorText!,
+                  key: const Key('export-error'),
+                  style: theme.textTheme.labelSmall
+                      ?.copyWith(color: palette.textError),
+                ),
+              ],
             ],
           ),
         ),
@@ -295,7 +322,11 @@ class _ExportDialogState extends State<ExportDialog> {
         FilledButton(
           key: const Key('export-run'),
           onPressed: _busy || pages.isEmpty ? null : _run,
-          child: Text('Экспорт ${pages.length} ${_pagesWord(pages.length)}'),
+          child: Text(
+            _busy
+                ? 'Результат готовится…'
+                : 'Экспорт ${pages.length} ${_pagesWord(pages.length)}',
+          ),
         ),
       ],
     );

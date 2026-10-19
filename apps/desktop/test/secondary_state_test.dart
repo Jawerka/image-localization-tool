@@ -230,6 +230,17 @@ void main() {
     final ws = _state((path) {
       if (path == '/api/dialog/directory') return {'path': r'D:\out'};
       if (path == '/api/jobs/export') return {'job_id': 'e1'};
+      if (path == '/api/jobs/status') {
+        return {
+          'status': 'done',
+          'result': {
+            'job_id': 'e1',
+            'kind': 'export',
+            'saved': 2,
+            'paths': [r'D:\out\001.png', r'D:\out\002.png'],
+          },
+        };
+      }
       return {};
     }, sent);
     var opened = '';
@@ -240,23 +251,80 @@ void main() {
     final dirBody = jsonDecode(sent.first.body) as Map<String, dynamic>;
     expect(dirBody['path'], r'D:\out');
 
-    await ws.runExport(const ExportOptions(
+    final exported = await ws.runExport(const ExportOptions(
       pageIds: ['a', 'b'],
       dest: r'D:\out',
       format: 'png',
       conflict: 'rename',
       openAfter: true,
     ));
-    expect(sent.last.path, '/api/jobs/export');
-    expect(sent.last.body, contains('"page_ids":["a","b"]'));
-
-    ws.applyJobFinished({
-      'kind': 'export',
-      'saved': 2,
-      'paths': [r'D:\out\001.png', r'D:\out\002.png'],
-    });
+    expect(exported, isTrue);
+    expect(sent.any((item) => item.path == '/api/jobs/export'), isTrue);
+    final exportBody =
+        sent.where((item) => item.path == '/api/jobs/export').last.body;
+    expect(exportBody, contains('"page_ids":["a","b"]'));
+    expect(sent.last.path, '/api/jobs/status');
     expect(ws.lastExport?.saved, 2);
     expect(opened, r'D:\out');
+  });
+
+  test('экспорт ждёт терминальный статус своего задания', () async {
+    final sent = <_Sent>[];
+    var polls = 0;
+    final ws = _state((path) {
+      if (path == '/api/jobs/export') return {'job_id': 'e2'};
+      if (path == '/api/jobs/status') {
+        polls += 1;
+        if (polls == 1) return {'status': 'running', 'result': {}};
+        return {
+          'status': 'done',
+          'result': {
+            'job_id': 'e2',
+            'kind': 'export',
+            'saved': 1,
+            'paths': [r'D:\out\001.png'],
+          },
+        };
+      }
+      return {};
+    }, sent);
+
+    final ok = await ws.runExport(const ExportOptions(
+      pageIds: ['a'],
+      dest: r'D:\out',
+    ));
+
+    expect(ok, isTrue);
+    expect(polls, 2);
+    expect(ws.lastExport?.paths, [r'D:\out\001.png']);
+  });
+
+  test('экспорт показывает ошибку задания и оставляет диалог открытым',
+      () async {
+    final sent = <_Sent>[];
+    final ws = _state((path) {
+      if (path == '/api/jobs/export') return {'job_id': 'e3'};
+      if (path == '/api/jobs/status') {
+        return {
+          'status': 'error',
+          'result': {
+            'job_id': 'e3',
+            'kind': 'export',
+            'error': 'Результат ещё готовится: страница page.png',
+          },
+        };
+      }
+      return {};
+    }, sent);
+
+    final ok = await ws.runExport(const ExportOptions(
+      pageIds: ['a'],
+      dest: r'D:\out',
+    ));
+
+    expect(ok, isFalse);
+    expect(ws.lastExport, isNull);
+    expect(ws.errorText, contains('Результат ещё готовится'));
   });
 
   test('ошибка API видна в errorText и сбрасывается', () async {

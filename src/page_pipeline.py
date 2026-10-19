@@ -50,6 +50,11 @@ def _bind_report(
     return report
 
 
+def _check_cancel(cancel_check: CancelCheck | None) -> None:
+    if cancel_check and cancel_check():
+        raise PipelineCancelled()
+
+
 def _sfx_on(config: Config) -> bool:
     """Звукоподражания включены: режим replace или старый флаг translate_sfx."""
     if str(getattr(config, "sfx_mode", "") or "").strip().lower() == "replace":
@@ -536,12 +541,20 @@ class PagePipeline:
             self._dump(result, debug)
         return result
 
-    def recognize_region(self, image: Image.Image, region: TextRegion) -> TextRegion:
+    def recognize_region(
+        self,
+        image: Image.Image,
+        region: TextRegion,
+        *,
+        cancel_check: CancelCheck | None = None,
+    ) -> TextRegion:
         """Распознать один регион: VLM, если сервер жив, иначе RapidOCR."""
+        _check_cancel(cancel_check)
         warnings: list[str] = []
         self._prepare_ocr(warnings)
         if isinstance(self.ocr, VlmOcr) and self.ocr.client.available():
             self.ocr.read_crop(image, region)
+            _check_cancel(cancel_check)
             return region
         if not isinstance(self.ocr, RapidOcr):
             self._llm_down = True
@@ -549,6 +562,7 @@ class PagePipeline:
                                 intra_op_threads=self.config.ort_intra_op_threads)
             self.ocr_name = "rapid"
         self.ocr.read_crop(image, region)
+        _check_cancel(cancel_check)
         return region
 
     def retranslate_region(
@@ -558,8 +572,11 @@ class PagePipeline:
         region_id: int,
         source_lang: str,
         target_lang: str,
+        *,
+        cancel_check: CancelCheck | None = None,
     ) -> TextRegion:
         """Перевести один регион текущим переводчиком, с контекстом страницы."""
+        _check_cancel(cancel_check)
         warnings: list[str] = []
         glossary = load_glossary(self.config.glossary_path)
         self._prepare_translator(warnings)
@@ -576,6 +593,7 @@ class PagePipeline:
             )
             warnings.extend(getattr(self.translator, "warnings", []) or [])
         except Exception as exc:
+            _check_cancel(cancel_check)
             logger.warning(f"Translator failed, Argos fallback: {exc}")
             self.translator = ArgosBlockTranslator()
             self.translator_name = "argos"
@@ -589,13 +607,21 @@ class PagePipeline:
                 translate_sfx=_sfx_on(self.config),
             )
             warnings.extend(getattr(self.translator, "warnings", []) or [])
+        _check_cancel(cancel_check)
         for region in regions:
             if region.id == int(region_id):
                 return region
         raise ValueError(f"Регион {region_id} не найден")
 
-    def shorten_region(self, region: TextRegion, target_lang: str) -> TextRegion:
+    def shorten_region(
+        self,
+        region: TextRegion,
+        target_lang: str,
+        *,
+        cancel_check: CancelCheck | None = None,
+    ) -> TextRegion:
         """Сократить перевод региона примерно до 70 % длины."""
+        _check_cancel(cancel_check)
         warnings: list[str] = []
         self._prepare_translator(warnings)
         limit = max(8, int(len(region.translation) * 0.7))
@@ -606,6 +632,7 @@ class PagePipeline:
             speaker_gender=region.speaker_gender,
             original=region.text,
         )
+        _check_cancel(cancel_check)
         return region
 
     def _result(self, source, image, regions, direction, warnings, stages, timings) -> PageResult:

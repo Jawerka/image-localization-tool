@@ -57,6 +57,7 @@ const STAGE_LABELS = {
   inpaint: "Очистка",
   clean: "Очистка",
   typeset: "Вёрстка",
+  "export-wait": "Ожидание результата",
 };
 
 const listeners = new Set();

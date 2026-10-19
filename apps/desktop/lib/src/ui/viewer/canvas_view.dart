@@ -433,11 +433,10 @@ class _CanvasViewState extends State<CanvasView> {
                 // сессию, а уведомлять во время build нельзя.
                 WidgetsBinding.instance.addPostFrameCallback((_) {
                   if (!mounted) return;
-                  viewer.noteDisplayedImage(
-                    viewer.imageFor(
-                      viewer.view == 'original' ? 'original' : 'result',
-                    ),
-                  );
+                  final shown = viewer.imageFor(
+                    viewer.view == 'original' ? 'original' : 'result',
+                  ) ?? viewer.imageFor('original');
+                  viewer.noteDisplayedImage(shown);
                   session.setImageSize(viewer.imageSize);
                 });
                 return MouseRegion(

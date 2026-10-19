@@ -1,10 +1,13 @@
 """Очередь заданий на фейковом воркере, без моделей и процессов."""
 
 import json
+import logging
 import time
 
+import pytest
 from PIL import Image
 
+import src.app.jobs as jobs_module
 from src.app.events import WorkerEvent
 from src.app.jobs import Job, JobQueue, compute_needs_llm, skip_ready
 from src.app.settings import AppSettings
@@ -511,6 +514,33 @@ def test_error_survives_save_load_then_retry(tmp_path):
     assert restored.retry_failed() == []
 
 
+def test_terminal_result_survives_save_load(tmp_path):
+    worker = FakeWorker(synchronous=False)
+    queue = JobQueue(worker)
+    job = queue.submit(
+        "export",
+        "proj",
+        settings=AppSettings(),
+        payload={"page_ids": ["page1"]},
+    )
+    result = {
+        "job_id": job.id,
+        "saved": 1,
+        "paths": [str(tmp_path / "page.png")],
+        "export": True,
+    }
+    queue.push_event(WorkerEvent("job.finished", result))
+    path = tmp_path / "queue.json"
+    queue.save(path)
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    assert raw["history"][0]["result"] == result
+
+    restored = JobQueue(FakeWorker(synchronous=False))
+    restored.load(path)
+    assert restored.job_status(job.id) == "done"
+    assert restored.job_result(job.id) == result
+
+
 def test_skip_ready_reads_payload():
     assert skip_ready(Job("a", "translate_page", "p", payload={"skip_ready": True})) is True
     assert skip_ready(Job("b", "translate_page", "p", payload={"skip_ready": False})) is False
@@ -648,3 +678,151 @@ def test_import_path_chapters_and_archive(tmp_path):
     packed = store.import_path(project["id"], archive, chapter_mode="subdir")
     assert [item["name"] for item in packed] == ["page2.png", "page10.png"]
     assert {item["chapter"] for item in packed} == {"pack"}
+
+
+def test_export_page_ids_are_not_status_busy():
+    worker = FakeWorker(synchronous=False)
+    queue = JobQueue(worker)
+    queue.pause()
+    queue.submit(
+        "export",
+        "proj",
+        settings=AppSettings(),
+        payload={"page_ids": ["p1", "p2"]},
+    )
+    assert queue.active_page_ids() == set()
+
+
+def test_late_finished_does_not_overwrite_cancelled():
+    worker = FakeWorker(synchronous=False)
+    queue = JobQueue(worker)
+    job = queue.submit("translate_page", "proj", "p1", settings=AppSettings())
+    queue.cancel(job.id)
+    queue.push_event(WorkerEvent("job.finished", {"job_id": job.id, "saved": 1}))
+    assert queue.job_status(job.id) == "cancelled"
+    assert queue.job_result(job.id) == {}
+    assert "job.finished" not in [event.type for event in queue.drain_events()]
+
+
+def test_terminal_event_saves_queue(tmp_path):
+    worker = FakeWorker(synchronous=False)
+    queue = JobQueue(worker)
+    path = tmp_path / "queue.json"
+    queue.save(path)
+    job = queue.submit("translate_page", "proj", "p1", settings=AppSettings())
+    queue.push_event(WorkerEvent("job.finished", {"job_id": job.id, "saved": 3}))
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    assert raw["history"][-1]["status"] == "done"
+    assert raw["history"][-1]["result"]["saved"] == 3
+
+
+def test_persist_failure_is_logged(tmp_path, monkeypatch, caplog):
+    worker = FakeWorker(synchronous=False)
+    queue = JobQueue(worker)
+    path = tmp_path / "queue.json"
+    queue.save(path)
+    job = queue.submit("translate_page", "proj", "p1", settings=AppSettings())
+
+    def fail(_path):
+        raise OSError("boom")
+
+    monkeypatch.setattr(queue, "save", fail)
+    with caplog.at_level(logging.ERROR, logger="ilt.app.jobs"):
+        queue.push_event(WorkerEvent("job.finished", {"job_id": job.id}))
+    assert "Не удалось сохранить очередь" in caplog.text
+
+
+def test_failed_save_keeps_old_queue(tmp_path, monkeypatch):
+    queue = JobQueue(FakeWorker(synchronous=False))
+    path = tmp_path / "queue.json"
+    path.write_text("old", encoding="utf-8")
+
+    def fail(*_args, **_kwargs):
+        raise OSError("boom")
+
+    monkeypatch.setattr(jobs_module.os, "replace", fail)
+    with pytest.raises(OSError):
+        queue.save(path)
+    assert path.read_text(encoding="utf-8") == "old"
+    assert [item.name for item in path.parent.iterdir()] == [path.name]
+
+
+def test_trim_drops_status_and_result_together():
+    queue = JobQueue(FakeWorker())
+    ids = [
+        queue.submit("translate_page", "proj", f"p{index}", settings=AppSettings()).id
+        for index in range(201)
+    ]
+    assert queue.job_status(ids[0]) == ""
+    assert queue.job_result(ids[0]) == {}
+    assert queue.job_status(ids[-1]) == "done"
+    assert queue.job_result(ids[-1])["job_id"] == ids[-1]
+
+def test_cancel_applies_history_limit():
+    queue = JobQueue(FakeWorker(synchronous=False))
+    queue.pause()
+    ids: list[str] = []
+    for index in range(250):
+        job = queue.submit(
+            "translate_page", "proj", f"p{index}", settings=AppSettings(),
+        )
+        ids.append(job.id)
+        queue.cancel(job.id)
+
+    assert len(queue.snapshot()["statuses"]) == 200
+    assert queue.job_status(ids[0]) == ""
+    assert queue.job_status(ids[-1]) == "cancelled"
+
+
+def test_cancelled_inflight_is_not_saved_as_running(tmp_path):
+    worker = FakeWorker(synchronous=False)
+    queue = JobQueue(worker)
+    job = queue.submit("translate_page", "proj", "p1", settings=AppSettings())
+    queue.cancel(job.id)
+
+    path = tmp_path / "queue.json"
+    queue.save(path)
+    raw = json.loads(path.read_text(encoding="utf-8"))
+
+    assert raw["running"] == []
+    assert any(item["job"]["id"] == job.id and item["status"] == "cancelled"
+               for item in raw["history"])
+
+
+def test_retried_job_is_not_trimmed_as_old(tmp_path):
+    class FlakyWorker(FakeWorker):
+        def __init__(self):
+            super().__init__(synchronous=True)
+            self.fail_pages: set[str] = set()
+
+        def submit(self, job):
+            if job.page_id in self.fail_pages:
+                self.calls.append(job)
+                self._emit(WorkerEvent("job.failed", {**_job_ids(job), "error": "boom"}))
+                return
+            super().submit(job)
+
+    worker = FlakyWorker()
+    queue = JobQueue(worker)
+    worker.fail_pages.add("p0")
+    failed = queue.submit("translate_page", "proj", "p0", settings=AppSettings())
+    assert queue.job_status(failed.id) == "error"
+    worker.fail_pages.clear()
+    for index in range(1, 200):
+        queue.submit("translate_page", "proj", f"p{index}", settings=AppSettings())
+
+    queue.retry_failed()
+    assert queue.job_status(failed.id) == "done"
+    queue.submit("translate_page", "proj", "p200", settings=AppSettings())
+
+    assert queue.job_status(failed.id) == "done"
+    assert queue.job_result(failed.id)["job_id"] == failed.id
+
+
+def _job_ids(job):
+    return {
+        "job_id": job.id,
+        "project_id": job.project_id,
+        "page_id": job.page_id,
+        "kind": job.kind,
+    }

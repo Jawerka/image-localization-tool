@@ -6,6 +6,8 @@
 Выключен — поведение как раньше: Heroika только в баллоне, free без CC0-пробы.
 
 Все перечисленные CC0 — GGBotNet, CC0 1.0, с кириллицей. Heroika — OFL.
+Jupiteroid Light: <https://ggbot.itch.io/jupiteroid-font>; Novem:
+<https://ggbot.itch.io/novem-font> (оба CC0, файлы в `src/resources/fonts`).
 
 ## Автовыбор (что ставит пайплайн)
 
@@ -15,7 +17,8 @@
 | `sfx` (обычный удар/звук) | **DeltaBlock-Regular** | Жирный блочный display, «БУМ/BOOM» |
 | `sfx` со смехом (`ха`, `ha`, `хи`, `lol`…) | **Unsightly** | Ломаный comedy-стиль |
 | `sfx` «технический» (много цифр / короткий код) | **Liber-Struct** | Геометрия FontStruct, не «взрыв» |
-| `title` или free **ALL CAPS** | **Blaec-Regular** | Тяжёлый shout/заголовок |
+| `title` | **Jupiteroid-Light** | Спокойный геометрический display вместо тяжёлого Blaec |
+| free **ALL CAPS** | **Blaec-Regular** | Тяжёлый shout/заголовок |
 | `sign` + ALL CAPS | **OperationNapalm-Regular** | Трафарет/предупреждение |
 | Free / `sign` / `noise` без капса | **FirstTimeWriting** | Рукопись, заметки, мягкий free-текст |
 | Регион уже с `font_id` или `edited` | не трогаем | Ручной выбор важнее |
@@ -31,8 +34,10 @@
 | **Unsightly** | sfx comedy | Смех, глупый эффект | Серьёзный экшен, диалог |
 | **PublicPixel** | sfx pixel | Крупный 8-bit / UI-пиксель | Длинный текст, мелкий кегль |
 | **Pixelzone** | sfx pixel | Читабельный pixel, цифровой знак | «Живой» рукописный free |
-| **Blaec-Regular** | shout | Крик, заголовок, CAPS free | Мелкий диалог |
+| **Blaec-Regular** | shout | Крик, CAPS free | Мелкий диалог |
 | **Blaec-Italic** | shout | Скорость, наклон, «СКОРЕЕ!» | Спокойная речь |
+| **Jupiteroid-Light** | title | Заголовки, титры, обложки | Крик, мелкий диалог |
+| **Novem** | title (запас) | Стилизованные/SF-заголовки | Универсальный текст |
 | **OperationNapalm-Regular** | shout stencil | Таблички, DANGER, военный тон | Рукопись, нежный текст |
 | **VyazPixel** | decor | Декор/титры «под старину» (по желанию) | Автопо умолчанию не ставим |
 

@@ -29,7 +29,7 @@ from src.app.dialogs import DialogBridge
 from src.app.document import PageDocument, diff_plan, typeset_changed_region_ids
 from src.app.events import LLM_STATUS, WorkerEvent
 from src.app.ingest import NoImagesError, archive_images, is_archive
-from src.app.jobs import JobQueue
+from src.app.jobs import BATCH_KINDS, REGION_KINDS, JobQueue
 from src.app.settings import AppSettings, get_api_key
 from src.app.portable_project import (
     PortableProjectError,
@@ -38,7 +38,11 @@ from src.app.portable_project import (
     unpack_project,
 )
 from src.app.store import ProjectStore, VersionConflict
-from src.app.worker import demote_restored_running, queue_has_unfinished
+from src.app.worker import (
+    demote_restored_running,
+    queue_has_unfinished,
+    restore_region_status,
+)
 from src.utils.paths import components_root, install_root
 
 logger = logging.getLogger("ilt.app.server")
@@ -186,6 +190,8 @@ class AppState:
         self._lock = threading.Lock()
         self._sub_lock = threading.Lock()
         self._drain_lock = threading.Lock()
+        # Серверные read-modify-write одного page.json (reset, sfx).
+        self._page_edit_lock = threading.RLock()
         self._stop = threading.Event()
         self._closed = False
         self._pump: threading.Thread | None = None
@@ -346,6 +352,12 @@ class AppState:
         with self._drain_lock:
             events = list(self.queue.drain_events())
         for event in events:
+            payload = getattr(event, "payload", {}) or {}
+            if (
+                getattr(event, "type", "") == "page.updated"
+                and str(payload.get("project_id") or "") == str(self.project_id or "")
+            ):
+                self.package_dirty = True
             self.fanout(event)
 
     def _pump_loop(self) -> None:
@@ -370,7 +382,9 @@ class AppState:
         snap = self.queue.snapshot()
         demote_restored_running(
             self.store,
-            list(snap.get("batch") or []) + list(snap.get("edits") or []),
+            list(snap.get("batch") or [])
+            + list(snap.get("edits") or [])
+            + list(snap.get("exports") or []),
         )
 
 
@@ -602,12 +616,25 @@ def _api(state: AppState, method: str, path: str, body: dict, query: dict | None
     if path == "/api/jobs":
         _need_method(method, "GET")
         return _Result(_jobs_view(state))
+    if path == "/api/jobs/status":
+        _need_method(method, "GET")
+        job_id = str((query or {}).get("job_id", [""])[0]).strip()
+        if not job_id:
+            raise ValueError("Нужен job_id")
+        status = state.queue.job_status(job_id)
+        if not status:
+            raise _HttpError(404, "Задание не найдено")
+        return _Result({
+            "job_id": job_id,
+            "status": status,
+            "result": state.queue.job_result(job_id),
+        })
     if path == "/api/jobs/translate":
         _need_method(method, "POST")
         return _Result(_translate(state, body))
     if path == "/api/jobs/cancel":
         _need_method(method, "POST")
-        return _Result(_cancel(state))
+        return _Result(_cancel(state, body))
     if path == "/api/jobs/pause":
         _need_method(method, "POST")
         return _Result(_pause_jobs(state))
@@ -931,6 +958,7 @@ def _put_document(state: AppState, page_id: str, body: dict) -> dict:
     except VersionConflict as exc:
         raise _HttpError(409, "Конфликт версии", document=exc.document.to_dict()) from exc
     if plan in ("typeset", "clean"):
+        state.store.mark_visual_version(project_id, page_id, saved.version)
         state.store.update_status(project_id, page_id, status="edited")
         _submit(
             state,
@@ -953,9 +981,18 @@ def _put_document(state: AppState, page_id: str, body: dict) -> dict:
 def _reset_page(state: AppState, page_id: str) -> dict:
     _require_page(state, page_id)
     project_id = state.project_id or ""
-    snapshot = state.store.read_auto(project_id, page_id)
-    saved = state.store.write_document(project_id, page_id, snapshot)
+    with state._page_edit_lock:
+        snapshot = state.store.read_auto(project_id, page_id)
+        current = state.store.read_document(project_id, page_id)
+        try:
+            saved = state.store.write_document(
+                project_id, page_id, snapshot, base_version=current.version,
+            )
+        except VersionConflict as exc:
+            raise _HttpError(409, "Конфликт версии", document=exc.document.to_dict()) from exc
+    state.store.mark_visual_version(project_id, page_id, saved.version)
     state.store.update_status(project_id, page_id, status="edited")
+    _mark_package_dirty(state)
     _submit(
         state,
         "apply_document",
@@ -975,13 +1012,26 @@ def _page_action(state: AppState, page_id: str, body: dict) -> dict:
         raise ValueError("Неизвестное действие")
     region_id = _region_id(body.get("region_id"))
     _require_page(state, page_id)
-    payload = {"region_id": region_id}
+    project_id = state.project_id or ""
+    previous_status = state.store.page_status(project_id, page_id)["status"]
+    payload = {"region_id": region_id, "previous_status": previous_status}
     if "base_version" in body:
         base_version = body["base_version"]
         if isinstance(base_version, bool) or not isinstance(base_version, int) or base_version < 0:
             raise ValueError("Некорректная base_version")
         payload["base_version"] = base_version
-    job = _submit(state, action, page_id, payload)
+    # Регион-задание меняет картинку после ответа LLM; экспорт не должен
+    # принять старый result, пока страница снова не станет готовой.
+    _mark_queued(state, [page_id])
+    try:
+        job = _submit(state, action, page_id, payload)
+    except Exception:
+        try:
+            state.store.update_status(project_id, page_id, status=previous_status)
+        except (FileNotFoundError, OSError, ValueError):
+            pass
+        raise
+    _mark_package_dirty(state)
     return {"job_id": job.id}
 
 
@@ -1010,6 +1060,7 @@ def _translate(state: AppState, body: dict) -> dict:
         if not _page_has_result(state, page_id, skip):
             _mark_queued(state, [page_id])
         job = _submit(state, "translate_page", page_id, {"page_id": page_id, "skip_ready": skip})
+        _mark_package_dirty(state)
         return {"job_id": job.id}
     if scope == "all":
         if not pages:
@@ -1030,6 +1081,7 @@ def _translate(state: AppState, body: dict) -> dict:
             ],
         }
         job = _submit(state, "translate_all", "", payload)
+        _mark_package_dirty(state)
         return {"job_id": job.id}
     raise ValueError("Неизвестная область перевода")
 
@@ -1070,29 +1122,96 @@ def _mark_queued(state: AppState, page_ids: list[str]) -> None:
         state.store.update_status(project_id, page_id, status="queued")
 
 
-def _cancel(state: AppState) -> dict:
-    """Стоп: выкинуть всю очередь, снять паузу и записать пустой снимок."""
-    state.queue.cancel(None)
+def _cancel(state: AppState, body: dict | None = None) -> dict:
+    """Стоп всей очереди или одного задания.
+
+    ``job_id`` в теле отменяет только его. Страницы этого задания получают
+    прежний статус, если их не держит другое активное задание.
+    """
+    body = body or {}
+    if "job_id" in body:
+        raw = body.get("job_id")
+        if not isinstance(raw, str) or not raw.strip():
+            raise ValueError("Нужен непустой job_id")
+        job_id = raw.strip()
+    else:
+        job_id = ""
+    job = state.queue.job(job_id) if job_id else None
+    removed = state.queue.cancel(job_id or None)
+    if job_id:
+        _restore_cancelled_pages(state, job)
+        _save_queue(state)
+        return {"ok": True, **_jobs_view(state)}
     state.queue_pending = False
-    if state.project_id:
-        project = state.store.open_project(state.project_id)
-        for record in project.get("pages") or []:
-            page_id = str(record.get("id") or "")
-            try:
-                current = state.store.page_status(state.project_id, page_id)
-            except (FileNotFoundError, ValueError):
-                continue
-            if current["status"] in ("queued", "running"):
-                state.store.update_status(
-                    state.project_id,
-                    page_id,
-                    status="idle",
-                    progress=0,
-                    stage="",
-                    error="",
-                )
+    # «Стоп» снимает задания всех проектов: статусы чиним по каждому
+    # снятому заданию, а не только по открытому проекту.
+    for item in removed:
+        _restore_cancelled_pages(state, item)
     _save_queue(state)
     return {"ok": True, **_jobs_view(state)}
+
+
+def _restore_cancelled_pages(state: AppState, job) -> None:
+    """Вернуть статус страниц снятого задания.
+
+    Регион возвращает ``previous_status`` из payload (или готовность по
+    provenance), пакет — готовность по result/provenance, вёрстка — ``edited``.
+    Экспорт страницы не меняет. Страницы, которые держит другое активное
+    задание, остаются как есть.
+    """
+    if job is None or job.kind not in REGION_KINDS | BATCH_KINDS | {"apply_document"}:
+        return
+    project_id = str(job.project_id or "")
+    if not project_id:
+        return
+    page_ids = [str(job.page_id)] if job.page_id else []
+    for item in job.payload.get("pages") or []:
+        if not isinstance(item, dict):
+            continue
+        page_id = str(item.get("page_id") or "")
+        if page_id and page_id not in page_ids:
+            page_ids.append(page_id)
+    if not page_ids:
+        return
+    busy = state.queue.active_page_ids(exclude=job.id, project_id=project_id)
+    for page_id in page_ids:
+        if page_id in busy:
+            continue
+        try:
+            current = state.store.page_status(project_id, page_id)
+        except (FileNotFoundError, OSError, ValueError):
+            continue
+        if current.get("status") not in ("queued", "running"):
+            continue
+        if job.kind in REGION_KINDS or job.kind in BATCH_KINDS:
+            try:
+                document = state.store.read_document(project_id, page_id)
+            except (FileNotFoundError, OSError, ValueError):
+                continue
+            previous = (
+                str(job.payload.get("previous_status") or "")
+                if job.kind in REGION_KINDS
+                else ""
+            )
+            restore_region_status(
+                state.store,
+                project_id,
+                page_id,
+                previous,
+                document,
+            )
+            continue
+        try:
+            state.store.update_status(
+                project_id,
+                page_id,
+                status="edited",
+                progress=0,
+                stage="",
+                error="",
+            )
+        except (FileNotFoundError, OSError, ValueError):
+            continue
 
 
 def _dialog_directory(state: AppState, body: dict | None = None) -> dict:
@@ -1167,6 +1286,18 @@ def _export(state: AppState, body: dict) -> dict:
         target = dest
     else:
         target = dest / f"export.{archive}"
+    pages = list(state.store.open_project(state.project_id).get("pages") or [])
+    page_ids = [str(item) for item in page_ids]
+    versions: dict[str, int] = {}
+    known = {str(page.get("id") or "") for page in pages}
+    for page_id in page_ids:
+        if page_id not in known:
+            continue
+        try:
+            # Невизуальные правки двигают версию документа, но не картинку.
+            versions[page_id] = state.store.visual_version(state.project_id, page_id)
+        except (FileNotFoundError, OSError, ValueError):
+            continue
     state.reveal_path = target
     job = _submit(
         state,
@@ -1174,7 +1305,8 @@ def _export(state: AppState, body: dict) -> dict:
         "",
         {
             "dest": str(target),
-            "page_ids": [str(item) for item in page_ids],
+            "page_ids": page_ids,
+            "required_document_versions": versions,
             "format": fmt,
             "jpeg_quality": quality,
             "conflict": conflict,
@@ -1548,6 +1680,10 @@ def _package_save(state: AppState, body: dict | None = None) -> dict:
     body = body or {}
     if not state.project_id:
         raise ValueError("Нет открытого проекта")
+    if state.queue.busy() or (
+        state._preparation_manager is not None and state._preparation_manager.busy()
+    ) or (state._runtime_manager is not None and state._runtime_manager.busy()):
+        raise _HttpError(409, "Дождитесь завершения обработки, чтобы сохранить пакет")
     project, pages = _project_and_pages(state)
     if not pages:
         raise ValueError("Нет страниц для сохранения")
@@ -1723,7 +1859,7 @@ def _jobs_view(state: AppState) -> dict:
     """Пауза, незаконченные задания и факт восстановления при старте."""
     snap = state.queue.snapshot()
     statuses = snap.get("statuses") or {}
-    unfinished = bool(snap.get("batch") or snap.get("edits")) or any(
+    unfinished = bool(snap.get("batch") or snap.get("edits") or snap.get("exports")) or any(
         status in ("queued", "running") for status in statuses.values()
     )
     return {
@@ -1747,29 +1883,66 @@ def _resume_jobs(state: AppState) -> dict:
 
 def _retry_errors(state: AppState) -> dict:
     """Снова поставить задания со статусом error через очередь."""
-    jobs = state.queue.retry_failed()
-    if state.project_id:
-        for job in jobs:
-            if job.project_id != state.project_id:
-                continue
-            page_ids: list[str] = []
-            if job.page_id:
-                page_ids.append(job.page_id)
-            raw_pages = job.payload.get("pages")
-            if isinstance(raw_pages, list):
-                for item in raw_pages:
-                    if isinstance(item, dict) and item.get("page_id"):
-                        page_ids.append(str(item["page_id"]))
-            for page_id in page_ids:
-                try:
-                    state.store.update_status(
-                        state.project_id,
-                        page_id,
-                        status="queued",
-                        error="",
-                    )
-                except (FileNotFoundError, ValueError, OSError):
+    # Пауза на время правки статусов: иначе быстрый воркер успеет закончить
+    # страницу, а мы вернём её в queued уже после завершения.
+    was_paused = state.queue.paused
+    if not was_paused:
+        state.queue.pause()
+    try:
+        jobs = state.queue.retry_failed()
+        if state.project_id:
+            project_id = state.project_id
+            for job in jobs:
+                if job.project_id != project_id or job.kind == "export":
                     continue
+                page_ids: list[str] = []
+                if job.page_id:
+                    page_ids.append(job.page_id)
+                raw_pages = job.payload.get("pages")
+                if isinstance(raw_pages, list):
+                    for item in raw_pages:
+                        if isinstance(item, dict) and item.get("page_id"):
+                            page_ids.append(str(item["page_id"]))
+                raw_ids = job.payload.get("page_ids")
+                if isinstance(raw_ids, list):
+                    for item in raw_ids:
+                        if not isinstance(item, (dict, list)):
+                            page_ids.append(str(item or ""))
+                busy = state.queue.active_page_ids(exclude=job.id, project_id=project_id)
+                skip_ready = bool(job.payload.get("skip_ready"))
+                for page_id in page_ids:
+                    if not page_id or page_id in busy:
+                        continue
+                    if skip_ready:
+                        try:
+                            ready = state.store.image_path(
+                                project_id, page_id, "result",
+                            ).is_file()
+                        except (FileNotFoundError, ValueError, OSError):
+                            ready = False
+                        if ready:
+                            # Воркер пропустит страницу; вернуть готовый статус,
+                            # иначе она навсегда останется queued.
+                            try:
+                                document = state.store.read_document(project_id, page_id)
+                            except (FileNotFoundError, OSError, ValueError):
+                                continue
+                            restore_region_status(
+                                state.store, project_id, page_id, "", document,
+                            )
+                            continue
+                    try:
+                        state.store.update_status(
+                            project_id,
+                            page_id,
+                            status="queued",
+                            error="",
+                        )
+                    except (FileNotFoundError, ValueError, OSError):
+                        continue
+    finally:
+        if not was_paused:
+            state.queue.resume()
     _save_queue(state)
     return {"ok": True, "job_ids": [job.id for job in jobs], **_jobs_view(state)}
 
@@ -2188,21 +2361,26 @@ def _apply_sfx_style(state: AppState, page_id: str, region_raw: str) -> dict:
     from src.models import TextStyle
 
     saved = None
-    for _attempt in range(2):
-        document = state.store.read_document(project_id, page_id)
-        region = next((item for item in document.regions if item.id == region_id), None)
-        if region is None:
-            raise _HttpError(400, "Регион не найден")
-        region.style = TextStyle.from_dict(_merge_style(region.style.to_dict(), estimated))
-        try:
-            saved = state.store.write_document(
-                project_id, page_id, document, base_version=int(document.version),
-            )
-            break
-        except VersionConflict:
-            saved = None
+    # Сериализовать read-modify-write в процессе сервера. Межпроцессный
+    # конфликт с воркером всё ещё ловит версия документа.
+    with state._page_edit_lock:
+        for _attempt in range(2):
+            document = state.store.read_document(project_id, page_id)
+            region = next((item for item in document.regions if item.id == region_id), None)
+            if region is None:
+                raise _HttpError(400, "Регион не найден")
+            region.style = TextStyle.from_dict(_merge_style(region.style.to_dict(), estimated))
+            try:
+                saved = state.store.write_document(
+                    project_id, page_id, document, base_version=int(document.version),
+                )
+                break
+            except VersionConflict:
+                saved = None
     if saved is None:
         raise _HttpError(409, "Конфликт версии")
+    state.store.mark_visual_version(project_id, page_id, saved.version)
+    _mark_package_dirty(state)
     try:
         state.store.update_status(project_id, page_id, status="edited")
     except (FileNotFoundError, ValueError, OSError):

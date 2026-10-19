@@ -9,7 +9,7 @@ sfx: creepster, eater, nosifer, unifraktur, pressstart, press start, special eli
 impact, liber-struct, liber struct, publicpixel, public pixel, pixelzone, deltablock,
 delta block, unsightly.
 shout: russo, oswald, anton, bebas, bangers, black, display, blaec, napalm,
-operationnapalm, operation napalm.
+operationnapalm, operation napalm, jupiteroid, novem.
 """
 
 from __future__ import annotations
@@ -29,6 +29,7 @@ _CYRILLIC = range(0x0410, 0x0450)
 # Роли автоподстановки. Человекочитаемая таблица — docs/FONTS.md.
 FONT_ROLE_DIALOGUE = "Heroika-Regular"
 FONT_ROLE_HANDWRITTEN = "FirstTimeWriting"
+FONT_ROLE_TITLE = "Jupiteroid-Light"
 FONT_ROLE_SHOUT = "Blaec-Regular"
 FONT_ROLE_SHOUT_ITALIC = "Blaec-Italic"
 FONT_ROLE_STENCIL = "OperationNapalm-Regular"
@@ -101,6 +102,8 @@ _SHOUT = (
     "napalm",
     "operationnapalm",
     "operation napalm",
+    "jupiteroid",
+    "novem",
 )
 
 
@@ -225,6 +228,9 @@ def assign_stylized_fonts(
         if bool(getattr(region, "edited", False)):
             continue
         font_id = role_font_id(region)
+        if font_id == FONT_ROLE_TITLE and font_id not in available:
+            # Нет файла заголовка — откат на прежний shout, затем на диалог.
+            font_id = FONT_ROLE_SHOUT if FONT_ROLE_SHOUT in available else FONT_ROLE_DIALOGUE
         if not font_id or font_id not in available:
             continue
         style.font_id = font_id
@@ -252,7 +258,7 @@ def role_font_id(region) -> str | None:
         return FONT_ROLE_DIALOGUE
 
     if block == "title":
-        return FONT_ROLE_SHOUT
+        return FONT_ROLE_TITLE
 
     if block == "sign":
         if uppercase:

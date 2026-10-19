@@ -1,4 +1,10 @@
-# Image Localization Tool
+<p align="center">
+  <img src="docs/assets/app-icon-master.png" width="240" alt="Image Localization Tool — перевод текста внутри изображений">
+</p>
+
+<h1 align="center">Image Localization Tool</h1>
+
+<p align="center"><strong>Переводите текст. Сохраняйте рисунок.</strong></p>
 
 Локальный перевод текста на изображениях (комиксы, манга, скриншоты): детекция баллонов, OCR и перевод через OpenAI-совместимый LLM, очистка букв, вёрстка перевода в форму баллона.
 

@@ -20,7 +20,7 @@ from PIL import Image
 from src.app import __version__
 from src.app.dialogs import DialogBridge
 from src.app.document import PageDocument
-from src.app.jobs import JobQueue
+from src.app.jobs import Job, JobQueue
 from src.app.server import AppState, _bootstrap, _merge_style, _page_action, serve
 from src.app.settings import AppSettings, get_api_key
 from src.app.store import ProjectStore
@@ -456,6 +456,48 @@ def test_put_translation_submits_typeset(api: Api, tmp_path):
     assert jobs[0].payload["plan"] == "typeset"
     assert jobs[0].payload["base_version"] == body["document"]["version"]
     assert jobs[0].page_id == page_id
+    assert api.store.visual_version(project_id, page_id) == body["document"]["version"]
+
+
+def test_nonvisual_edit_does_not_bump_visual_version(api: Api, tmp_path):
+    payload, _image = _add_page(api, tmp_path)
+    project_id = api.state.project_id
+    page_id = payload["pages"][0]["id"]
+    document = api.store.read_document(project_id, page_id)
+    image = Image.new("RGB", (24, 16), "white")
+    api.store.save_image(project_id, page_id, "clean", image)
+    api.store.save_image(project_id, page_id, "result", image)
+    api.store.record_result_provenance(
+        project_id, page_id, document_version=document.version, region_bounds={},
+    )
+    api.store.update_status(project_id, page_id, status="done")
+
+    raw = document.to_dict()
+    raw["warnings"] = ["только предупреждение"]
+    status, _, body = api.json(
+        "PUT",
+        f"/api/pages/{page_id}/document",
+        {"base_version": document.version, "document": raw},
+    )
+    assert status == 200
+    assert body["plan"] == "none"
+    assert api.store.read_document(project_id, page_id).version == document.version + 1
+    assert api.store.visual_version(project_id, page_id) == document.version
+
+    chosen = tmp_path / "export-nonvisual"
+    chosen.mkdir()
+    status, _, _ = api.json(
+        "POST", "/api/dialog/directory", {"path": str(chosen)},
+    )
+    assert status == 200
+    status, _, _ = api.json(
+        "POST",
+        "/api/jobs/export",
+        {"page_ids": [page_id], "format": "png", "conflict": "rename"},
+    )
+    assert status == 200
+    job = [item for item in api.worker.calls if item.kind == "export"][-1]
+    assert job.payload["required_document_versions"][page_id] == document.version
 
 
 def test_put_translation_attaches_previous_document_only_for_current_completed_result(api: Api, tmp_path):
@@ -691,6 +733,9 @@ def test_export_requires_dialog_directory(api: Api, tmp_path):
     assert not _same_path(jobs[0].payload["dest"], evil)
     assert jobs[0].payload["store_root"] == str(api.store.root)
     assert jobs[0].payload["page_ids"] == [page_id]
+    assert jobs[0].payload["required_document_versions"] == {
+        page_id: api.store.read_document(api.state.project_id, page_id).version,
+    }
     assert jobs[0].payload["format"] == "jpg"
     assert jobs[0].payload["jpeg_quality"] == 80
     assert jobs[0].payload["conflict"] == "overwrite"
@@ -727,6 +772,39 @@ def test_dialog_directory_accepts_explicit_path(api: Api, tmp_path):
     )
     assert status == 400
     assert bad["error"]
+
+
+def test_job_status_reports_export_result(api: Api, tmp_path):
+    payload, _image = _add_page(api, tmp_path)
+    page_id = payload["pages"][0]["id"]
+    status, _, _ = api.json(
+        "POST", "/api/jobs/translate", {"scope": "page", "page_id": page_id},
+    )
+    assert status == 200
+
+    chosen = tmp_path / "export-status"
+    chosen.mkdir()
+    status, _, _ = api.json(
+        "POST", "/api/dialog/directory", {"path": str(chosen)},
+    )
+    assert status == 200
+    status, _, submitted = api.json(
+        "POST",
+        "/api/jobs/export",
+        {"page_ids": [page_id], "format": "png", "conflict": "rename"},
+    )
+    assert status == 200
+
+    status, _, body = api.json(
+        "GET", f"/api/jobs/status?job_id={submitted['job_id']}",
+    )
+    assert status == 200
+    assert body["status"] == "done"
+    assert body["result"]["saved"] == 1
+    assert body["result"]["paths"]
+
+    status, _, _ = api.json("GET", "/api/jobs/status?job_id=unknown")
+    assert status == 404
 
 
 def test_secret_does_not_echo_or_clear_key(api: Api):
@@ -1296,6 +1374,97 @@ def test_decoded_page_cache_returns_independent_rgb_copies(api: Api, tmp_path):
     assert first is not second
     assert api.state._render_cache.size_bytes >= 12 * 8 * 3
 
+def test_cancel_single_job_keeps_page_status(api: Api, tmp_path):
+    payload, _image = _add_page(api, tmp_path)
+    page_id = payload["pages"][0]["id"]
+    api.store.update_status(api.state.project_id, page_id, status="done")
+    api.state.queue.pause()
+    job = api.state.queue.submit(
+        "export",
+        api.state.project_id,
+        "",
+        settings=api.state.settings,
+        payload={"dest": str(tmp_path / "out"), "page_ids": [page_id]},
+    )
+
+    status, _, body = api.json("POST", "/api/jobs/cancel", {"job_id": job.id})
+
+    assert status == 200
+    assert body["ok"] is True
+    assert api.store.page_status(api.state.project_id, page_id)["status"] == "done"
+    assert api.state.queue.job_status(job.id) == "cancelled"
+    api.state.queue.resume()
+
+
+def test_cancel_queued_region_job_restores_previous_status(api: Api, tmp_path):
+    payload, _image = _add_page(api, tmp_path)
+    page_id = payload["pages"][0]["id"]
+    project_id = api.state.project_id
+    api.store.update_status(project_id, page_id, status="done")
+    api.state.queue.pause()
+
+    status, _, action = api.json(
+        "POST", f"/api/pages/{page_id}/action",
+        {"action": "retranslate", "region_id": 1},
+    )
+    assert status == 200
+    job_id = action["job_id"]
+    assert api.store.page_status(project_id, page_id)["status"] == "queued"
+
+    status, _, body = api.json("POST", "/api/jobs/cancel", {"job_id": job_id})
+
+    assert status == 200
+    assert body["ok"] is True
+    assert api.store.page_status(project_id, page_id)["status"] == "done"
+    assert api.state.queue.job_status(job_id) == "cancelled"
+    api.state.queue.resume()
+
+
+def test_full_stop_restores_pages_of_other_project(api: Api, tmp_path):
+    other = api.store.create_project("Другая", "en", "ru")
+    image = tmp_path / "other.png"
+    Image.new("RGB", (24, 16), "white").save(image)
+    page_id = api.store.add_sources(other["id"], [image])[0]["id"]
+    api.store.update_status(other["id"], page_id, status="queued")
+    api.state.queue.pause()
+    job = api.state.queue.submit(
+        "translate_page",
+        other["id"],
+        page_id,
+        settings=api.state.settings,
+        payload={"store_root": str(api.store.root)},
+    )
+
+    status, _, body = api.json("POST", "/api/jobs/cancel", {})
+
+    assert status == 200
+    assert body["ok"] is True
+    assert api.state.queue.job_status(job.id) == "cancelled"
+    assert api.store.page_status(other["id"], page_id)["status"] == "idle"
+    api.state.queue.resume()
+
+
+def test_cancel_apply_restores_edited(api: Api, tmp_path):
+    payload, _image = _add_page(api, tmp_path)
+    page_id = payload["pages"][0]["id"]
+    project_id = api.state.project_id
+    api.store.update_status(project_id, page_id, status="queued")
+    api.state.queue.pause()
+    job = api.state.queue.submit(
+        "apply_document",
+        project_id,
+        page_id,
+        settings=api.state.settings,
+        payload={"plan": "typeset"},
+    )
+
+    status, _, _body = api.json("POST", "/api/jobs/cancel", {"job_id": job.id})
+
+    assert status == 200
+    assert api.store.page_status(project_id, page_id)["status"] == "edited"
+    api.state.queue.resume()
+
+
 def test_region_action_carries_base_version(api: Api, tmp_path, monkeypatch):
     from types import SimpleNamespace
 
@@ -1310,10 +1479,14 @@ def test_region_action_carries_base_version(api: Api, tmp_path, monkeypatch):
         return SimpleNamespace(id="job-1")
 
     monkeypatch.setattr(server, "_submit", submit)
+    api.state.package_dirty = False
     result = _page_action(api.state, page_id, {"action": "retranslate", "region_id": 1, "base_version": 7})
     assert result == {"job_id": "job-1"}
+    assert api.store.page_status(api.state.project_id, page_id)["status"] == "queued"
+    assert api.state.package_dirty is True
     assert captured == {"kind": "retranslate", "page_id": page_id,
-                        "body": {"region_id": 1, "base_version": 7}}
+                        "body": {"region_id": 1, "base_version": 7,
+                                 "previous_status": "idle"}}
 
     with pytest.raises(ValueError, match="base_version"):
         _page_action(api.state, page_id, {"action": "retranslate", "region_id": 1, "base_version": True})
@@ -1427,3 +1600,101 @@ def test_merge_style_skips_rotation_and_warp():
     assert merged["warp"]["bend"] == 0.2
     assert merged["warp"]["quad"] == [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0]]
     assert merged["warp"]["mesh"] == [[0.0, 0.0], [1.0, 1.0]]
+
+def test_cancel_empty_job_id_is_rejected(api: Api):
+    status, _, payload = api.json("POST", "/api/jobs/cancel", {"job_id": ""})
+    assert status == 400
+    assert "job_id" in payload["error"]
+
+
+def test_retry_errors_restores_ready_skip_page(api: Api, tmp_path):
+    payload, _image = _add_page(api, tmp_path)
+    page_id = payload["pages"][0]["id"]
+    project_id = api.state.project_id
+    api.store.save_image(project_id, page_id, "clean", Image.new("RGB", (20, 10), "white"))
+    api.store.save_image(project_id, page_id, "result", Image.new("RGB", (20, 10), "white"))
+    api.store.record_result_provenance(
+        project_id, page_id, document_version=1, region_bounds={},
+    )
+    api.store.update_status(project_id, page_id, status="error")
+
+    api.state.queue.pause()
+    job = Job(
+        id="retry-ready",
+        kind="translate_page",
+        project_id=project_id,
+        page_id=page_id,
+        settings=api.state.settings.to_dict(),
+        payload={"skip_ready": True},
+    )
+    with api.state.queue._lock:
+        api.state.queue._jobs[job.id] = job
+        api.state.queue._status[job.id] = "error"
+    try:
+        status, _, _body = api.json("POST", "/api/jobs/retry-errors", {})
+        assert status == 200
+        assert api.store.page_status(project_id, page_id)["status"] == "done"
+    finally:
+        api.state.queue.resume()
+
+
+def test_retry_errors_skips_page_held_by_other_job(api: Api, tmp_path):
+    payload, _image = _add_page(api, tmp_path)
+    page_id = payload["pages"][0]["id"]
+    project_id = api.state.project_id
+    api.store.update_status(project_id, page_id, status="running")
+
+    api.state.queue.pause()
+    retry = Job(
+        id="retry-busy",
+        kind="translate_page",
+        project_id=project_id,
+        page_id=page_id,
+        settings=api.state.settings.to_dict(),
+        payload={},
+    )
+    busy = Job(
+        id="busy-edit",
+        kind="apply_document",
+        project_id=project_id,
+        page_id=page_id,
+        settings=api.state.settings.to_dict(),
+        payload={},
+    )
+    with api.state.queue._lock:
+        api.state.queue._jobs[retry.id] = retry
+        api.state.queue._status[retry.id] = "error"
+        api.state.queue._jobs[busy.id] = busy
+        api.state.queue._status[busy.id] = "running"
+        api.state.queue._inflight_edits.append(busy.id)
+    try:
+        status, _, _body = api.json("POST", "/api/jobs/retry-errors", {})
+        assert status == 200
+        assert api.store.page_status(project_id, page_id)["status"] == "running"
+    finally:
+        api.state.queue.resume()
+
+def test_package_save_rejects_busy_queue(api: Api, tmp_path):
+    payload, _image = _add_page(api, tmp_path)
+    project_id = api.state.project_id
+    job = Job(
+        id="busy-package",
+        kind="apply_document",
+        project_id=project_id,
+        page_id=payload["pages"][0]["id"],
+        settings=api.state.settings.to_dict(),
+        payload={},
+    )
+    with api.state.queue._lock:
+        api.state.queue._jobs[job.id] = job
+        api.state.queue._status[job.id] = "running"
+        api.state.queue._inflight_edits.append(job.id)
+    try:
+        status, _, body = api.json(
+            "POST", "/api/project/package/save", {"path": str(tmp_path / "out.ilt.zip")},
+        )
+        assert status == 409
+        assert "завершения" in body["error"]
+    finally:
+        with api.state.queue._lock:
+            api.state.queue._inflight_edits.clear()

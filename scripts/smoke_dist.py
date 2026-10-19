@@ -137,8 +137,15 @@ def read_app_version(root: Path | None = None) -> str:
     return match.group(2)
 
 
+_REQUIRED_BASE_FONTS = (
+    "Heroika-Regular.otf",
+    "Jupiteroid-Light.ttf",
+    "Novem.ttf",
+)
+
+
 def expected_font_names(root: Path | None = None) -> list[str]:
-    """Имена файлов шрифтов в ``src/resources/fonts``, если каталог есть."""
+    """Имена файлов шрифтов в ``src/resources/fonts``, которые едут в базе."""
     base = Path(root) if root is not None else repo_root()
     folder = base / "src" / "resources" / "fonts"
     if not folder.is_dir():
@@ -146,7 +153,7 @@ def expected_font_names(root: Path | None = None) -> list[str]:
     names = [
         path.name
         for path in folder.iterdir()
-        if path.is_file() and path.name == "Heroika-Regular.otf"
+        if path.is_file() and path.name in _REQUIRED_BASE_FONTS
     ]
     names.sort()
     return names
@@ -187,7 +194,7 @@ def _stage_fonts(src: Path, dest: Path) -> None:
     if dest.exists():
         shutil.rmtree(dest)
     dest.mkdir(parents=True, exist_ok=True)
-    for name in ("Heroika-Regular.otf", "OFL.txt", "CC0.txt"):
+    for name in (*_REQUIRED_BASE_FONTS, "OFL.txt", "CC0.txt"):
         path = src / name
         if path.is_file():
             shutil.copy2(path, dest / name)
@@ -245,7 +252,7 @@ def dist_problems(
                 problems.append(f"В базу попал скачиваемый компонент: {name}")
         for path in (internal / "rapidocr").rglob("*.onnx"):
             problems.append(f"В базу попала скачиваемая OCR-модель: {path.name}")
-        if any(p.is_file() and p.name != "Heroika-Regular.otf" and p.suffix in _FONT_SUFFIXES
+        if any(p.is_file() and p.name not in _REQUIRED_BASE_FONTS and p.suffix in _FONT_SUFFIXES
                for p in (dist / "fonts").glob("*")):
             problems.append("В базу попали дополнительные скачиваемые шрифты")
     return problems

@@ -363,8 +363,10 @@ class ViewerState extends ChangeNotifier {
     if (pageId == null || document == null) return;
     final version = document.version;
     final kinds = <String>{
-      if (_view == 'original') 'original' else 'result',
-      if (_view == 'compare') 'original',
+      // Оригинал всегда нужен как источник размера листа, пока result
+      // ещё не готов или не декодирован.
+      'original',
+      if (_view != 'original') 'result',
       if (_showMask) 'mask',
     };
     for (final kind in kinds) {
