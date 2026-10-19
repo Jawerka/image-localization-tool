@@ -249,7 +249,10 @@ class FakeWorker:
             self._execute(job)
 
     def _execute(self, job: Job) -> None:
-        self._emit(WorkerEvent(JOB_STARTED, _job_ids(job)))
+        self._emit(WorkerEvent(JOB_STARTED, {
+            **_job_ids(job),
+            "queue_wait_seconds": max(0.0, float(getattr(job, "queue_wait_seconds", 0.0))),
+        }))
         finished = _job_ids(job)
         try:
             if job.kind in BATCH_KINDS:
@@ -436,6 +439,7 @@ class ProcessWorker:
             raise RuntimeError("Воркер остановлен")
         self._ensure()
         payload = job.to_dict()
+        payload["queue_wait_seconds"] = max(0.0, float(getattr(job, "queue_wait_seconds", 0.0)))
         with self._lock:
             self._inflight[str(payload.get("id") or "")] = payload
         self._commands.put({"cmd": "submit", "job": payload})
@@ -747,7 +751,10 @@ def _pull_queued(work_queue: queue.Queue, job_id: str | None) -> list[dict]:
 
 def _dispatch(job: dict, ctx: _Runtime) -> None:
     ctx.page_id = str(job.get("page_id") or "")
-    ctx.emit(WorkerEvent(JOB_STARTED, _dict_ids(job)))
+    ctx.emit(WorkerEvent(JOB_STARTED, {
+        **_dict_ids(job),
+        "queue_wait_seconds": max(0.0, float(job.get("queue_wait_seconds") or 0.0)),
+    }))
     try:
         kind = job.get("kind")
         if kind in BATCH_KINDS:
@@ -1039,6 +1046,29 @@ def _paint(
     with ctx.typeset_lock:
         pipe, config = _pipeline(ctx, job.get("settings") or {}, reset_clients=False)
         drawable = _drawable(document.regions, config.translate_sfx)
+        incremental = None
+        payload = job.get("payload") or {}
+        previous_raw = payload.get("previous_document")
+        changed_ids = payload.get("changed_region_ids") or []
+        if plan == "typeset" and isinstance(previous_raw, dict) and changed_ids and not need_clean:
+            try:
+                previous_document = PageDocument.from_dict(previous_raw)
+                if store.result_provenance_is_current(
+                    project_id, page_id, previous_document.version
+                ):
+                    provenance = store.read_result_provenance(project_id, page_id) or {}
+                    previous_result = _open_rgb(store.image_path(project_id, page_id, "result"))
+                    if previous_result.size == cleaned.size:
+                        incremental = {
+                            "previous_regions": _drawable(
+                                previous_document.regions, config.translate_sfx
+                            ),
+                            "previous_result": previous_result,
+                            "previous_bounds": provenance.get("region_bounds") or {},
+                            "changed_region_ids": [int(item) for item in changed_ids],
+                        }
+            except (FileNotFoundError, OSError, TypeError, ValueError):
+                incremental = None
         rendered, overflow = pipe.typeset_image(
             cleaned,
             drawable,
@@ -1046,6 +1076,7 @@ def _paint(
             warnings,
             progress_callback=progress,
             cancel_check=check,
+            incremental=incremental,
         )
     overflow_ids = set(overflow)
     for region in document.regions:
@@ -1065,6 +1096,12 @@ def _paint(
         return
     store.save_image(project_id, page_id, "result", rendered)
     store.save_image(project_id, page_id, "thumb", rendered)
+    store.record_result_provenance(
+        project_id,
+        page_id,
+        document_version=saved.version,
+        region_bounds=pipe.typesetter._last_region_bounds,
+    )
     _finish_status(store, job, document, page_id)
     ctx.emit(WorkerEvent(PAGE_UPDATED, _page_update(
         store, job, page_id, plan=plan_name, version=saved.version,

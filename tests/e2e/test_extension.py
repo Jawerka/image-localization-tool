@@ -103,9 +103,17 @@ class ApiHandler(BaseHTTPRequestHandler):
             return
         if path == "/page.html":
             page = (
-                "<!DOCTYPE html><html lang=\"ru\"><head><meta charset=\"utf-8\"><title>ilt</title></head>"
+                "<!DOCTYPE html><html lang=\"ru\"><head><meta charset=\"utf-8\"><title>ilt</title>"
+                "<style>body{height:1400px}#contain{position:absolute;left:100px;top:180px;width:300px;height:180px}"
+                "#pic{width:100%;height:100%;object-fit:contain;object-position:70% 50%}"
+                "#contain:fullscreen{left:0;top:0;width:100vw;height:100vh}"
+                "#exit-fullscreen{position:absolute;top:8px;left:8px;z-index:10}"
+                "dialog{padding:20px}dialog #pic{width:340px;height:260px;object-fit:contain;object-position:25% 75%}</style></head>"
                 "<body><nav><img id=\"chrome\" alt=\"шапка\" src=\"/pic.png\" width=\"32\" height=\"32\"></nav>"
-                "<img id=\"pic\" alt=\"страница\" src=\"/pic.png\" width=\"220\" height=\"220\"></body></html>"
+                "<div id=\"contain\"><img id=\"pic\" alt=\"страница\" src=\"/pic.png\"><button id=\"exit-fullscreen\" onclick=\"document.exitFullscreen()\">Выйти</button></div>"
+                "<button id=\"fullscreen-control\" onclick=\"document.querySelector('#contain').requestFullscreen()\">Полный экран</button>"
+                "<button id=\"open-lightbox\" onclick=\"const p=document.querySelector('#pic');document.querySelector('#lightbox').append(p);document.querySelector('#lightbox').showModal()\">Открыть</button>"
+                "<dialog id=\"lightbox\"></dialog></body></html>"
             )
             self._send(200, page.encode("utf-8"), "text/html; charset=utf-8")
             return
@@ -321,6 +329,111 @@ def test_extension_pairs_and_translates(tmp_path):
                 """() => getComputedStyle(document.querySelector(".ilt-btn")).display !== "none" """,
                 timeout=4000,
             )
+            image.evaluate("""() => window.scrollTo(0, 60)""")
+            image.wait_for_timeout(100)
+            placed = image.evaluate(
+                """() => {
+                  const img = document.querySelector('#pic');
+                  const ui = document.querySelector('.ilt-ui');
+                  const rect = img.getBoundingClientRect();
+                  const style = getComputedStyle(img);
+                  const contentWidth = rect.width;
+                  const contentHeight = rect.height;
+                  const scale = Math.min(contentWidth / img.naturalWidth, contentHeight / img.naturalHeight);
+                  const width = img.naturalWidth * scale;
+                  const height = img.naturalHeight * scale;
+                  const visibleRight = rect.left + (contentWidth - width) * 0.7 + width;
+                  const uiRect = ui.getBoundingClientRect();
+                  return { rightGap: visibleRight - uiRect.right, parent: img.parentElement.id,
+                    visibleRight, uiRight: uiRect.right, inlineRight: ui.style.right, imageRect: rect.toJSON(), objectPosition: style.objectPosition };
+                }"""
+            )
+            assert abs(placed["rightGap"] - 4) <= 1.1, placed
+            assert placed["parent"] == "contain"
+            image.evaluate("""() => { const img=document.querySelector('#pic'); img.style.objectFit='cover'; img.style.objectPosition='20% 80%'; }""")
+            image.wait_for_timeout(100)
+            cover_gap = image.evaluate(
+                """() => {
+                  const img = document.querySelector('#pic');
+                  const ui = document.querySelector('.ilt-ui');
+                  return img.getBoundingClientRect().right - ui.getBoundingClientRect().right;
+                }"""
+            )
+            assert abs(cover_gap - 4) <= 1.1, cover_gap
+            image.evaluate("""() => { const img=document.querySelector('#pic'); img.style.removeProperty('object-fit'); img.style.removeProperty('object-position'); }""")
+            image.locator("#fullscreen-control").click()
+            image.wait_for_function("""() => document.fullscreenElement === document.querySelector('#contain')""", timeout=4000)
+            image.wait_for_timeout(100)
+            fullscreen = image.evaluate(
+                """() => {
+                  const img = document.querySelector('#pic');
+                  const ui = document.querySelector('.ilt-ui');
+                      const rect = img.getBoundingClientRect();
+                      const scale = Math.min(rect.width / img.naturalWidth, rect.height / img.naturalHeight);
+                      const width = img.naturalWidth * scale;
+                      const visibleRight = rect.left + (rect.width - width) * 0.7 + width;
+                      return { parent: ui.parentElement.id, gap: visibleRight - ui.getBoundingClientRect().right };
+                }"""
+            )
+            assert fullscreen["parent"] == "contain"
+            assert abs(fullscreen["gap"] - 4) <= 1.1, fullscreen
+            image.locator("#exit-fullscreen").click()
+            image.wait_for_function("""() => document.fullscreenElement === null""", timeout=4000)
+            image.evaluate("""() => document.querySelector('#open-lightbox').click()""")
+            image.wait_for_function(
+                """() => document.querySelector('#lightbox').contains(document.querySelector('.ilt-ui'))""",
+                timeout=4000,
+            )
+            image.wait_for_timeout(500)
+            assert image.locator(".ilt-btn").count() == 1
+            dialog_place = image.evaluate(
+                """() => {
+                  const img = document.querySelector('#pic');
+                  const ui = document.querySelector('.ilt-ui');
+                  const rect = img.getBoundingClientRect();
+                  const scale = Math.min(rect.width / img.naturalWidth, rect.height / img.naturalHeight);
+                  const width = img.naturalWidth * scale;
+                  const visibleRight = rect.left + (rect.width - width) * 0.25 + width;
+                      return visibleRight - ui.getBoundingClientRect().right;
+                }"""
+            )
+            assert abs(dialog_place - 4) <= 1.1, dialog_place
+            image.evaluate("""() => document.querySelector('#lightbox').close()""")
+            image.wait_for_function(
+                """() => document.body.contains(document.querySelector('.ilt-ui'))""",
+                timeout=4000,
+            )
+            image.evaluate(
+                """async () => {
+                  const img = document.querySelector('#pic');
+                  const dialog = document.querySelector('#lightbox');
+                  const frame = document.querySelector('#contain');
+                  const paint = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+                  for (let i = 0; i < 20; i++) {
+                    dialog.append(img);
+                    dialog.showModal();
+                    await paint();
+                    if (!dialog.contains(document.querySelector('.ilt-ui'))) throw new Error('overlay вне lightbox');
+                    dialog.close();
+                    frame.append(img);
+                    await paint();
+                    if (!document.body.contains(document.querySelector('.ilt-ui'))) throw new Error('overlay не вернулся');
+                  }
+                  return {
+                    buttons: document.querySelectorAll('.ilt-btn').length,
+                    wrappers: document.querySelectorAll('.ilt-host').length,
+                    parent: img.parentElement.id,
+                  };
+                }"""
+            )
+            lifecycle = image.evaluate(
+                """() => ({
+                  buttons: document.querySelectorAll('.ilt-btn').length,
+                  wrappers: document.querySelectorAll('.ilt-host').length,
+                  parent: document.querySelector('#pic').parentElement.id,
+                })"""
+            )
+            assert lifecycle == {"buttons": 1, "wrappers": 0, "parent": "contain"}, lifecycle
             image.evaluate(
                 """() => {
                   const btn = document.querySelector(".ilt-btn");
@@ -360,6 +473,9 @@ def test_extension_pairs_and_translates(tmp_path):
             assert "GET /v1/health 200" in joined
             assert "POST /v1/translate 202" in joined
             assert any(line.startswith("GET /v1/jobs/") and line.endswith("/result 200") for line in ApiHandler.events)
+            image.evaluate("""() => { window.__iltRemovedImage = document.querySelector('#pic'); window.__iltRemovedImage.remove(); }""")
+            image.wait_for_function("""() => document.querySelectorAll('.ilt-ui').length === 0""", timeout=4000)
+            assert image.evaluate("""() => window.__iltRemovedImage.dataset.iltBound === undefined""")
         finally:
             if context is not None:
                 context.close()

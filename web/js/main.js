@@ -30,6 +30,7 @@ import {
 } from "./api.js";
 import { initApplyChip } from "./apply_chip.js";
 import { render as renderBatch } from "./batch-panel.js";
+import { initSidebarTabs } from "./sidebar_tabs.js";
 import { closeTop, confirm, init as initDialogs, isAnyOpen, openExport, openGlossary, openHotkeys, openWorker } from "./dialogs.js";
 import { init as initInspector } from "./inspector.js";
 import { install as installKeys } from "./keys.js";
@@ -102,6 +103,7 @@ function icon(id) {
 function start() {
   initShellChrome();
   initPages(onPageCommand, { beforeLeavePage: resolveDeferredOrAbort });
+  initSidebarTabs(() => closeMenu());
   initViewer();
   initApplyChip({ onCommit: () => commitDeferredEdits() });
   initInspector();
@@ -287,11 +289,7 @@ function render(state) {
   const clients = Number(state.remote && state.remote.clients) || 0;
   const net = document.querySelector("[data-role='net-clients']");
   if (net) net.textContent = `Сеть: ${clients} клиентов`;
-  const batchFold = document.querySelector("[data-role='batch-fold']");
-  if (batchFold) {
-    batchFold.hidden = !hasPages;
-    if (hasPages) renderBatch(document.querySelector("[data-role='batch-root']"), batchState(state), batchActions);
-  }
+  renderBatch(document.querySelector("[data-role='batch-root']"), batchState(state), batchActions);
   renderBanners(state);
   renderRecent(state);
   renderStatus(state);
@@ -750,6 +748,18 @@ function onEvent(type, payload) {
   }
   if (type === "worker.failed") openWorker(payload.message || payload.error || payload.reason || "");
   if (type === "model.progress") noteModelProgress(payload);
+  if (type === "preparation.progress") onPreparation(payload);
+}
+
+function onPreparation(payload) {
+  if (payload.state === "error") {
+    setBanner("preparation", {
+      text: payload.error || "Не удалось подготовить компоненты.",
+      actions: [{ id: "settings", label: "Открыть", tab: "models" }],
+    });
+  } else if (payload.state === "ready") {
+    setBanner("preparation", null);
+  }
 }
 
 function onProgress(payload) {

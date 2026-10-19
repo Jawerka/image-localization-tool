@@ -65,6 +65,26 @@ export function models() {
   return request("GET", "/api/models");
 }
 
+export function preparationPlan(selection) {
+  return request("POST", "/api/preparation/plan", selection || {});
+}
+
+export function preparationCurrent() {
+  return request("GET", "/api/preparation");
+}
+
+export function startPreparation(selection) {
+  return request("POST", "/api/preparation/start", selection || {});
+}
+
+export function pausePreparation() {
+  return request("POST", "/api/preparation/pause", {});
+}
+
+export function resumePreparation() {
+  return request("POST", "/api/preparation/resume", {});
+}
+
 export function downloadModel(kind) {
   return request("POST", "/api/models/download", { kind });
 }
@@ -108,10 +128,11 @@ export function resetPage(id) {
   return request("POST", `/api/pages/${encodeURIComponent(id)}/reset`, {});
 }
 
-export function pageAction(id, action, regionId) {
+export function pageAction(id, action, regionId, baseVersion = null) {
   return request("POST", `/api/pages/${encodeURIComponent(id)}/action`, {
     action,
     region_id: regionId,
+    ...(Number.isInteger(baseVersion) ? { base_version: baseVersion } : {}),
   });
 }
 
@@ -241,14 +262,14 @@ export function sfxRestyle(pageId, regionId) {
   );
 }
 
-export async function previewRegion(pageId, regionId) {
+export async function previewRegion(pageId, regionId, draft = null, revision = 0, mode = "exact") {
   let response;
   try {
     response = await fetch(`/api/pages/${encodeURIComponent(pageId)}/preview-region`, {
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json", Accept: "image/png" },
-      body: JSON.stringify({ region_id: regionId }),
+      body: JSON.stringify({ region_id: regionId, revision, mode, ...(draft ? { draft } : {}) }),
     });
   } catch (error) {
     throw new ApiError("Нет связи с программой", 0, null);
@@ -273,6 +294,8 @@ export async function previewRegion(pageId, regionId) {
     y: Number(response.headers.get("X-Offset-Y")) || 0,
     width: 0,
     height: 0,
+    revision: Number(response.headers.get("X-Preview-Revision")) || 0,
+    mode,
   };
 }
 

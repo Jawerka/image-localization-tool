@@ -19,6 +19,7 @@
   const SETTING_KEYS = ["serverUrl", "token", "targetLang", "autoSites"];
 
   const records = new WeakMap();
+  const activeRecords = new Set();
   const jobs = new WeakMap();
   const translated = new Set();
 
@@ -28,6 +29,10 @@
   let autoLock = false;
   let autoAgain = false;
   let autoTimer = 0;
+  let layoutFrame = 0;
+  let motionFrame = 0;
+  let motionTimer = 0;
+  let resizeObserver = null;
 
   // Один вызов API: thenable — его результат, иначе колбэк и lastError.
   function invoke(call) {
@@ -296,53 +301,208 @@
     event.stopPropagation();
   }
 
-  function canHostOnParent(parent, img) {
-    if (!parent || parent.nodeType !== 1) return false;
-    const pos = getComputedStyle(parent).position;
-    if (pos !== "relative" && pos !== "absolute" && pos !== "fixed") return false;
-    const parentRect = parent.getBoundingClientRect();
-    const imageRect = img.getBoundingClientRect();
-    if (parentRect.width <= 0 || parentRect.height <= 0) return false;
-    if (imageRect.width <= 0 || imageRect.height <= 0) return false;
-    return parentRect.width * parentRect.height < imageRect.width * imageRect.height * 4;
-  }
-
-  function wrapperDisplay(img) {
-    const display = getComputedStyle(img).display;
-    if (display === "block" || display === "flex" || display === "grid") return "block";
-    return "inline-block";
-  }
-
-  function createWrapper(img) {
-    const displayName = wrapperDisplay(img);
-    const host = document.createElement("span");
-    host.className = "ilt-host";
-    host.style.display = displayName;
-    host.style.maxWidth = "100%";
-    if (displayName === "inline-block") host.style.verticalAlign = "bottom";
-    img.parentNode.insertBefore(host, img);
-    host.appendChild(img);
-    return host;
-  }
-
   function placeUi(img) {
     const rec = records.get(img);
     if (!rec) return;
-    const host = rec.host;
-    const imgRect = img.getBoundingClientRect();
-    const hostRect = host.getBoundingClientRect();
-    if (rec.wrapped && Math.abs(hostRect.right - imgRect.right) < 1 && Math.abs(imgRect.top - hostRect.top) < 1) {
-      rec.ui.style.top = "4px";
-      rec.ui.style.right = "4px";
+    const rect = visibleImageRect(img);
+    if (!rect) {
+      rec.ui.hidden = true;
       return;
     }
-    const style = getComputedStyle(host);
-    const borderTop = parseFloat(style.borderTopWidth) || 0;
+    const layer = layerForImage(img);
+    if (layer && rec.ui.parentElement !== layer) layer.appendChild(rec.ui);
+    rec.layer = layer;
+    rec.ui.hidden = false;
+    if (!layer || layer === document.body || layer === document.documentElement) {
+      rec.ui.style.position = "fixed";
+      rec.ui.style.top = `${Math.round(rect.top + 4)}px`;
+      const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
+      rec.ui.style.right = `${Math.max(0, Math.round(viewportWidth - rect.right + 4))}px`;
+      return;
+    }
+    const layerRect = layer.getBoundingClientRect();
+    const scaleX = layer.offsetWidth ? layerRect.width / layer.offsetWidth : 1;
+    const scaleY = layer.offsetHeight ? layerRect.height / layer.offsetHeight : 1;
+    const originLeft = layerRect.left + layer.clientLeft * scaleX;
+    const originTop = layerRect.top + layer.clientTop * scaleY;
+    rec.ui.style.position = "absolute";
+    rec.ui.style.top = `${Math.round((rect.top - originTop) / scaleY + 4)}px`;
+    rec.ui.style.right = `${Math.max(0, Math.round(layer.clientWidth - (rect.right - originLeft) / scaleX + 4))}px`;
+  }
+
+  function layerForImage(img) {
+    const dialog = img.closest("dialog[open]");
+    if (dialog) return dialog;
+    const fullscreen = document.fullscreenElement;
+    if (fullscreen && (fullscreen === img || fullscreen.contains(img))) return fullscreen;
+    return document.body || document.documentElement;
+  }
+
+  function visibleImageRect(img) {
+    const style = getComputedStyle(img);
+    const outer = img.getBoundingClientRect();
+    const borderLeft = parseFloat(style.borderLeftWidth) || 0;
     const borderRight = parseFloat(style.borderRightWidth) || 0;
-    const top = imgRect.top - hostRect.top - borderTop + 4;
-    const right = hostRect.right - imgRect.right - borderRight + 4;
-    rec.ui.style.top = Math.round(top) + "px";
-    rec.ui.style.right = Math.round(right) + "px";
+    const borderTop = parseFloat(style.borderTopWidth) || 0;
+    const borderBottom = parseFloat(style.borderBottomWidth) || 0;
+    const paddingLeft = parseFloat(style.paddingLeft) || 0;
+    const paddingRight = parseFloat(style.paddingRight) || 0;
+    const paddingTop = parseFloat(style.paddingTop) || 0;
+    const paddingBottom = parseFloat(style.paddingBottom) || 0;
+    const content = {
+      left: outer.left + borderLeft + paddingLeft,
+      top: outer.top + borderTop + paddingTop,
+      width: Math.max(0, outer.width - borderLeft - borderRight - paddingLeft - paddingRight),
+      height: Math.max(0, outer.height - borderTop - borderBottom - paddingTop - paddingBottom),
+    };
+    if (!content.width || !content.height) return null;
+
+    const naturalWidth = img.naturalWidth || content.width;
+    const naturalHeight = img.naturalHeight || content.height;
+    const containScale = Math.min(content.width / naturalWidth, content.height / naturalHeight);
+    let width = content.width;
+    let height = content.height;
+    const fit = style.objectFit || "fill";
+    if (fit === "contain" || fit === "cover" || fit === "scale-down" || fit === "none") {
+      const scale = fit === "contain" ? containScale
+        : fit === "cover" ? Math.max(content.width / naturalWidth, content.height / naturalHeight)
+          : fit === "scale-down" ? Math.min(1, containScale) : 1;
+      width = naturalWidth * scale;
+      height = naturalHeight * scale;
+    }
+    const [xOffset, yOffset] = objectPosition(style.objectPosition || "50% 50%", content.width, width, content.height, height);
+    let rect = {
+      left: content.left + xOffset,
+      top: content.top + yOffset,
+      right: content.left + xOffset + width,
+      bottom: content.top + yOffset + height,
+    };
+    if (fit === "cover") rect = intersectRect(rect, {
+      left: content.left, top: content.top,
+      right: content.left + content.width, bottom: content.top + content.height,
+    });
+    const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
+    const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
+    if (rect) rect = intersectRect(rect, { left: 0, top: 0, right: viewportWidth, bottom: viewportHeight });
+    for (let parent = img.parentElement; parent && parent !== document.body; parent = parent.parentElement) {
+      const parentStyle = getComputedStyle(parent);
+      if ([parentStyle.overflow, parentStyle.overflowX, parentStyle.overflowY].some((value) => value !== "visible")) {
+        const clip = parent.getBoundingClientRect();
+        if (rect) rect = intersectRect(rect, clip);
+      }
+    }
+    return rect && rect.right - rect.left > 0 && rect.bottom - rect.top > 0
+      ? { ...rect, width: rect.right - rect.left, height: rect.bottom - rect.top }
+      : null;
+  }
+
+  function objectPosition(value, boxWidth, imageWidth, boxHeight, imageHeight) {
+    const parts = String(value).trim().split(/\s+/).filter(Boolean);
+    let x = parts[0] || "50%";
+    let y = parts[1] || "50%";
+    if (parts.length === 1 && /^(top|bottom)$/i.test(x)) {
+      y = x;
+      x = "50%";
+    }
+    return [positionOffset(x, boxWidth - imageWidth), positionOffset(y, boxHeight - imageHeight)];
+  }
+
+  function positionOffset(token, freeSpace) {
+    const value = String(token).toLowerCase();
+    if (value === "center") return freeSpace * 0.5;
+    if (value === "left" || value === "top") return 0;
+    if (value === "right" || value === "bottom") return freeSpace;
+    if (value.endsWith("%")) return freeSpace * Math.min(1, Math.max(0, (parseFloat(value) || 0) / 100));
+    const pixels = value.match(/^(-?[\d.]+)px$/);
+    return pixels ? Number(pixels[1]) || 0 : freeSpace * 0.5;
+  }
+
+  function intersectRect(left, right) {
+    const rect = {
+      left: Math.max(left.left, right.left),
+      top: Math.max(left.top, right.top),
+      right: Math.min(left.right, right.right),
+      bottom: Math.min(left.bottom, right.bottom),
+    };
+    return rect.right > rect.left && rect.bottom > rect.top ? rect : null;
+  }
+
+  function refreshRecord(img, rec = records.get(img)) {
+    if (!rec) return;
+    if (!img.isConnected) {
+      cleanupRecord(img, rec);
+      return;
+    }
+    observeAncestors(img, rec);
+    placeUi(img);
+  }
+
+  function observeAncestors(img, rec) {
+    if (!resizeObserver) return;
+    const next = new Set();
+    for (let node = img; node && node !== document.body; node = node.parentElement) next.add(node);
+    for (const node of rec.observed) {
+      if (!next.has(node)) resizeObserver.unobserve(node);
+    }
+    for (const node of next) {
+      if (!rec.observed.has(node)) resizeObserver.observe(node);
+    }
+    rec.observed = next;
+  }
+
+  function cleanupRecord(img, rec) {
+    if (rec.hoverTimer) clearTimeout(rec.hoverTimer);
+    if (resizeObserver && rec.observed) {
+      for (const node of rec.observed) resizeObserver.unobserve(node);
+    }
+    img.removeEventListener("load", scheduleLayout);
+    rec.ui.remove();
+    activeRecords.delete(rec);
+    delete img.dataset.iltBound;
+    delete img.dataset.iltPhase;
+  }
+
+  function scheduleLayout() {
+    if (layoutFrame) return;
+    layoutFrame = requestAnimationFrame(() => {
+      layoutFrame = 0;
+      for (const rec of activeRecords) refreshRecord(rec.img, rec);
+    });
+  }
+
+  function refreshMotion() {
+    for (const rec of activeRecords) refreshRecord(rec.img, rec);
+    if (hasActiveMotion()) {
+      motionFrame = requestAnimationFrame(refreshMotion);
+      return;
+    }
+    motionFrame = 0;
+  }
+
+  function hasActiveMotion() {
+    const checked = new Set();
+    for (const rec of activeRecords) {
+      for (let node = rec.img; node && node !== document.body; node = node.parentElement) {
+        if (checked.has(node)) continue;
+        checked.add(node);
+        if (node.getAnimations().some((animation) => animation.playState === "running")) return true;
+      }
+    }
+    return false;
+  }
+
+  function startMotionTracking() {
+    if (!motionFrame) motionFrame = requestAnimationFrame(refreshMotion);
+    clearTimeout(motionTimer);
+    motionTimer = setTimeout(() => {
+      if (hasActiveMotion()) {
+        if (!motionFrame) motionFrame = requestAnimationFrame(refreshMotion);
+      } else if (motionFrame) {
+        cancelAnimationFrame(motionFrame);
+        motionFrame = 0;
+        scheduleLayout();
+      }
+    }, 120);
   }
 
   function pictureSources(img) {
@@ -488,16 +648,6 @@
     if (!img.isConnected || !img.parentNode) return;
 
     img.dataset.iltBound = "1";
-    const parentEl = img.parentElement;
-    let host;
-    let wrapped = false;
-    if (parentEl && canHostOnParent(parentEl, img)) {
-      host = parentEl;
-    } else {
-      host = createWrapper(img);
-      wrapped = true;
-    }
-
     const ui = el("div", "ilt-ui ilt-idle");
     const btn = el("button", "ilt-btn");
     btn.type = "button";
@@ -513,11 +663,15 @@
     badge.textContent = "Перевод";
     badge.title = "Показать оригинал";
     ui.append(btn, overlay, badge);
-    host.appendChild(ui);
 
-    const rec = { ui, btn, overlay, stage, queue, badge, host, wrapped };
+    const rec = { img, ui, btn, overlay, stage, queue, badge, layer: null, observed: new Set(), hoverTimer: 0 };
     records.set(img, rec);
+    activeRecords.add(rec);
+    const layer = layerForImage(img);
+    if (layer) layer.appendChild(ui);
     img.dataset.iltPhase = "idle";
+    img.addEventListener("load", scheduleLayout);
+    observeAncestors(img, rec);
     bindHover(img, rec);
     bindControl(btn, () => onButtonClick(img));
     bindControl(badge, () => onBadgeClick(img));
@@ -551,7 +705,10 @@
 
   function consider(img) {
     if (!(img instanceof HTMLImageElement)) return;
-    if (img.dataset.iltBound === "1") return;
+    if (img.dataset.iltBound === "1") {
+      refreshRecord(img);
+      return;
+    }
     if (!img.isConnected || isForeignBlob(img) || !hasAddress(img)) return;
     if (!img.complete) {
       waitLoad(img);
@@ -573,13 +730,17 @@
   function startObserver() {
     const root = document.documentElement || document.body;
     if (!root) return;
+    if (typeof ResizeObserver === "function") resizeObserver = new ResizeObserver(scheduleLayout);
     const observer = new MutationObserver((mutations) => {
+      let layoutChanged = false;
       for (let i = 0; i < mutations.length; i++) {
         const mutation = mutations[i];
         if (mutation.type === "attributes") {
           if (mutation.target instanceof HTMLImageElement) consider(mutation.target);
+          layoutChanged = true;
           continue;
         }
+        layoutChanged = true;
         const nodes = mutation.addedNodes;
         for (let n = 0; n < nodes.length; n++) {
           const node = nodes[n];
@@ -590,13 +751,28 @@
           }
         }
       }
+      if (layoutChanged) {
+        for (const rec of activeRecords) {
+          if (!rec.img.isConnected) cleanupRecord(rec.img, rec);
+        }
+        scheduleLayout();
+      }
     });
     observer.observe(root, {
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ["src", "srcset"],
+      attributeFilter: ["src", "srcset", "style", "class", "open"],
     });
+    window.addEventListener("scroll", scheduleLayout, true);
+    window.addEventListener("resize", scheduleLayout, { passive: true });
+    document.addEventListener("fullscreenchange", scheduleLayout);
+    document.addEventListener("animationstart", startMotionTracking, true);
+    document.addEventListener("transitionrun", startMotionTracking, true);
+    document.addEventListener("animationend", startMotionTracking, true);
+    document.addEventListener("animationcancel", startMotionTracking, true);
+    document.addEventListener("transitionend", startMotionTracking, true);
+    document.addEventListener("transitioncancel", startMotionTracking, true);
   }
 
   function startJob(img) {

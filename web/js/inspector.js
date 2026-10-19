@@ -28,7 +28,7 @@ import {
   inspectorContentKey,
   shouldSkipInspectorRebuild,
 } from "./inspector_render.js";
-import { setStylePreview, viewCenter } from "./viewer.js";
+import { clearMeshPreviewBase, setMeshPreviewBase, setStylePreview, viewCenter } from "./viewer.js";
 
 const TYPES = [
   ["dialogue", "диалог"],
@@ -50,6 +50,7 @@ let rebuilding = false;
 let previewTimer = 0;
 let previewKey = "";
 let previewToken = 0;
+let previewRevision = 0;
 let stylesProject = "";
 let sfxNote = null;
 let lastRegionsKey = "";
@@ -194,6 +195,9 @@ function renderRegions(state, page) {
     list.querySelectorAll("[data-font-nav]").forEach((button) => {
       button.addEventListener("click", () => onFontNav(button));
     });
+    list.querySelectorAll("[data-font-search]").forEach((input) => {
+      input.addEventListener("input", () => filterFonts(input));
+    });
     list.querySelectorAll("[data-nudge]").forEach((button) => {
       button.addEventListener("mousedown", (event) => event.preventDefault());
       button.addEventListener("click", (event) => {
@@ -247,41 +251,43 @@ function card(region, index, state, detailsOpen = null) {
   const pending = state.pendingAction && sameId(state.pendingAction.regionId, region.id)
     ? `<p class="warn-line">${icon("warning")}<span>Ждёт сервер LLM</span></p>`
     : "";
+  const positionOpen = detailsOpenFromMap(detailsOpen, region.id, "position", false);
   return `<article class="${classes.join(" ")}" data-region-id="${escapeAttr(region.id)}" aria-current="true">${head}${pending}
-    <label class="field" for="orig-${escapeAttr(region.id)}">Оригинал
-      <textarea id="orig-${escapeAttr(region.id)}" class="textarea" lang="${escapeAttr(state.settings.source_lang)}" rows="2" data-field="text">${escapeText(region.text)}</textarea>
-    </label>
-    <label class="field" for="tr-${escapeAttr(region.id)}">Перевод
-      <textarea id="tr-${escapeAttr(region.id)}" class="textarea" lang="${escapeAttr(state.settings.target_lang)}" rows="2" data-field="translation">${escapeText(region.translation)}</textarea>
-    </label>
-    <div class="region-card__row">
-      <label class="field" for="type-${escapeAttr(region.id)}">Тип
-        <select id="type-${escapeAttr(region.id)}" class="select" data-field="type">${typeOptions(region.type)}</select>
-      </label>
-      <label class="field" for="speaker-${escapeAttr(region.id)}">Говорящий
-        <input id="speaker-${escapeAttr(region.id)}" class="input" type="text" data-field="speaker" value="${escapeAttr(region.speaker)}">
-      </label>
-    </div>
-    ${sfxNoteHtml(region)}
-    <div class="region-card__actions">
-      <button type="button" class="btn btn-accent" data-region-action="recognize">Распознать</button>
-      <button type="button" class="btn btn-accent" data-region-action="retranslate">Перевести заново</button>
-      <button type="button" class="btn btn-accent" data-region-action="shorten">Сократить</button>
-      <button type="button" class="btn btn-ghost" data-region-action="skip" aria-pressed="${region.skip ? "true" : "false"}">Не переводить</button>
+    <section class="inspector-section" aria-label="Текст">
+      <h3 class="inspector-section__title">Текст</h3>
+      <div class="text-editor">
+        <div class="text-editor__head"><label for="orig-${escapeAttr(region.id)}">Оригинал</label><button type="button" class="btn btn-ghost" data-region-action="recognize">Распознать</button></div>
+        <textarea id="orig-${escapeAttr(region.id)}" class="textarea" lang="${escapeAttr(state.settings.source_lang)}" rows="2" data-field="text">${escapeText(region.text)}</textarea>
+      </div>
+      <div class="text-editor text-editor--translation">
+        <div class="text-editor__head"><label for="tr-${escapeAttr(region.id)}">Перевод</label><span class="text-editor__language">${escapeText(state.settings.target_lang || "")}</span></div>
+        <textarea id="tr-${escapeAttr(region.id)}" class="textarea" lang="${escapeAttr(state.settings.target_lang)}" rows="3" data-field="translation">${escapeText(region.translation)}</textarea>
+        <div class="text-editor__actions"><button type="button" class="btn btn-ghost" data-region-action="retranslate">Перевести заново</button><button type="button" class="btn btn-ghost" data-region-action="shorten">Сократить</button></div>
+      </div>
+      <div class="region-card__row">
+        <label class="field" for="type-${escapeAttr(region.id)}">Тип<select id="type-${escapeAttr(region.id)}" class="select" data-field="type">${typeOptions(region.type)}</select></label>
+        <label class="field" for="speaker-${escapeAttr(region.id)}">Говорящий<input id="speaker-${escapeAttr(region.id)}" class="input" type="text" placeholder="Не указан" data-field="speaker" value="${escapeAttr(region.speaker)}"></label>
+      </div>
+      ${sfxNoteHtml(region)}
       ${(region.type || region.block_type) === "sfx" ? sfxButton(region) : ""}
-      <button type="button" class="btn btn-ghost" data-region-action="reset-style">Сбросить стили</button>
+    </section>
+    <section class="inspector-section" aria-label="Оформление">
+      <h3 class="inspector-section__title">Оформление <span>Аа</span></h3>
+      ${cardStyleMarkup(region, state, detailsOpen)}
+    </section>
+    <details class="region-card__position inspector-section"${positionOpen}>
+      <summary>Положение на странице</summary>
+      <button type="button" class="btn btn-accent" data-region-action="geometry">Редактировать на холсте</button>
+      <button type="button" class="btn btn-ghost" data-region-action="text-move" aria-pressed="${sameId(state.textMoveRegionId, region.id) ? "true" : "false"}">Перемещать только текст</button>
+      <p class="field-hint">В режиме перемещения текста тяните рамку, чтобы изменить положение надписи, не меняя область распознавания и очистки.</p>
+      <p class="field-hint">В обычном режиме тяните рамку для перемещения области, края — для размера. Shift — движение по одной оси.</p>
+      ${nudgePadMarkup()}
+      <button type="button" class="btn btn-ghost" data-region-action="reset-style">Сбросить геометрию</button>
+    </details>
+    <footer class="region-card__footer">
+      <button type="button" class="btn btn-ghost" data-region-action="skip" aria-pressed="${region.skip ? "true" : "false"}">Не переводить</button>
       <button type="button" class="btn btn-ghost" data-region-action="delete">${icon("delete")}Удалить</button>
-    </div>
-    ${nudgePadMarkup()}
-    <div class="region-card__row">
-      ${fontMarkup(region, state)}
-      <label class="choice">
-        <input data-field="uppercase" type="checkbox"${region.style?.uppercase ? " checked" : ""}>
-        ПРОПИСНЫЕ
-      </label>
-    </div>
-    ${inkToggle(region)}
-    ${cardStyleMarkup(region, state, detailsOpen)}
+    </footer>
   </article>`;
 }
 
@@ -681,13 +687,20 @@ function cardStyleMarkup(region, state, detailsOpen = null) {
       </details>`
     : "";
   return `<div class="region-card__style">
-    <label class="field" for="font-id-${escapeAttr(region.id)}">Шрифт
+    <div class="field">
+      <span>Шрифт</span>
+      <input class="input font-search" type="search" data-font-search placeholder="Найти шрифт" aria-label="Поиск шрифта">
       <div class="num-field" data-role="font-family-field">
         <button type="button" class="btn btn-ghost num-field__btn" data-font-nav="-1" aria-label="Предыдущий шрифт">←</button>
-        <select id="font-id-${escapeAttr(region.id)}" class="select select--font" data-field="font_id">${fontOptions}</select>
+        <select id="font-id-${escapeAttr(region.id)}" class="select select--font" data-field="font_id" aria-label="Шрифт">${fontOptions}</select>
         <button type="button" class="btn btn-ghost num-field__btn" data-font-nav="1" aria-label="Следующий шрифт">→</button>
       </div>
-    </label>
+    </div>
+    <div class="region-card__row">
+      ${fontMarkup(region, state)}
+      <label class="choice"><input data-field="uppercase" type="checkbox"${region.style?.uppercase ? " checked" : ""}>Прописные</label>
+    </div>
+    ${inkToggle(region)}
     <div class="region-card__row style-colors">
       <label class="field" for="fill-${escapeAttr(region.id)}">Заливка
         <input id="fill-${escapeAttr(region.id)}" type="color" data-field="fill_rgb" value="${escapeAttr(fill)}">
@@ -700,8 +713,9 @@ function cardStyleMarkup(region, state, detailsOpen = null) {
       </label>
     </div>
     <details class="region-card__warp"${warpOpen}>
-      <summary>Искривление</summary>
+      <summary>Изгиб и сетка</summary>
       <div class="warp-presets" role="group" aria-label="Вид искривления">${presets}</div>
+      <p class="field-hint">Сетка: Ctrl-клик выбирает несколько узлов для совместного перетаскивания. Shift зеркалит одиночный узел; двойной щелчок сбрасывает узел.</p>
       <label class="field" for="bend-${escapeAttr(region.id)}">Изгиб
         <span class="style-range">
           <input id="bend-${escapeAttr(region.id)}" type="range" min="-1" max="1" step="0.05" data-field="warp_bend" value="${escapeAttr(String(bendValue))}">
@@ -711,6 +725,16 @@ function cardStyleMarkup(region, state, detailsOpen = null) {
     </details>
     ${styleChips}
   </div>`;
+}
+
+function filterFonts(input) {
+  const select = input.closest("[data-region-id]")?.querySelector("select[data-field='font_id']");
+  if (!select) return;
+  const query = String(input.value || "").trim().toLocaleLowerCase();
+  [...select.options].forEach((option) => {
+    option.hidden = Boolean(query) && option !== select.selectedOptions[0]
+      && !option.textContent.toLocaleLowerCase().includes(query);
+  });
 }
 
 function warpChoice(warp) {
@@ -772,6 +796,7 @@ function applyCardWarp(region, preset) {
     warp.mesh = null;
   } else if (preset === "mesh") {
     warp.kind = "mesh";
+    warp.version = 2;
     warp.mesh = Array.isArray(warp.mesh) && warp.mesh.length === 16 ? warp.mesh : defaultMeshPoints(bw, bh);
     warp.quad = null;
   }
@@ -798,6 +823,7 @@ function onCardWarp(button) {
   const id = cardNode?.dataset.regionId;
   const preset = button.dataset.cardWarp;
   if (!id || !preset) return;
+  patch({ tool: "select", showBoxes: true });
   editDocument((document) => {
     const region = findRegion(document, id);
     if (!region) return;
@@ -873,6 +899,15 @@ async function onAction(button) {
   const action = button.dataset.regionAction;
   const pageId = getState().activePageId;
   if (!id || !pageId) return;
+  if (action === "geometry") {
+    patch({ tool: "select", showBoxes: true, textMoveRegionId: "" });
+    return;
+  }
+  if (action === "text-move") {
+    const active = sameId(getState().textMoveRegionId, id) ? "" : id;
+    patch({ tool: "select", showBoxes: true, textMoveRegionId: active });
+    return;
+  }
   if (action === "delete") {
     editDocument((document) => {
       document.regions = document.regions.filter((region) => !sameId(region.id, id));
@@ -909,9 +944,13 @@ async function onAction(button) {
     }, { deferApply: true });
     return;
   }
-  patch({ pendingAction: { pageId, regionId: id, action } });
+  if (getState().pendingAction) return;
   try {
-    await pageAction(pageId, action, id);
+    await whenSaved(pageId);
+    const latest = getState();
+    if (String(latest.activePageId) !== String(pageId) || !findRegion(latest.document, id)) return;
+    patch({ pendingAction: { pageId, regionId: id, action } });
+    await pageAction(pageId, action, id, Number(latest.document.version) || 0);
   } catch (error) {
     patch({ pendingAction: null });
     document.dispatchEvent(new CustomEvent("ilt-banner", { detail: { id: "action", text: error.message || "Не удалось выполнить действие" } }));
@@ -1009,12 +1048,13 @@ function watchStyles(state) {
 
 function watchPreview(state) {
   const region = findRegion(state.document, state.selectedRegionId);
-  const key = region ? `${state.activePageId}|${region.id}|${JSON.stringify(region.style || {})}` : "";
+  const key = region ? `${state.activePageId}|${region.id}|${JSON.stringify([region.style || {}, region.bbox, region.text, region.translation, region.text_position || null])}` : "";
   if (key === previewKey) return;
   previewKey = key;
   window.clearTimeout(previewTimer);
   if (!region || !state.activePageId) {
     setStylePreview(null);
+    clearMeshPreviewBase();
     if (state.stylePreview && state.stylePreview.status !== "idle") {
       patch({ stylePreview: { status: "idle", message: "" } });
     }
@@ -1023,19 +1063,40 @@ function watchPreview(state) {
   const pageId = state.activePageId;
   const regionId = region.id;
   patch({ stylePreview: { status: "loading", message: "Обновляем предпросмотр" } });
-  previewTimer = window.setTimeout(() => runPreview(pageId, regionId, key), 400);
+  const revision = ++previewRevision;
+  previewTimer = window.setTimeout(() => runPreview(pageId, regionId, key, revision), 400);
 }
 
-async function runPreview(pageId, regionId, key) {
+async function runPreview(pageId, regionId, key, revision) {
   const token = ++previewToken;
   try {
-    const result = await previewRegion(pageId, regionId);
-    if (token !== previewToken || key !== previewKey) {
+    const draft = findRegion(getState().document, regionId);
+    if (key !== previewKey || !draft) return;
+    const warp = draft.style && draft.style.warp;
+    const needsMeshLayer = warp && warp.kind === "mesh" && Number(warp.version) >= 2;
+    const baseRequest = needsMeshLayer
+      ? previewRegion(pageId, regionId, draft, revision, "base-layer")
+      : null;
+    if (!needsMeshLayer) clearMeshPreviewBase();
+    const result = await previewRegion(pageId, regionId, draft, revision);
+    if (token !== previewToken || key !== previewKey || result.revision !== revision) {
       URL.revokeObjectURL(result.url);
       return;
     }
     setStylePreview(result);
     patch({ stylePreview: { status: "ready", message: "" } });
+    if (baseRequest) {
+      try {
+        const base = await baseRequest;
+        if (token !== previewToken || key !== previewKey || base.revision !== revision) {
+          URL.revokeObjectURL(base.url);
+          return;
+        }
+        setMeshPreviewBase(base, { ...draft, originX: base.x, originY: base.y });
+      } catch (_error) {
+        clearMeshPreviewBase();
+      }
+    }
   } catch (error) {
     if (token !== previewToken || key !== previewKey) return;
     setStylePreview(null);

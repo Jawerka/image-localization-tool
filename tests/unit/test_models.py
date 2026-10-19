@@ -51,6 +51,8 @@ class TestTextRegion:
         assert region.overflow is False
         assert region.translation_locked is False
         assert region.style.font_size_override == 0
+        assert region.text_position is None
+        assert region.style.warp["version"] == 1
 
     def test_roundtrip_new_fields(self):
         region = TextRegion(
@@ -75,6 +77,22 @@ class TestTextRegion:
         assert restored.style.uppercase is True
         assert restored.style.fill_locked is True
         assert restored.style.stroke_width == 3.0
+
+    def test_text_position_roundtrip_and_validation(self):
+        region = TextRegion(id=4, bbox=(2, 3, 40, 20), text_position=(100.5, 55.25))
+        restored = TextRegion.from_dict(region.to_dict())
+        assert restored.text_position == (100.5, 55.25)
+        with pytest.raises(ValueError):
+            TextRegion.from_dict({"id": 4, "bbox": [0, 0, 10, 10], "text_position": [float("nan"), 2]})
+        with pytest.raises(ValueError):
+            TextRegion.from_dict({"id": 4, "bbox": [0, 0, 10, 10], "text_position": [1]})
+
+    def test_old_warp_without_version_defaults_to_identity_compatible_version(self):
+        style = TextStyle.from_dict({"warp": {"kind": "arc", "bend": 0.2}})
+        assert style.warp["version"] == 1
+        assert style.warp["kind"] == "arc"
+        mesh = TextStyle.from_dict({"warp": {"kind": "mesh", "version": 2}})
+        assert mesh.to_dict()["warp"]["version"] == 2
 
     def test_should_translate_respects_skip(self):
         region = TextRegion(

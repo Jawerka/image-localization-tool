@@ -62,10 +62,12 @@ class BubbleDetector:
         model_path: str | Path | None = None,
         conf: float = 0.3,
         providers: list[str] | None = None,
+        intra_op_threads: int = 0,
     ):
         self.model_path = Path(model_path) if model_path else self._default_model()
         self.conf = conf
         self.providers = providers or ["CPUExecutionProvider"]
+        self.intra_op_threads = max(0, int(intra_op_threads))
         self._session = None
 
     @staticmethod
@@ -84,7 +86,14 @@ class BubbleDetector:
         if not self.model_path.exists():
             raise FileNotFoundError(f"Не найден детектор: {self.model_path}")
         logger.info(f"Loading bubble detector: {self.model_path.name}")
-        self._session = ort.InferenceSession(str(self.model_path), providers=self.providers)
+        if self.intra_op_threads:
+            options = ort.SessionOptions()
+            options.intra_op_num_threads = self.intra_op_threads
+            self._session = ort.InferenceSession(
+                str(self.model_path), sess_options=options, providers=self.providers,
+            )
+        else:
+            self._session = ort.InferenceSession(str(self.model_path), providers=self.providers)
         return self._session
 
     def detect(self, image: Image.Image) -> list[Detection]:

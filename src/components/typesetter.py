@@ -644,13 +644,17 @@ def _rotate_layer(
     return rotated, _source_to_dest(matrix, point[0], point[1])
 
 
-def _paste_rgba(base: Image.Image, layer: Image.Image, xy: tuple[float, float]) -> None:
+def _paste_rgba(
+    base: Image.Image,
+    layer: Image.Image,
+    xy: tuple[float, float],
+) -> tuple[int, int, int, int] | None:
     x = int(round(xy[0]))
     y = int(round(xy[1]))
     base_w, base_h = base.size
     layer_w, layer_h = layer.size
     if layer_w < 1 or layer_h < 1 or x >= base_w or y >= base_h or x + layer_w <= 0 or y + layer_h <= 0:
-        return
+        return None
     src_x0 = max(0, -x)
     src_y0 = max(0, -y)
     dst_x = max(0, x)
@@ -658,9 +662,124 @@ def _paste_rgba(base: Image.Image, layer: Image.Image, xy: tuple[float, float]) 
     src_x1 = min(layer_w, base_w - dst_x + src_x0)
     src_y1 = min(layer_h, base_h - dst_y + src_y0)
     if src_x1 <= src_x0 or src_y1 <= src_y0:
-        return
+        return None
     cropped = layer.crop((src_x0, src_y0, src_x1, src_y1))
+    visible = cropped.getchannel("A").getbbox()
     base.alpha_composite(cropped, dest=(dst_x, dst_y))
+    if visible is None:
+        return None
+    return (
+        dst_x + visible[0],
+        dst_y + visible[1],
+        dst_x + visible[2],
+        dst_y + visible[3],
+    )
+
+
+def _union_bounds(
+    current: tuple[int, int, int, int] | None,
+    addition: tuple[int, int, int, int] | None,
+) -> tuple[int, int, int, int] | None:
+    if addition is None:
+        return current
+    if current is None:
+        return addition
+    return (
+        min(current[0], addition[0]),
+        min(current[1], addition[1]),
+        max(current[2], addition[2]),
+        max(current[3], addition[3]),
+    )
+
+
+def _clip_bounds(
+    bounds: tuple[int, int, int, int] | None,
+    size: tuple[int, int],
+) -> tuple[int, int, int, int] | None:
+    if bounds is None:
+        return None
+    left = max(0, min(int(size[0]), int(bounds[0])))
+    top = max(0, min(int(size[1]), int(bounds[1])))
+    right = max(0, min(int(size[0]), int(bounds[2])))
+    bottom = max(0, min(int(size[1]), int(bounds[3])))
+    return (left, top, right, bottom) if right > left and bottom > top else None
+
+
+def compose_overlay_crop(
+    clean: Image.Image,
+    previous_result: Image.Image,
+    overlay: Image.Image,
+    bounds: tuple[int, int, int, int],
+) -> Image.Image:
+    """Обновить прямоугольник результата тем же alpha-composite, что и полный рендер."""
+    if clean.size != previous_result.size or clean.size != overlay.size:
+        raise ValueError("Размеры clean, предыдущего результата и overlay должны совпадать")
+    clipped = _clip_bounds(bounds, clean.size)
+    result = previous_result.convert("RGB").copy()
+    if clipped is None:
+        return result
+    left, top, right, bottom = clipped
+    base_crop = clean.crop(clipped).convert("RGBA")
+    overlay_crop = overlay.crop(clipped).convert("RGBA")
+    composed_crop = Image.alpha_composite(base_crop, overlay_crop).convert("RGB")
+    result.paste(composed_crop, (left, top))
+    return result
+
+
+def incremental_dirty_bounds(
+    previous_regions: list[TextRegion],
+    current_regions: list[TextRegion],
+    previous_bounds: dict,
+    current_bounds: dict,
+    changed_region_ids: list[int],
+    page_size: tuple[int, int],
+) -> tuple[int, int, int, int] | None:
+    """Объединить старые/новые чернила и зависимые баллоны; None требует full fallback."""
+    if not changed_region_ids:
+        return None
+    previous_by_id = {int(region.id): region for region in previous_regions}
+    current_by_id = {int(region.id): region for region in current_regions}
+    if set(previous_by_id) != set(current_by_id):
+        return None
+    previous_bounds = {int(key): value for key, value in previous_bounds.items()}
+    current_bounds = {int(key): value for key, value in current_bounds.items()}
+    affected = {int(region_id) for region_id in changed_region_ids}
+    if not affected.issubset(previous_by_id):
+        return None
+
+    # Размер и разбивка коротких реплик зависят от соседних кеглей; изменённый
+    # текст/стиль в баллоне инвалидирует bounds всех баллонных реплик.
+    for region_id in tuple(affected):
+        old = previous_by_id[region_id]
+        new = current_by_id[region_id]
+        layout_changed = old.translation != new.translation or old.style.to_dict() != new.style.to_dict()
+        if layout_changed and (old.bubble_bbox is not None or new.bubble_bbox is not None):
+            affected.update(
+                item_id
+                for item_id, item in previous_by_id.items()
+                if item.bubble_bbox is not None
+            )
+            affected.update(
+                item_id
+                for item_id, item in current_by_id.items()
+                if item.bubble_bbox is not None
+            )
+
+    merged = None
+    for region_id in affected:
+        if region_id not in previous_bounds or region_id not in current_bounds:
+            return None
+        for bounds in (previous_bounds[region_id], current_bounds[region_id]):
+            if bounds is None:
+                continue
+            if not isinstance(bounds, (list, tuple)) or len(bounds) != 4:
+                return None
+            try:
+                candidate = tuple(int(value) for value in bounds)
+            except (TypeError, ValueError, OverflowError):
+                return None
+            merged = _union_bounds(merged, _clip_bounds(candidate, page_size))
+    return merged or (0, 0, 0, 0)
 
 
 def _field_center(region: TextRegion | None, fallback: tuple[float, float]) -> tuple[float, float]:
@@ -672,6 +791,17 @@ def _field_center(region: TextRegion | None, fallback: tuple[float, float]) -> t
         return fallback
     x, y, width, height = (float(box[0]), float(box[1]), float(box[2]), float(box[3]))
     return x + width / 2.0, y + height / 2.0
+
+
+def _text_is_moved(region: TextRegion) -> bool:
+    """Определить реальное смещение относительно прежней опорной точки."""
+    if region.text_position is None:
+        return False
+    source_x, source_y = _field_center(region, (0.0, 0.0))
+    return (
+        abs(float(region.text_position[0]) - source_x) > 1e-6
+        or abs(float(region.text_position[1]) - source_y) > 1e-6
+    )
 
 
 def _bbox_local_to_layer(
@@ -709,7 +839,7 @@ def _composite_styled_layer(
     style: TextStyle,
     measure: ImageDraw.ImageDraw,
     region: TextRegion | None = None,
-) -> None:
+) -> tuple[int, int, int, int] | None:
     """Нарисовать блок на слое 2×, скосить, повернуть, поварпить и вклеить в страницу.
 
     ``quad`` и ``mesh`` в стиле — в координатах рамки региона; перед варпом
@@ -761,6 +891,11 @@ def _composite_styled_layer(
     glyph_cx = min_x + box_w / 2.0
     glyph_cy = min_y + box_h / 2.0
     world_cx, world_cy = _field_center(region, (glyph_cx, glyph_cy))
+    if region is not None and region.text_position is not None:
+        translate_x = float(region.text_position[0]) - world_cx
+        translate_y = float(region.text_position[1]) - world_cy
+    else:
+        translate_x = translate_y = 0.0
     pivot = ((world_cx - origin_x) * scale, (world_cy - origin_y) * scale)
     point = pivot
     if style.skew_x:
@@ -780,13 +915,18 @@ def _composite_styled_layer(
                 for row in range(4)
                 for col in range(4)
             ]
-        warped = warp_image(
-            np.asarray(layer),
-            kind,
-            bend=bend,
-            quad=layer_quad,
-            mesh=layer_mesh,
-        )
+        if kind == "mesh" and int((style.warp or {}).get("version", 1)) >= 2:
+            from src.components.text_mesh import warp_mesh_forward
+
+            warped = warp_mesh_forward(np.asarray(layer), layer_mesh)
+        else:
+            warped = warp_image(
+                np.asarray(layer),
+                kind,
+                bend=bend,
+                quad=layer_quad,
+                mesh=layer_mesh,
+            )
         layer = Image.fromarray(warped)
         if kind == "arc" and bend:
             # Середина дуги смещается по Y; ведём опорную точку вместе с ней.
@@ -797,7 +937,11 @@ def _composite_styled_layer(
             Image.Resampling.LANCZOS,
         )
         point = (point[0] / scale, point[1] / scale)
-    _paste_rgba(overlay, layer, (world_cx - point[0], world_cy - point[1]))
+    return _paste_rgba(
+        overlay,
+        layer,
+        (world_cx - point[0] + translate_x, world_cy - point[1] + translate_y),
+    )
 
 
 def _channel_luminance(value: float) -> float:
@@ -913,6 +1057,7 @@ class Typesetter:
         self.margin_ratio = margin_ratio
         self.user_fonts = Path(user_fonts) if user_fonts else None
         self._font_faces = None
+        self._last_region_bounds: dict[int, tuple[int, int, int, int] | None] = {}
 
     def _region_font(self, region: TextRegion) -> Path | None:
         """Пустой ``font_id`` оставляет прежний подбор. Иначе — файл из каталога."""
@@ -926,6 +1071,21 @@ class Typesetter:
             return found
         logger.info(f"Шрифт '{font_id}' не найден, используется запасной")
         return _font_file(region)
+
+    def render_layer(
+        self,
+        image: Image.Image,
+        regions: list[TextRegion],
+        force: bool = False,
+    ) -> tuple[Image.Image, tuple[int, int], list[int]]:
+        """Вернуть прозрачный слой надписей, его origin на странице и переполнения."""
+        self._render(image, regions, force=force, compose=False)
+        layer = self._last_overlay.copy()
+        bounds = layer.getchannel("A").getbbox()
+        if bounds is None:
+            return Image.new("RGBA", (1, 1), (0, 0, 0, 0)), (0, 0), []
+        left, top, right, bottom = bounds
+        return layer.crop(bounds), (left, top), list(self._last_overflow)
 
     def _stroke_paint(
         self,
@@ -988,13 +1148,66 @@ class Typesetter:
         force: bool = False,
     ) -> tuple[Image.Image, list[int]]:
         """Нарисовать переводы. Второй результат — id регионов, которые не влезли."""
+        return self._render(image, regions, force=force, compose=True)
+
+    def render_incremental(
+        self,
+        image: Image.Image,
+        regions: list[TextRegion],
+        previous_regions: list[TextRegion],
+        previous_result: Image.Image,
+        previous_bounds: dict,
+        changed_region_ids: list[int],
+        *,
+        force: bool = False,
+        max_area_ratio: float = 0.25,
+    ) -> tuple[Image.Image, list[int], dict]:
+        """Рендерить обычный overlay и пересобирать только доказанную dirty-область."""
+        _unused, overflow = self._render(image, regions, force=force, compose=False)
+        width, height = image.size
+        dirty = incremental_dirty_bounds(
+            previous_regions,
+            regions,
+            previous_bounds,
+            self._last_region_bounds,
+            changed_region_ids,
+            image.size,
+        )
+        details = {"mode": "full", "bounds": [0, 0, width, height], "dirty_pixels": width * height}
+        if previous_result.size != image.size or dirty is None:
+            rendered = Image.alpha_composite(image.convert("RGBA"), self._last_overlay).convert("RGB")
+            return rendered, overflow, details
+
+        left, top, right, bottom = dirty
+        dirty_pixels = max(0, right - left) * max(0, bottom - top)
+        details = {"mode": "partial", "bounds": list(dirty), "dirty_pixels": dirty_pixels}
+        if dirty_pixels == 0:
+            return previous_result.convert("RGB").copy(), overflow, details
+        if dirty_pixels / float(max(1, width * height)) > max_area_ratio:
+            details = {"mode": "full", "bounds": [0, 0, width, height], "dirty_pixels": width * height}
+            rendered = Image.alpha_composite(image.convert("RGBA"), self._last_overlay).convert("RGB")
+            return rendered, overflow, details
+        rendered = compose_overlay_crop(image, previous_result, self._last_overlay, dirty)
+        return rendered, overflow, details
+
+    def _render(
+        self,
+        image: Image.Image,
+        regions: list[TextRegion],
+        force: bool,
+        *,
+        compose: bool,
+    ) -> tuple[Image.Image, list[int]]:
+        """Выполнить раскладку и при необходимости собрать итоговую RGB-страницу."""
         rgb = np.array(image.convert("RGB"))
-        canvas = image.convert("RGBA")
-        overlay = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+        canvas = image.convert("RGBA") if compose else None
+        overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
         draw = ImageDraw.Draw(overlay)
         hyphenator = _hyphenator(self.lang)
         overflow: list[int] = []
         clip = np.zeros(rgb.shape[:2], dtype=np.uint8)
+        moved_ink = np.zeros(rgb.shape[:2], dtype=np.uint8)
+        region_bounds: dict[int, tuple[int, int, int, int] | None] = {}
 
         for region in regions:
             text = region.translation.strip()
@@ -1005,10 +1218,12 @@ class Typesetter:
             area = interior_mask(rgb, region)
             from src.components.bubble_layout import separate_neighbour_bubbles
             area = separate_neighbour_bubbles(area, region, regions)
+            text_moved = _text_is_moved(region)
             if not np.any(area):
                 overflow.append(region.id)
                 continue
-            clip = np.maximum(clip, area)
+            if not text_moved:
+                clip = np.maximum(clip, area)
             align = "center" if region.bubble_bbox is not None and not region.document else region.style.alignment
             font_path = self._region_font(region)
             letter_spacing = float(region.style.letter_spacing or 0.0)
@@ -1120,29 +1335,71 @@ class Typesetter:
                 fill = _readable_fill(fill, _area_color(rgb, area))
                 region.style.fill_rgb = fill
             if _style_needs_layer(region.style):
-                _composite_styled_layer(
+                visible_bounds = _composite_styled_layer(
                     overlay, placed, chosen_font, font_path, fill, stroke, stroke_width,
                     region.style, draw, region=region,
                 )
+                region_bounds[int(region.id)] = _union_bounds(
+                    region_bounds.get(int(region.id)), visible_bounds,
+                )
             else:
+                if text_moved:
+                    source_box = region.bubble_bbox or region.bbox
+                    source_cx = float(source_box[0]) + float(source_box[2]) / 2.0
+                    source_cy = float(source_box[1]) + float(source_box[3]) / 2.0
+                    offset_x = float(region.text_position[0]) - source_cx
+                    offset_y = float(region.text_position[1]) - source_cy
+                else:
+                    offset_x = offset_y = 0.0
                 for line, x, y in placed:
+                    xy = (x + offset_x, y + offset_y)
                     draw.text(
-                        (x, y),
+                        xy,
                         line,
                         font=chosen_font,
                         fill=fill + (255,),
                         stroke_width=stroke_width,
                         stroke_fill=(stroke + (255,)) if stroke else None,
                     )
-            overlay = _keep_own_ink(overlay, before_alpha, area)
+                    text_bounds = draw.textbbox(
+                        xy,
+                        line,
+                        font=chosen_font,
+                        stroke_width=stroke_width,
+                    )
+                    spacing_pad = int(math.ceil(abs(letter_spacing) * max(0, len(line) - 1))) + 1
+                    visible_bounds = _clip_bounds(
+                        (
+                            text_bounds[0] - spacing_pad,
+                            text_bounds[1] - 1,
+                            text_bounds[2] + spacing_pad,
+                            text_bounds[3] + 1,
+                        ),
+                        image.size,
+                    )
+                    region_bounds[int(region.id)] = _union_bounds(
+                        region_bounds.get(int(region.id)), visible_bounds,
+                    )
+            if text_moved:
+                after_alpha = np.asarray(overlay)[..., 3]
+                moved_ink = np.maximum(moved_ink, ((after_alpha > before_alpha) * 255).astype(np.uint8))
+            else:
+                overlay = _keep_own_ink(overlay, before_alpha, area)
             draw = ImageDraw.Draw(overlay)
 
         overlay_arr = np.array(overlay)
-        overlay_arr[..., 3] = np.where(clip > 0, overlay_arr[..., 3], 0)
-        composed = Image.alpha_composite(canvas, Image.fromarray(overlay_arr)).convert("RGB")
+        visible = (clip > 0) | (moved_ink > 0)
+        overlay_arr[..., 3] = np.where(visible, overlay_arr[..., 3], 0)
+        self._last_overlay = Image.fromarray(overlay_arr)
+        self._last_region_bounds = {
+            int(region.id): region_bounds.get(int(region.id))
+            for region in regions
+        }
+        composed = Image.alpha_composite(canvas, self._last_overlay).convert("RGB") if canvas is not None else image
         overflow_ids = set(overflow)
         for region in regions:
             region.overflow = region.id in overflow_ids
         if overflow:
             logger.info(f"Typeset overflow: {overflow}")
+        self._last_overflow = overflow
         return composed, overflow

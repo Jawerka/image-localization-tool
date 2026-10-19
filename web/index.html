@@ -14,6 +14,7 @@
   <link rel="stylesheet" href="css/settings.css">
   <link rel="stylesheet" href="css/dialogs.css">
   <link rel="stylesheet" href="css/app.css">
+  <link rel="stylesheet" href="css/inspector.css">
 </head>
 <body>
   <a class="skip" href="#viewer">К просмотру</a>
@@ -90,29 +91,33 @@
     <div class="banner-stack" data-role="banners"></div>
 
     <div class="workspace">
-      <nav class="pages" aria-label="Страницы">
+      <nav class="pages" aria-label="Панель проекта">
         <div class="pages__head">
-          <span>Страницы</span>
-          <button type="button" class="btn btn-ghost btn-icon panel-toggle" data-role="toggle-pages" data-toggle-panel="is-pages-collapsed" aria-label="Скрыть список страниц" title="Скрыть список страниц">
+          <button type="button" class="btn btn-ghost btn-icon panel-toggle" data-role="toggle-pages" data-toggle-panel="is-pages-collapsed" aria-label="Скрыть левую панель" title="Скрыть левую панель">
             <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#panel-left"></use></svg>
           </button>
         </div>
-        <details class="batch-fold" data-role="batch-fold" hidden>
-          <summary>Прогон</summary>
+        <div class="sidebar-tabs" role="tablist" aria-label="Разделы проекта">
+          <button type="button" class="sidebar-tabs__tab" id="sidebar-tab-pages" role="tab" aria-selected="true" aria-controls="sidebar-panel-pages" tabindex="0" data-sidebar-tab="pages">Страницы</button>
+          <button type="button" class="sidebar-tabs__tab" id="sidebar-tab-queue" role="tab" aria-selected="false" aria-controls="sidebar-panel-queue" tabindex="-1" data-sidebar-tab="queue">Очередь</button>
+        </div>
+        <section class="sidebar-tabpanel sidebar-tabpanel--pages" id="sidebar-panel-pages" role="tabpanel" aria-labelledby="sidebar-tab-pages" data-sidebar-panel="pages" tabindex="0">
+          <div class="pages__list" role="listbox" data-role="page-list" aria-label="Страницы главы" aria-multiselectable="true" tabindex="0">
+            <p class="pages__empty">Нет страниц</p>
+          </div>
+          <p class="pages__sum"><span>0 из 0 готово</span></p>
+          <div class="context-menu" role="menu" data-role="context-menu" hidden>
+            <div class="context-menu__title" data-role="context-title"></div>
+            <button type="button" class="btn menu__item" role="menuitem" data-action="translate">Перевести страницу</button>
+            <button type="button" class="btn menu__item" role="menuitem" data-action="retranslate">Перевести заново</button>
+            <button type="button" class="btn menu__item" role="menuitem" data-action="reveal">Показать в папке</button>
+            <div class="menu__sep" role="separator"></div>
+            <button type="button" class="btn menu__item" role="menuitem" data-action="remove">Убрать из проекта</button>
+          </div>
+        </section>
+        <section class="sidebar-tabpanel sidebar-tabpanel--queue" id="sidebar-panel-queue" role="tabpanel" aria-labelledby="sidebar-tab-queue" data-sidebar-panel="queue" tabindex="0" hidden>
           <div data-role="batch-root"></div>
-        </details>
-        <div class="pages__list" role="listbox" data-role="page-list" aria-label="Страницы главы" aria-multiselectable="true" tabindex="0">
-          <p class="pages__empty">Нет страниц</p>
-        </div>
-        <div class="context-menu" role="menu" data-role="context-menu" hidden>
-          <div class="context-menu__title" data-role="context-title"></div>
-          <button type="button" class="btn menu__item" role="menuitem" data-action="translate">Перевести страницу</button>
-          <button type="button" class="btn menu__item" role="menuitem" data-action="retranslate">Перевести заново</button>
-          <button type="button" class="btn menu__item" role="menuitem" data-action="reveal">Показать в папке</button>
-          <div class="menu__sep" role="separator"></div>
-          <button type="button" class="btn menu__item" role="menuitem" data-action="remove">Убрать из проекта</button>
-        </div>
-        <p class="pages__sum"><span>0 из 0 готово</span></p>
+        </section>
       </nav>
 
       <main class="viewer" id="viewer" data-role="viewer">
@@ -156,6 +161,7 @@
                 <span class="curtain__grip"></span>
               </div>
               <img class="frame__preview" data-role="style-preview" alt="" hidden>
+              <canvas class="frame__mesh-preview" data-role="mesh-preview" hidden aria-hidden="true"></canvas>
               <div class="frame__boxes" data-role="boxes"></div>
               <svg class="stroke-layer" data-role="stroke-layer" aria-hidden="true"></svg>
               <div class="brush-cursor" data-role="brush-cursor" hidden></div>
@@ -339,25 +345,31 @@
         <nav class="stepper" aria-label="Шаги мастера">
           <button type="button" class="stepper__btn is-active" data-step-btn="1" aria-current="step">
             <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#check"></use></svg>
-            1. Тема
+            1. Профиль
           </button>
           <button type="button" class="stepper__btn" data-step-btn="2">
             <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#check"></use></svg>
-            2. Модели
+            2. Язык
           </button>
           <button type="button" class="stepper__btn" data-step-btn="3">
             <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#check"></use></svg>
-            3. Сервер LLM
+            3. Компоненты
           </button>
           <button type="button" class="stepper__btn" data-step-btn="4">
             <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#check"></use></svg>
-            4. Языки
+            4. LLM/VLM
           </button>
         </nav>
         <div class="wizard__panel">
           <section class="wizard__step" data-step="1">
-            <h2>Тема</h2>
-            <p class="settings__intro">Её можно сменить позже в настройках. «Как в системе» следует за Windows.</p>
+            <h2>Профиль и тема</h2>
+            <p class="settings__intro">Сервер LLM/VLM может быть локальным или сетевым; очистка страницы и offline fallback остаются на этом компьютере.</p>
+            <hr class="settings__rule">
+            <div class="choice-col" role="radiogroup" aria-label="Профиль подготовки">
+              <label class="choice"><input type="radio" name="wiz-profile" value="llm" checked> LLM/VLM с локальным fallback</label>
+              <label class="choice"><input type="radio" name="wiz-profile" value="offline"> Полностью офлайн</label>
+            </div>
+            <p class="settings__intro">Тему можно сменить позже. «Как в системе» следует за Windows.</p>
             <hr class="settings__rule">
             <div class="choice-col" role="radiogroup" aria-label="Тема">
               <label class="choice"><input type="radio" name="wiz-theme" value="dark"> Тёмная</label>
@@ -366,17 +378,32 @@
             </div>
           </section>
           <section class="wizard__step" data-step="2" hidden>
-            <h2>Модели</h2>
-            <p class="settings__intro" data-role="models-note">Проверяем файлы…</p>
+            <h2>Язык</h2>
+            <p class="settings__intro">Укажите язык переводов. Исходный язык страницы определяется автоматически; офлайн-профиль зависит от доступной языковой пары.</p>
             <hr class="settings__rule">
-            <div data-role="wizard-models"></div>
-            <div class="form__actions stack-top">
-              <button type="button" class="btn btn-primary" data-role="models-download">Скачать</button>
+            <div class="form">
+              <label class="form__label" for="wiz-dst">Язык перевода</label>
+              <select id="wiz-dst" class="select">
+                <option value="ru">ru — Русский</option>
+                <option value="en">en — English</option>
+                <option value="uk">uk — Українська</option>
+              </select>
             </div>
           </section>
           <section class="wizard__step" data-step="3" hidden>
+            <h2>Компоненты</h2>
+            <p class="settings__intro" data-role="preparation-note">Считаем объём загрузки и необходимое место…</p>
+            <hr class="settings__rule">
+            <div data-role="wizard-models"></div>
+            <div class="form__actions stack-top">
+              <button type="button" class="btn btn-primary" data-role="preparation-start">Подготовить компоненты</button>
+              <button type="button" class="btn btn-accent" data-role="preparation-pause" hidden>Пауза</button>
+              <button type="button" class="btn btn-accent" data-role="preparation-resume" hidden>Продолжить</button>
+            </div>
+          </section>
+          <section class="wizard__step" data-step="4" hidden>
             <h2>Сервер LLM</h2>
-            <p class="settings__intro">Необязательно. Без сервера останутся RapidOCR и Argos.</p>
+            <p class="settings__intro">Необязательно для офлайн-профиля. При серверном профиле укажите локальный или сетевой OpenAI-compatible LLM/VLM.</p>
             <hr class="settings__rule">
             <div class="form">
               <label class="form__label" for="wiz-url">Адрес</label>
@@ -387,19 +414,6 @@
                 <button type="button" class="btn btn-accent" data-role="wiz-check">Проверить</button>
               </div>
               <p class="field-hint form__full" data-role="wiz-check-result">Проверка убеждается, что модель принимает картинки. Сейчас: не проверено.</p>
-            </div>
-          </section>
-          <section class="wizard__step" data-step="4" hidden>
-            <h2>Язык</h2>
-            <p class="settings__intro">На какой язык переводить. Исходный язык страницы выбирать не нужно.</p>
-            <hr class="settings__rule">
-            <div class="form">
-              <label class="form__label" for="wiz-dst">Язык перевода</label>
-              <select id="wiz-dst" class="select">
-                <option value="ru">ru — Русский</option>
-                <option value="en">en — English</option>
-                <option value="uk">uk — Українська</option>
-              </select>
             </div>
           </section>
         </div>
@@ -427,7 +441,7 @@
             <button type="button" class="btn" role="tab" id="nav-processing" data-tab="processing" aria-selected="false" aria-controls="sec-processing" tabindex="-1">Обработка</button>
             <button type="button" class="btn" role="tab" id="nav-typeset" data-tab="typeset" aria-selected="false" aria-controls="sec-typeset" tabindex="-1">Вёрстка</button>
             <button type="button" class="btn" role="tab" id="nav-export" data-tab="export" aria-selected="false" aria-controls="sec-export" tabindex="-1">Экспорт</button>
-            <button type="button" class="btn" role="tab" id="nav-models" data-tab="models" aria-selected="false" aria-controls="sec-models" tabindex="-1">Модели</button>
+            <button type="button" class="btn" role="tab" id="nav-models" data-tab="models" aria-selected="false" aria-controls="sec-models" tabindex="-1">Компоненты</button>
             <button type="button" class="btn" role="tab" id="nav-network" data-tab="network" aria-selected="false" aria-controls="sec-network" tabindex="-1">Сеть</button>
             <button type="button" class="btn" role="tab" id="nav-about" data-tab="about" aria-selected="false" aria-controls="sec-about" tabindex="-1">О программе</button>
           </div>
@@ -531,11 +545,13 @@
               <label class="form__label" for="set-device">Устройство</label>
               <select id="set-device" class="select">
                 <option value="auto">Авто</option>
-                <option value="gpu">GPU</option>
+                <option value="cuda">GPU</option>
                 <option value="cpu">CPU</option>
               </select>
               <label class="form__label" for="set-conf">Порог детектора</label>
               <input id="set-conf" class="input" type="number" min="0.05" max="0.95" step="0.05" value="0.3">
+              <label class="form__label" for="set-ort-threads">Потоки ONNX Runtime (0 — авто)</label>
+              <input id="set-ort-threads" class="input" type="number" min="0" max="256" step="1" value="0">
             </div>
           </section>
           <section class="settings__section" id="sec-typeset" role="tabpanel" data-tabpanel="typeset" aria-labelledby="nav-typeset" hidden>
@@ -578,17 +594,22 @@
             </div>
           </section>
           <section class="settings__section" id="sec-models" role="tabpanel" data-tabpanel="models" aria-labelledby="nav-models" hidden>
-            <h2>Модели</h2>
-            <p class="settings__intro" data-role="models-note">Проверяем файлы…</p>
+            <h2>Компоненты</h2>
+            <p class="settings__intro" data-role="settings-preparation-note">Проверяем состав подготовки…</p>
+            <p class="field-hint">Папка компонентов: <span data-role="components-path">…</span></p>
             <hr class="settings__rule">
-            <div data-role="model-list"></div>
+            <div data-role="settings-preparation-list"></div>
             <div class="form__actions stack-top">
-              <button type="button" class="btn btn-primary" data-role="models-download">Скачать</button>
-              <button type="button" class="btn btn-accent" data-role="open-models-dir">
+              <button type="button" class="btn btn-primary" data-role="settings-preparation-start">Подготовить компоненты</button>
+              <button type="button" class="btn btn-accent" data-role="settings-preparation-pause" hidden>Пауза</button>
+              <button type="button" class="btn btn-accent" data-role="settings-preparation-resume" hidden>Продолжить</button>
+              <button type="button" class="btn btn-accent" data-role="settings-preparation-refresh">Проверить</button>
+              <button type="button" class="btn btn-accent" data-role="open-components-dir">
                 <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#folder"></use></svg>
-                Открыть папку моделей
+                Открыть папку компонентов
               </button>
             </div>
+            <p class="field-hint">Проверка уже установленных компонентов не требует повторной загрузки.</p>
           </section>
           <section class="settings__section" id="sec-network" role="tabpanel" data-tabpanel="network" aria-labelledby="nav-network" hidden>
             <h2>Доступ по сети</h2>

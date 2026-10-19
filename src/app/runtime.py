@@ -1177,7 +1177,7 @@ class Manager:
             if self.busy():
                 return dict(self._state)
             pack = pack_by_id(pack_id)
-            if ready(pack):
+            if ready(pack) and (pack.kind != "torch" or selected_torch_id() == pack.id):
                 return {"id": pack.id, "state": "installed", "done": 0, "total": 0, "error": ""}
             self._update({"id": pack.id, "state": "downloading", "done": 0, "total": 0, "error": ""})
             self._thread = threading.Thread(target=self._run, args=(pack,), name="ilt-runtime", daemon=True)

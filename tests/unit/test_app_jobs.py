@@ -1,6 +1,7 @@
 """Очередь заданий на фейковом воркере, без моделей и процессов."""
 
 import json
+import time
 
 from PIL import Image
 
@@ -176,6 +177,22 @@ def test_synchronous_finish_releases_batch_slot():
     assert [job.id for job in worker.calls] == [first.id, second.id]
     assert queue.job_status(first.id) == "done"
     assert queue.job_status(second.id) == "done"
+
+
+def test_queue_wait_is_measured_without_persisting_monotonic_clock():
+    worker = FakeWorker(synchronous=False)
+    jobs = JobQueue(worker)
+    jobs.pause()
+    pending = jobs.submit("translate_page", "project1", "page", settings=AppSettings())
+    time.sleep(0.02)
+    jobs.resume()
+
+    assert pending.queue_wait_seconds >= 0.015
+    snapshot = jobs.snapshot()
+    assert "queued_monotonic" not in json.dumps(snapshot)
+    worker.flush()
+    started = next(event for event in jobs.drain_events() if event.type == "job.started")
+    assert started.payload["queue_wait_seconds"] >= 0.015
 
 
 def test_pause_holds_next_batch_until_resume():

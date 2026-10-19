@@ -1,6 +1,6 @@
 """Сравнение документов страницы."""
 
-from src.app.document import PageDocument, diff_plan
+from src.app.document import PageDocument, diff_plan, typeset_changed_region_ids
 from src.models import MaskStroke, TextRegion, TextStyle
 
 
@@ -64,6 +64,10 @@ def test_diff_plan_none_typeset_and_clean():
     spoken.regions[0].speaker = "Аня"
     assert diff_plan(original, spoken) == "typeset"
 
+    translated_position = _clone(original)
+    translated_position.regions[0].text_position = (80.5, 90.25)
+    assert diff_plan(original, translated_position) == "typeset"
+
     moved = _clone(original)
     moved.regions[0].bbox = (1, 2, 3, 4)
     assert diff_plan(original, moved) == "clean"
@@ -95,3 +99,20 @@ def test_diff_plan_strokes():
 
     cleared = _doc(_region())
     assert diff_plan(original, cleared) == "clean"
+
+
+def test_typeset_changed_region_ids_is_stable_and_includes_global_direction_changes():
+    original = _doc(_region(), _region(id=2, bbox=(60, 20, 30, 40)))
+    same = _clone(original)
+    same.version += 1
+    same.regions[0].overflow = True
+    assert typeset_changed_region_ids(original, same) == []
+
+    changed = _clone(original)
+    changed.regions[1].translation = "Здравствуй"
+    changed.regions[0].style.uppercase = True
+    assert typeset_changed_region_ids(original, changed) == [1, 2]
+
+    direction = _clone(original)
+    direction.reading_direction = "rtl"
+    assert typeset_changed_region_ids(original, direction) == [1, 2]

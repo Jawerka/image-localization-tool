@@ -13,6 +13,8 @@ class TestConfig:
         assert config.llm_base_url == "http://127.0.0.1:8080/v1"
         assert config.ocr_backend == "vlm"
         assert config.sfx_mode == "skip"
+        assert config.render_cache_limit_mb == 256
+        assert config.ort_intra_op_threads == 0
 
     def test_load_missing_file(self, tmp_path):
         config = Config.load(tmp_path / "missing.json")
@@ -45,11 +47,13 @@ class TestConfig:
         assert config.min_confidence == 0.5
 
     def test_save(self, tmp_path):
-        config = Config(min_confidence=0.7)
+        config = Config(min_confidence=0.7, ort_intra_op_threads=4)
         path = tmp_path / "out.json"
         config.save(path)
         data = json.loads(path.read_text(encoding="utf-8"))
         assert data["min_confidence"] == 0.7
+        assert data["ort_intra_op_threads"] == 4
+        assert Config.load(path).ort_intra_op_threads == 4
 
     def test_save_never_writes_api_key(self, tmp_path):
         config = Config(llm_api_key="secret-key")

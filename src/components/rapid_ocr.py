@@ -43,8 +43,9 @@ def _point_in_box(point: tuple[float, float], box: tuple[int, int, int, int]) ->
 class RapidOcr:
     """Фолбэк, когда VLM недоступна. Тип блока оценивается геометрией."""
 
-    def __init__(self, min_confidence: float = 0.3):
+    def __init__(self, min_confidence: float = 0.3, intra_op_threads: int = 0):
         self.min_confidence = min_confidence
+        self.intra_op_threads = max(0, int(intra_op_threads))
         self._engine = None
 
     def _load(self):
@@ -56,7 +57,10 @@ class RapidOcr:
             from rapidocr_onnxruntime import RapidOCR
         from src.app.component_catalog import ocr_params
 
-        self._engine = RapidOCR(params=ocr_params())
+        params = ocr_params()
+        if self.intra_op_threads:
+            params["EngineConfig.onnxruntime.intra_op_num_threads"] = self.intra_op_threads
+        self._engine = RapidOCR(params=params)
         return self._engine
 
     def _words(self, image: Image.Image) -> list[OcrWord]:

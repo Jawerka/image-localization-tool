@@ -72,7 +72,7 @@ def diff_plan(previous: PageDocument, new: PageDocument) -> str:
     Сравнение по содержимому, поле ``version`` не учитывается.
     ``clean`` нужен, если менялись рамки, набор id, пропуск, тип блока,
     исходный текст, штрихи или страница потеряла либо получила регион.
-    ``typeset`` — если изменились только перевод, стиль или говорящий.
+    ``typeset`` — если изменились только перевод, стиль, положение текста или говорящий.
     """
     if _strokes(previous) != _strokes(new):
         return "clean"
@@ -91,6 +91,21 @@ def diff_plan(previous: PageDocument, new: PageDocument) -> str:
     if typeset:
         return "typeset"
     return "none"
+
+
+def typeset_changed_region_ids(previous: PageDocument, new: PageDocument) -> list[int]:
+    """Список регионов, чернила которых могут измениться при повторной вёрстке."""
+    previous_by_id = _by_id(previous.regions)
+    new_by_id = _by_id(new.regions)
+    if set(previous_by_id) != set(new_by_id):
+        return []
+    if previous.reading_direction != new.reading_direction:
+        return sorted(new_by_id)
+    return sorted(
+        region_id
+        for region_id, old in previous_by_id.items()
+        if _needs_typeset(old, new_by_id[region_id])
+    )
 
 
 def _by_id(regions: list[TextRegion]) -> dict[int, TextRegion]:
@@ -120,6 +135,7 @@ def _needs_clean(old: TextRegion, current: TextRegion) -> bool:
 def _needs_typeset(old: TextRegion, current: TextRegion) -> bool:
     return (
         old.translation != current.translation
+        or old.text_position != current.text_position
         or old.speaker != current.speaker
         or old.speaker_gender != current.speaker_gender
         or old.style.to_dict() != current.style.to_dict()

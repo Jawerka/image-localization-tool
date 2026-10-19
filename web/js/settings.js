@@ -1,6 +1,6 @@
 /* Настройки и мастер первого запуска. Тема на экране живая, в файл — по ОК и Применить. */
 
-import { dialogLog, dialogReveal, downloadModel, llmCheck, models, putSecret, putSettings, remotePair, remoteRevoke } from "./api.js";
+import { dialogLog, dialogReveal, downloadModel, llmCheck, models, pausePreparation, preparationCurrent, preparationPlan, putSecret, putSettings, remotePair, remoteRevoke, resumePreparation, startPreparation } from "./api.js";
 import { openModelPick } from "./dialogs.js";
 import { clone, getState, patch, setBanner, settingsForSave, subscribe } from "./state.js";
 
@@ -23,6 +23,16 @@ let modelProgress = {};
 let downloading = false;
 let modelError = "";
 let remoteActionError = "";
+let prepPlanResult = null;
+let prepCurrent = null;
+let prepError = "";
+let prepTimer = 0;
+let prepLoading = false;
+let settingsPrepPlan = null;
+let settingsPrepCurrent = null;
+let settingsPrepError = "";
+let settingsPrepLoading = false;
+let settingsPrepTimer = 0;
 
 export function isOpen() {
   return opened;
@@ -74,8 +84,8 @@ export function init() {
   document.querySelector("[data-role='open-log']").addEventListener("click", () => {
     dialogLog().catch((error) => notify(error.message));
   });
-  document.querySelector("[data-role='open-models-dir']").addEventListener("click", () => {
-    dialogReveal({ kind: "models" }).catch((error) => notify(error.message));
+  document.querySelector("[data-role='open-components-dir']")?.addEventListener("click", () => {
+    dialogReveal({ kind: "components" }).catch((error) => notify(error.message));
   });
   document.querySelectorAll("[data-role='models-download']").forEach((button) => {
     button.addEventListener("click", () => downloadMissing());
@@ -90,6 +100,18 @@ export function init() {
       if (input.checked) applyAppearance(input.value, getState().settings.ui_scale);
     });
   });
+  wizardScreen.querySelectorAll("input[name='wiz-profile']").forEach((input) => {
+    input.addEventListener("change", () => {
+      if (input.checked && wizardStep === 3) refreshPreparationPlan();
+    });
+  });
+  document.querySelector("[data-role='preparation-start']")?.addEventListener("click", startWizardPreparation);
+  document.querySelector("[data-role='preparation-pause']")?.addEventListener("click", pauseWizardPreparation);
+  document.querySelector("[data-role='preparation-resume']")?.addEventListener("click", resumeWizardPreparation);
+  document.querySelector("[data-role='settings-preparation-start']")?.addEventListener("click", startSettingsPreparation);
+  document.querySelector("[data-role='settings-preparation-pause']")?.addEventListener("click", pauseSettingsPreparation);
+  document.querySelector("[data-role='settings-preparation-resume']")?.addEventListener("click", resumeSettingsPreparation);
+  document.querySelector("[data-role='settings-preparation-refresh']")?.addEventListener("click", refreshSettingsPreparation);
   document.querySelector("[data-role='wiz-check']").addEventListener("click", () => checkLlm(
     document.getElementById("wiz-url").value,
     document.getElementById("wiz-model").value,
@@ -128,15 +150,21 @@ export function openWizard() {
   wizard = true;
   previewing = true;
   wizardStep = 1;
+  prepPlanResult = null;
+  prepCurrent = null;
+  prepError = "";
+  prepLoading = false;
   const settings = getState().settings;
   checkRadio("wiz-theme", settings.theme || "system");
+  checkRadio("wiz-profile", settings.translator_backend === "argos" ? "offline" : "llm");
   document.getElementById("wiz-url").value = settings.llm_base_url || "";
   document.getElementById("wiz-model").value = settings.llm_model || "";
   document.getElementById("wiz-dst").value = settings.target_lang || "ru";
   wizardScreen.hidden = false;
   document.querySelector("[data-role='shell']")?.setAttribute("inert", "");
   showWizardStep(1);
-  refreshModels();
+  if (prepTimer) window.clearInterval(prepTimer);
+  prepTimer = 0;
 }
 
 export function noteModelProgress(payload) {
@@ -173,6 +201,7 @@ async function apply(close) {
       document.getElementById("set-api-key").readOnly = true;
     }
     if (close) closeScreen();
+    else refreshSettingsPreparation();
   } catch (error) {
     notify(error.message || "Не удалось сохранить настройки");
   }
@@ -182,6 +211,14 @@ function closeScreen() {
   opened = false;
   previewing = wizard;
   screen.hidden = true;
+  if (!wizard && prepTimer) {
+    window.clearInterval(prepTimer);
+    prepTimer = 0;
+  }
+  if (settingsPrepTimer) {
+    window.clearInterval(settingsPrepTimer);
+    settingsPrepTimer = 0;
+  }
   const modal = document.querySelector("[data-role='modals']");
   const modalOpen = Boolean(modal && !modal.hidden);
   if (!wizard && !modalOpen) document.querySelector("[data-role='shell']")?.removeAttribute("inert");
@@ -211,6 +248,7 @@ function readForm() {
   next.inpainter_backend = document.getElementById("set-clean").value === "fill" ? "opencv" : document.getElementById("set-clean").value;
   next.device = document.getElementById("set-device").value;
   next.detector_conf = numberValue("set-conf", 0.3);
+  next.ort_intra_op_threads = numberValue("set-ort-threads", 0);
   next.min_font_size = numberValue("set-font-min", 10);
   next.max_font_size = numberValue("set-font-max", 128);
   next.text_stroke_ratio = numberValue("set-stroke", 0.08);
@@ -252,6 +290,7 @@ function fill(settings) {
   document.getElementById("set-clean").value = clean;
   document.getElementById("set-device").value = settings.device || "auto";
   document.getElementById("set-conf").value = String(settings.detector_conf ?? 0.3);
+  document.getElementById("set-ort-threads").value = String(settings.ort_intra_op_threads ?? 0);
   document.getElementById("set-font-min").value = String(settings.min_font_size ?? 10);
   document.getElementById("set-font-max").value = String(settings.max_font_size ?? 128);
   document.getElementById("set-stroke").value = String(settings.text_stroke_ratio ?? 0.08);
@@ -265,6 +304,8 @@ function fill(settings) {
   document.getElementById("set-version").textContent = state.version || "1.0.0";
   document.getElementById("set-settings-path").textContent = state.paths?.settings || "%APPDATA%\\ImageLocalizationTool\\settings.json";
   document.getElementById("set-data-path").textContent = state.paths?.data || "%LOCALAPPDATA%\\ImageLocalizationTool\\";
+  const componentsPath = document.querySelector("[data-role='components-path']");
+  if (componentsPath) componentsPath.textContent = state.paths?.components || "папка программы";
   applyAppearance(settings.theme, scale);
 }
 
@@ -304,7 +345,7 @@ function choose(list) {
 }
 
 async function onWizardNext() {
-  if (wizardStep === 2 && !requiredReady()) return;
+  if (wizardStep === 3 && !preparationReady()) return;
   if (wizardStep < 4) {
     showWizardStep(wizardStep + 1);
     return;
@@ -315,6 +356,9 @@ async function onWizardNext() {
   current.llm_model = document.getElementById("wiz-model").value.trim();
   current.source_lang = "auto";
   current.target_lang = document.getElementById("wiz-dst").value;
+  const offline = checked("wiz-profile") === "offline";
+  current.translator_backend = offline ? "argos" : "llm";
+  current.ocr_backend = offline ? "rapid" : "vlm";
   current.first_run_complete = true;
   try {
     const saved = await putSettings(current);
@@ -324,6 +368,8 @@ async function onWizardNext() {
     wizard = false;
     previewing = opened;
     wizardScreen.hidden = true;
+    if (prepTimer) window.clearInterval(prepTimer);
+    prepTimer = 0;
     if (!opened) document.querySelector("[data-role='shell']")?.removeAttribute("inert");
   } catch (error) {
     notify(error.message || "Не удалось сохранить настройки");
@@ -332,7 +378,7 @@ async function onWizardNext() {
 
 function showWizardStep(step) {
   const target = Math.min(4, Math.max(1, step));
-  if (target > 2 && !requiredReady()) return;
+  if (target > 3 && !preparationReady()) return;
   wizardStep = target;
   wizardScreen.querySelectorAll("[data-step]").forEach((panel) => {
     panel.hidden = Number(panel.dataset.step) !== wizardStep;
@@ -348,7 +394,308 @@ function showWizardStep(step) {
   document.getElementById("wizard-prev").disabled = wizardStep === 1;
   document.getElementById("wizard-next").textContent = wizardStep === 4 ? "Готово" : "Далее";
   paintModelGate();
-  if (wizardStep === 2) refreshModels();
+  if (wizardStep === 3) {
+    refreshPreparationPlan();
+    refreshPreparationState();
+    if (!prepTimer) prepTimer = window.setInterval(refreshPreparationState, 1200);
+  }
+}
+
+function preparationSelection() {
+  const settings = getState().settings || {};
+  return {
+    source_lang: "en",
+    target_lang: document.getElementById("wiz-dst").value || "ru",
+    translator_backend: checked("wiz-profile") === "offline" ? "argos" : "llm",
+    inpainter_backend: settings.inpainter_backend || "lama",
+    device: settings.device || "auto",
+    models_dir: settings.models_dir || "",
+  };
+}
+
+function preparationReady() {
+  const items = prepPlanResult?.items;
+  return Boolean(Array.isArray(items) && items.length && items.every((item) => item.ready));
+}
+
+async function refreshPreparationPlan() {
+  prepLoading = true;
+  prepError = "";
+  paintPreparation();
+  try {
+    prepPlanResult = await preparationPlan(preparationSelection());
+  } catch (error) {
+    prepPlanResult = null;
+    prepError = error.message || "Не удалось составить план подготовки";
+  } finally {
+    prepLoading = false;
+    paintPreparation();
+  }
+}
+
+async function refreshPreparationState() {
+  if (!wizard || wizardStep !== 3) return;
+  const previousState = prepCurrent?.state;
+  try {
+    prepCurrent = await preparationCurrent();
+    if (prepCurrent?.state === "ready" && previousState !== "ready") {
+      await refreshPreparationPlan();
+    }
+  } catch (error) {
+    prepError = error.message || "Не удалось проверить состояние подготовки";
+  }
+  paintPreparation();
+}
+
+async function startWizardPreparation() {
+  if (prepLoading || preparationReady()) return;
+  prepLoading = true;
+  prepError = "";
+  paintPreparation();
+  try {
+    prepPlanResult = await preparationPlan(preparationSelection());
+    if (prepPlanResult.items?.every((item) => item.ready)) {
+      prepCurrent = { state: "ready" };
+    } else {
+      prepCurrent = await startPreparation(preparationSelection());
+    }
+  } catch (error) {
+    prepError = error.message || "Не удалось начать подготовку";
+  } finally {
+    prepLoading = false;
+    paintPreparation();
+  }
+}
+
+async function pauseWizardPreparation() {
+  try { prepCurrent = await pausePreparation(); }
+  catch (error) { prepError = error.message || "Не удалось приостановить подготовку"; }
+  paintPreparation();
+}
+
+async function resumeWizardPreparation() {
+  try { prepCurrent = await resumePreparation(); }
+  catch (error) { prepError = error.message || "Не удалось продолжить подготовку"; }
+  paintPreparation();
+}
+
+function paintPreparation() {
+  const note = document.querySelector("[data-role='preparation-note']");
+  const host = document.querySelector("[data-role='wizard-models']");
+  const start = document.querySelector("[data-role='preparation-start']");
+  const pause = document.querySelector("[data-role='preparation-pause']");
+  const resume = document.querySelector("[data-role='preparation-resume']");
+  if (!note || !host || !start) return;
+  const plan = prepPlanResult;
+  const current = prepCurrent || {};
+  const active = ["planning", "downloading", "installing", "checking"].includes(current.state);
+  const selected = preparationSelection();
+  const savedSelection = current.selection || {};
+  const matchesCurrent = ["source_lang", "target_lang", "translator_backend", "inpainter_backend", "device", "models_dir"]
+    .every((key) => String(savedSelection[key] || "") === String(selected[key] || ""));
+  const paused = current.state === "paused" && matchesCurrent;
+  const pausedOther = current.state === "paused" && !matchesCurrent;
+  const ready = preparationReady();
+  const total = Number(plan?.total || 0);
+  const required = Number(plan?.required_space || 0);
+  start.textContent = total > 0 ? "Подготовить компоненты" : "Проверить и активировать";
+  if (prepError) note.textContent = prepError;
+  else if (prepLoading) note.textContent = "Считаем объём загрузки и место установки…";
+  else if (ready) note.textContent = "Компоненты готовы. Можно продолжить настройку.";
+  else if (current.state === "error") note.textContent = current.error || "Не удалось подготовить компоненты.";
+  else if (paused) note.textContent = `Подготовка приостановлена: ${formatBytes(current.done)} из ${formatBytes(current.total)}.`;
+  else if (pausedOther) note.textContent = "Приостановлена подготовка другого профиля. Запуск ниже создаст план для выбранного профиля.";
+  else if (active) note.textContent = `${current.current || "Подготовка компонентов"}: ${formatBytes(current.done)} из ${formatBytes(current.total)}.`;
+  else note.textContent = total === 0
+    ? "Компоненты уже скачаны. Нужна только проверка и активация."
+    : `Потребуется скачать ${formatBytes(total)} и иметь ${formatBytes(required)} свободного места.`;
+
+  const items = Array.isArray(plan?.items) ? plan.items : [];
+  host.innerHTML = items.map((item) => `<div class="model-row"><span class="model-row__name">${escapeText(item.title || item.id)}</span><span class="badge ${item.ready ? "badge--ok" : "badge--warn"}">${escapeText(preparationBadge(item))}</span></div>`).join("");
+  if (Array.isArray(plan?.warnings) && plan.warnings.length) {
+    host.insertAdjacentHTML("beforeend", `<p class="field-hint">${plan.warnings.map(escapeText).join(" ")}</p>`);
+  }
+  start.hidden = ready || active || paused || prepLoading;
+  start.disabled = !plan || Boolean(prepError);
+  if (pause) pause.hidden = !active;
+  if (resume) resume.hidden = !paused;
+  const next = document.getElementById("wizard-next");
+  if (next && wizard && wizardStep === 3) next.disabled = !ready;
+}
+
+function formatBytes(value) {
+  const bytes = Math.max(0, Number(value) || 0);
+  if (bytes < 1024 * 1024) return `${Math.ceil(bytes / 1024)} КБ`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} ГБ`;
+}
+
+function preparationBadge(item) {
+  if (item.ready) return "готово";
+  return Number(item.download_bytes) > 0 ? formatBytes(item.download_bytes) : "проверить";
+}
+
+function settingsPreparationSelection() {
+  const form = readForm();
+  return {
+    source_lang: "en",
+    target_lang: form.target_lang || "ru",
+    translator_backend: form.translator_backend || "llm",
+    inpainter_backend: form.inpainter_backend || "lama",
+    device: form.device || "auto",
+    models_dir: form.models_dir || "",
+  };
+}
+
+function settingsPreparationActive(current = settingsPrepCurrent) {
+  return ["planning", "downloading", "installing", "checking"].includes(String(current?.state || ""));
+}
+
+function settingsPreparationMatches(current, selected) {
+  const saved = current?.selection || {};
+  return ["source_lang", "target_lang", "translator_backend", "inpainter_backend", "device", "models_dir"]
+    .every((key) => String(saved[key] || "") === String(selected[key] || ""));
+}
+
+function settingsPreparationReady() {
+  const items = settingsPrepPlan?.items;
+  return Boolean(Array.isArray(items) && items.length && items.every((item) => item.ready));
+}
+
+async function refreshSettingsPreparation() {
+  if (!opened || !document.querySelector("[data-role='settings-preparation-note']")) return;
+  settingsPrepLoading = true;
+  settingsPrepError = "";
+  paintSettingsPreparation();
+  try {
+    const selection = settingsPreparationSelection();
+    const [plan, current] = await Promise.all([preparationPlan(selection), preparationCurrent()]);
+    settingsPrepPlan = plan;
+    settingsPrepCurrent = current;
+  } catch (error) {
+    settingsPrepPlan = null;
+    settingsPrepError = error.message || "Не удалось проверить компоненты";
+  } finally {
+    settingsPrepLoading = false;
+    paintSettingsPreparation();
+    syncSettingsPreparationPoll();
+  }
+}
+
+function syncSettingsPreparationPoll() {
+  if (settingsPreparationActive()) {
+    if (!settingsPrepTimer) settingsPrepTimer = window.setInterval(refreshSettingsPreparationState, 1200);
+    return;
+  }
+  if (settingsPrepTimer) {
+    window.clearInterval(settingsPrepTimer);
+    settingsPrepTimer = 0;
+  }
+}
+
+async function refreshSettingsPreparationState() {
+  if (!opened) {
+    if (settingsPrepTimer) {
+      window.clearInterval(settingsPrepTimer);
+      settingsPrepTimer = 0;
+    }
+    return;
+  }
+  const previous = settingsPrepCurrent?.state;
+  try {
+    settingsPrepCurrent = await preparationCurrent();
+    if (settingsPrepCurrent?.state === "ready" && previous !== "ready") {
+      settingsPrepPlan = await preparationPlan(settingsPreparationSelection());
+    }
+  } catch (error) {
+    settingsPrepError = error.message || "Не удалось проверить состояние подготовки";
+  }
+  paintSettingsPreparation();
+  syncSettingsPreparationPoll();
+}
+
+async function startSettingsPreparation() {
+  if (settingsPrepLoading) return;
+  settingsPrepLoading = true;
+  settingsPrepError = "";
+  paintSettingsPreparation();
+  try {
+    const selection = settingsPreparationSelection();
+    settingsPrepPlan = await preparationPlan(selection);
+    if (settingsPrepPlan?.items?.every((item) => item.ready)) {
+      settingsPrepCurrent = await preparationCurrent();
+    } else {
+      settingsPrepCurrent = await startPreparation(selection);
+    }
+  } catch (error) {
+    settingsPrepError = error.message || "Не удалось начать подготовку";
+  } finally {
+    settingsPrepLoading = false;
+    paintSettingsPreparation();
+    syncSettingsPreparationPoll();
+  }
+}
+
+async function pauseSettingsPreparation() {
+  try {
+    settingsPrepCurrent = await pausePreparation();
+    settingsPrepError = "";
+  } catch (error) {
+    settingsPrepError = error.message || "Не удалось приостановить подготовку";
+  }
+  paintSettingsPreparation();
+  syncSettingsPreparationPoll();
+}
+
+async function resumeSettingsPreparation() {
+  try {
+    settingsPrepCurrent = await resumePreparation();
+    settingsPrepError = "";
+  } catch (error) {
+    settingsPrepError = error.message || "Не удалось продолжить подготовку";
+  }
+  paintSettingsPreparation();
+  syncSettingsPreparationPoll();
+}
+
+function paintSettingsPreparation() {
+  const note = document.querySelector("[data-role='settings-preparation-note']");
+  const host = document.querySelector("[data-role='settings-preparation-list']");
+  const start = document.querySelector("[data-role='settings-preparation-start']");
+  const pause = document.querySelector("[data-role='settings-preparation-pause']");
+  const resume = document.querySelector("[data-role='settings-preparation-resume']");
+  if (!note || !host || !start) return;
+  const plan = settingsPrepPlan;
+  const current = settingsPrepCurrent || {};
+  const active = settingsPreparationActive(current);
+  const selected = settingsPreparationSelection();
+  const paused = current.state === "paused" && settingsPreparationMatches(current, selected);
+  const pausedOther = current.state === "paused" && !settingsPreparationMatches(current, selected);
+  const ready = settingsPreparationReady();
+  const total = Number(plan?.total || 0);
+  const required = Number(plan?.required_space || 0);
+  start.textContent = total > 0 ? "Подготовить компоненты" : "Проверить и активировать";
+  if (settingsPrepError) note.textContent = settingsPrepError;
+  else if (settingsPrepLoading) note.textContent = "Считаем объём загрузки и проверяем компоненты…";
+  else if (ready) note.textContent = "Компоненты готовы. Перевод можно запускать.";
+  else if (current.state === "error") note.textContent = current.error || "Не удалось подготовить компоненты.";
+  else if (paused) note.textContent = `Подготовка приостановлена: ${formatBytes(current.done)} из ${formatBytes(current.total)}.`;
+  else if (pausedOther) note.textContent = "Приостановлена подготовка другого профиля. Новый запуск создаст план для текущих настроек.";
+  else if (active) note.textContent = `${current.current || "Подготовка компонентов"}: ${formatBytes(current.done)} из ${formatBytes(current.total)}.`;
+  else if (plan) note.textContent = total === 0
+    ? "Компоненты уже скачаны. Нужна только проверка и активация."
+    : `Потребуется скачать ${formatBytes(total)} и иметь ${formatBytes(required)} свободного места.`;
+  else note.textContent = "Не удалось получить план подготовки.";
+
+  const items = Array.isArray(plan?.items) ? plan.items : [];
+  host.innerHTML = items.map((item) => `<div class="model-row"><span class="model-row__name">${escapeText(item.title || item.id)}</span><span class="badge ${item.ready ? "badge--ok" : "badge--warn"}">${escapeText(preparationBadge(item))}</span></div>`).join("");
+  if (Array.isArray(plan?.warnings) && plan.warnings.length) {
+    host.insertAdjacentHTML("beforeend", `<p class="field-hint">${plan.warnings.map(escapeText).join(" ")}</p>`);
+  }
+  start.hidden = ready || active || paused || settingsPrepLoading;
+  start.disabled = !plan || Boolean(settingsPrepError);
+  if (pause) pause.hidden = !active;
+  if (resume) resume.hidden = !paused;
 }
 
 async function refreshModels() {
@@ -363,9 +710,7 @@ async function refreshModels() {
 
 function renderModelLists() {
   const settingsHost = document.querySelector("[data-role='model-list']");
-  const wizardHost = document.querySelector("[data-role='wizard-models']");
   if (settingsHost) settingsHost.innerHTML = modelItems.map((item) => modelRow(item, "settings")).join("");
-  if (wizardHost) wizardHost.innerHTML = modelItems.map((item) => modelRow(item, "wizard")).join("");
   paintModelGate();
 }
 
@@ -381,12 +726,17 @@ function modelRow(model, place) {
   return `<div class="model-row">${name}${badge}<span></span></div>`;
 }
 
+function requiredKinds() {
+  const settings = getState().settings || {};
+  return settings.inpainter_backend === "opencv" ? ["detector", "font"] : REQUIRED;
+}
+
 function requiredReady() {
-  return REQUIRED.every((kind) => modelItems.some((item) => item.kind === kind && item.present));
+  return requiredKinds().every((kind) => modelItems.some((item) => item.kind === kind && item.present));
 }
 
 function missingKinds() {
-  return REQUIRED.filter((kind) => !modelItems.some((item) => item.kind === kind && item.present));
+  return requiredKinds().filter((kind) => !modelItems.some((item) => item.kind === kind && item.present));
 }
 
 function modelNote() {
@@ -409,8 +759,7 @@ function paintModelGate() {
     button.disabled = downloading;
   });
   const next = document.getElementById("wizard-next");
-  if (next && wizard && wizardStep === 2) next.disabled = downloading || !ready;
-  else if (next && wizard) next.disabled = false;
+  if (next && wizard && wizardStep !== 3) next.disabled = false;
   if (modelItems.length && getState().modelsReady !== ready) patch({ modelsReady: ready });
 }
 
@@ -520,7 +869,13 @@ function showSettingsTab(name) {
   screen.querySelectorAll("[data-tabpanel]").forEach((panel) => {
     panel.hidden = panel.dataset.tabpanel !== name;
   });
-  if (name === "models") refreshModels();
+  if (name === "models") {
+    refreshModels();
+    refreshSettingsPreparation();
+  } else if (settingsPrepTimer) {
+    window.clearInterval(settingsPrepTimer);
+    settingsPrepTimer = 0;
+  }
   if (name === "network") paintRemote();
 }
 

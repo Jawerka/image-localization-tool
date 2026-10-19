@@ -31,7 +31,7 @@ def test_stale_typeset_is_dropped(tmp_path, monkeypatch):
     stale.regions[0].translation = "старое"
 
     class _Pipe:
-        def typeset_image(self, image, regions, lang, warnings, progress_callback=None, cancel_check=None):
+        def typeset_image(self, image, regions, lang, warnings, progress_callback=None, cancel_check=None, incremental=None):
             if progress_callback:
                 progress_callback(40, "typeset", "typeset")
             return image, []
@@ -82,6 +82,62 @@ def test_stale_typeset_is_dropped(tmp_path, monkeypatch):
     assert updated[0].payload["status"] == "edited"
 
 
+def test_retranslation_does_not_replace_newer_user_input(tmp_path, monkeypatch):
+    store = ProjectStore(tmp_path)
+    project = store.create_project("Глава", "en", "ru")
+    source = tmp_path / "page.png"
+    Image.new("RGB", (40, 20), "white").save(source)
+    page = store.add_sources(project["id"], [source])[0]
+    page_id = page["id"]
+    document = store.read_document(project["id"], page_id)
+    document.regions = [TextRegion(id=1, bbox=(0, 0, 20, 10), text="Hi", translation="старый перевод")]
+    store.write_document(project["id"], page_id, document, base_version=1)
+    store.save_image(project["id"], page_id, "clean", Image.new("RGB", (40, 20), "white"))
+
+    class _Pipe:
+        translator = types.SimpleNamespace(warnings=[])
+
+        def retranslate_region(self, image, regions, region_id, source_lang, target_lang):
+            latest = store.read_document(project["id"], page_id)
+            latest.regions[0].translation = "свежий ручной ввод"
+            store.write_document(project["id"], page_id, latest, base_version=latest.version)
+            regions[0].translation = "устаревший ответ"
+
+        def typeset_image(self, image, regions, lang, warnings, progress_callback=None, cancel_check=None, incremental=None):
+            return image, []
+
+    class _Config:
+        target_lang = "ru"
+        translate_sfx = False
+
+    class _Ctx:
+        llm_lock = threading.Lock()
+        typeset_lock = threading.Lock()
+        lama_lock = threading.Lock()
+        events = []
+
+        def cancel_check(self, _job_id):
+            return lambda: False
+
+        def emit(self, event):
+            self.events.append(event)
+
+    monkeypatch.setattr(worker, "_pipeline", lambda *_args, **_kwargs: (_Pipe(), _Config()))
+    context = _Ctx()
+    worker._run_region({
+        "id": "job-retranslate",
+        "kind": "retranslate",
+        "project_id": project["id"],
+        "page_id": page_id,
+        "payload": {"region_id": 1, "base_version": 1, "store_root": str(store.root)},
+    }, context)
+
+    saved = store.read_document(project["id"], page_id)
+    assert saved.regions[0].translation == "свежий ручной ввод"
+    assert not store.image_path(project["id"], page_id, "result").is_file()
+    assert [event.type for event in context.events] == ["page.updated"]
+
+
 def test_paint_reports_done(tmp_path, monkeypatch):
     store = ProjectStore(tmp_path)
     project = store.create_project("Глава", "en", "ru")
@@ -96,7 +152,9 @@ def test_paint_reports_done(tmp_path, monkeypatch):
     store.save_image(project["id"], page_id, "clean", Image.new("RGB", (40, 20), "white"))
 
     class _Pipe:
-        def typeset_image(self, image, regions, lang, warnings, progress_callback=None, cancel_check=None):
+        typesetter = types.SimpleNamespace(_last_region_bounds={1: (0, 0, 0, 0)})
+
+        def typeset_image(self, image, regions, lang, warnings, progress_callback=None, cancel_check=None, incremental=None):
             return image, []
 
     class _Config:
@@ -140,6 +198,65 @@ def test_paint_reports_done(tmp_path, monkeypatch):
     assert updated[0].payload["status"] == "done"
     assert updated[0].payload["progress"] == 100
     assert store.page_status(project["id"], page_id)["status"] == "done"
+
+
+def test_paint_uses_current_provenance_and_refreshes_it(tmp_path, monkeypatch):
+    store = ProjectStore(tmp_path)
+    project = store.create_project("Глава", "en", "ru")
+    source = tmp_path / "incremental.png"
+    Image.new("RGB", (60, 40), "white").save(source)
+    page_id = store.add_sources(project["id"], [source])[0]["id"]
+    previous = store.read_document(project["id"], page_id)
+    previous.regions = [TextRegion(id=1, bbox=(2, 2, 45, 30), text="Hi", translation="Старый")]
+    previous = store.write_document(project["id"], page_id, previous, base_version=1)
+    clean = Image.new("RGB", (60, 40), "white")
+    store.save_image(project["id"], page_id, "clean", clean)
+    store.save_image(project["id"], page_id, "result", clean)
+    store.record_result_provenance(
+        project["id"], page_id, document_version=previous.version,
+        region_bounds={1: (2, 2, 20, 14)},
+    )
+    current = PageDocument.from_dict(previous.to_dict())
+    current.regions[0].translation = "Новый"
+    store.write_document(project["id"], page_id, current, base_version=previous.version)
+
+    seen = {}
+
+    class _Pipe:
+        typesetter = types.SimpleNamespace(_last_region_bounds={1: (2, 2, 18, 14)})
+
+        def typeset_image(self, image, regions, lang, warnings, progress_callback=None,
+                          cancel_check=None, incremental=None):
+            seen["incremental"] = incremental
+            return Image.new("RGB", image.size, (250, 250, 250)), []
+
+    class _Config:
+        target_lang = "ru"
+        translate_sfx = False
+
+    class _Ctx:
+        typeset_lock = threading.Lock()
+        events = []
+
+        def cancel_check(self, _job_id):
+            return lambda: False
+
+        def emit(self, event):
+            self.events.append(event)
+
+    monkeypatch.setattr(worker, "_pipeline", lambda *_args, **_kwargs: (_Pipe(), _Config()))
+    context = _Ctx()
+    worker._paint(
+        {"id": "incremental", "project_id": project["id"], "page_id": page_id,
+         "settings": {}, "payload": {"previous_document": previous.to_dict(), "changed_region_ids": [1]}},
+        context, store, current, "typeset", page_id, str(source), image=None,
+        snapshot=False, base_version=previous.version + 1,
+    )
+    assert seen["incremental"]["changed_region_ids"] == [1]
+    assert seen["incremental"]["previous_bounds"] == {"1": [2, 2, 20, 14]}
+    updated = store.read_result_provenance(project["id"], page_id)
+    assert updated["document_version"] == current.version
+    assert updated["region_bounds"] == {"1": [2, 2, 18, 14]}
 
 
 def test_cancel_keeps_flag_while_job_is_held():

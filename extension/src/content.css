@@ -1,11 +1,7 @@
-/* Кнопка и статус поверх изображения, без сдвига вёрстки страницы. */
-
-.ilt-host {
-  position: relative;
-}
+/* Кнопка и статус в отдельном слое; разметка страницы не меняется. */
 
 .ilt-ui {
-  position: absolute;
+  position: fixed;
   z-index: 2147483646;
   top: 4px;
   right: 4px;
@@ -21,7 +17,10 @@
   font-size: 13px;
   line-height: 1.25;
   color: #fff;
+  contain: layout style;
 }
+
+.ilt-ui[hidden] { display: none !important; }
 
 .ilt-btn,
 .ilt-badge,

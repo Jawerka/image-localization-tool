@@ -242,19 +242,6 @@ button.region-card__head {
   white-space: nowrap;
 }
 
-.batch-fold {
-  flex: 0 1 auto;
-  max-height: 45%;
-  overflow: auto;
-  border-bottom: 1px solid var(--border);
-}
-
-.batch-fold summary {
-  padding: var(--space-xs) var(--space);
-  cursor: pointer;
-  font-weight: 700;
-}
-
 .pages__chapter {
   padding: var(--space-xs) var(--space);
   color: var(--text-muted);

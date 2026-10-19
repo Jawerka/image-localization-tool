@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 import shutil
@@ -128,6 +129,20 @@ def _read_json(path: Path) -> dict:
     if not isinstance(data, dict):
         raise ValueError(f"Ожидался объект JSON: {path}")
     return data
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _clear_result_provenance(data: dict) -> None:
+    data.pop("result_document_version", None)
+    data.pop("result_clean_sha256", None)
+    data.pop("result_region_bounds", None)
 
 
 def _blank_page(version: int = 1) -> dict:
@@ -570,7 +585,64 @@ class ProjectStore:
             _thumbnail(image).save(path, "JPEG", quality=85)
             return path
         image.save(path)
+        if kind in ("clean", "result"):
+            data = self._load_page(project_id, page_id)
+            _clear_result_provenance(data)
+            _write_json(self._page_file(project_id, page_id), data)
         return path
+
+    def record_result_provenance(
+        self,
+        project_id: str,
+        page_id: str,
+        *,
+        document_version: int,
+        region_bounds: dict[int | str, tuple[int, int, int, int] | None],
+    ) -> None:
+        """Зафиксировать версию и геометрию только что сохранённого результата."""
+        clean_path = self.image_path(project_id, page_id, "clean")
+        result_path = self.image_path(project_id, page_id, "result")
+        if not clean_path.is_file() or not result_path.is_file():
+            return
+        data = self._load_page(project_id, page_id)
+        data["result_document_version"] = int(document_version)
+        data["result_clean_sha256"] = _sha256_file(clean_path)
+        data["result_region_bounds"] = {
+            str(region_id): [int(value) for value in bounds] if bounds is not None else None
+            for region_id, bounds in region_bounds.items()
+        }
+        _write_json(self._page_file(project_id, page_id), data)
+
+    def read_result_provenance(self, project_id: str, page_id: str) -> dict | None:
+        """Прочитать provenance результата; старые страницы вернут ``None``."""
+        data = self._read_page(project_id, page_id)
+        version = data.get("result_document_version")
+        fingerprint = data.get("result_clean_sha256")
+        bounds = data.get("result_region_bounds")
+        if version is None or not isinstance(fingerprint, str) or not isinstance(bounds, dict):
+            return None
+        return {
+            "document_version": int(version),
+            "clean_sha256": fingerprint,
+            "region_bounds": bounds,
+        }
+
+    def result_provenance_is_current(
+        self,
+        project_id: str,
+        page_id: str,
+        document_version: int,
+    ) -> bool:
+        """Проверить версию результата, наличие артефактов и fingerprint clean."""
+        provenance = self.read_result_provenance(project_id, page_id)
+        clean_path = self.image_path(project_id, page_id, "clean")
+        result_path = self.image_path(project_id, page_id, "result")
+        if provenance is None or not clean_path.is_file() or not result_path.is_file():
+            return False
+        return (
+            provenance["document_version"] == int(document_version)
+            and provenance["clean_sha256"] == _sha256_file(clean_path)
+        )
 
     def _page_file(self, project_id: str, page_id: str) -> Path:
         return self.page_dir(project_id, page_id) / "page.json"

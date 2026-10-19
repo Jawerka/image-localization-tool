@@ -254,6 +254,30 @@ def test_manager_emits_runtime_progress(monkeypatch, tmp_path):
     assert events[-1].payload["state"] == "installed"
 
 
+def test_manager_selects_already_installed_torch(monkeypatch, tmp_path):
+    """Переключение CPU/CUDA не должно завершаться до смены активного пака."""
+    import time
+
+    archive = tmp_path / "torch.7z"
+    digest = _make_pack_archive(archive)
+    _use(monkeypatch, tmp_path, [
+        _pack_dict(name, url=archive.as_uri(), sha256=digest)
+        for name in ("torch-cpu", "torch-cu130")
+    ])
+    runtime.download_and_install("torch-cu130")
+    runtime.download_and_install("torch-cpu")
+    assert runtime.selected_torch_id() == "torch-cpu"
+    assert runtime.ready(runtime.pack_by_id("torch-cu130"))
+    manager = runtime.Manager()
+    manager.start("torch-cu130")
+    deadline = time.monotonic() + 5
+    while manager.busy() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert not manager.busy()
+    assert manager.current()["state"] == "installed"
+    assert runtime.selected_torch_id() == "torch-cu130"
+
+
 def test_torch_state_is_false_without_pack(monkeypatch, tmp_path):
     _use(monkeypatch, tmp_path, [_pack_dict("torch-cpu")])
     monkeypatch.delitem(sys.modules, "torch", raising=False)

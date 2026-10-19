@@ -5,7 +5,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from src.components import typesetter as typesetter_module
-from src.components.typesetter import Typesetter, interior_mask
+from src.components.typesetter import Typesetter, incremental_dirty_bounds, interior_mask
 from src.models import TextRegion, TextStyle
 from src.page_pipeline import _layout_scale
 
@@ -25,6 +25,197 @@ def test_document_line_changes_the_image():
     assert overflow == []
     dark = int(np.sum(np.any(np.array(result) != 255, axis=2)))
     assert dark > 20
+
+
+def test_text_position_moves_only_rendered_ink_and_preserves_legacy_pixels():
+    image = Image.new("RGB", (260, 100), "white")
+    legacy = TextRegion(
+        id=1,
+        bbox=(20, 20, 80, 50),
+        translation="Текст",
+        block_type="narration",
+        style=TextStyle(font_size_override=22, alignment="left"),
+    )
+    setter = Typesetter(min_font_size=22, max_font_size=22, lang="ru")
+    original, overflow = setter.render(image, [legacy])
+    assert overflow == []
+
+    identity = TextRegion.from_dict(legacy.to_dict())
+    identity.text_position = (60, 45)
+    identity_result, identity_overflow = setter.render(image, [identity])
+    assert identity_overflow == []
+    assert np.array_equal(np.asarray(original), np.asarray(identity_result))
+
+    moved = TextRegion.from_dict(legacy.to_dict())
+    moved.text_position = (190, 45)
+    translated, overflow = setter.render(image, [moved])
+    assert overflow == []
+    assert np.array_equal(np.asarray(original)[:, :, 0] < 128, np.asarray(original)[:, :, 1] < 128)
+    legacy_ink = np.asarray(original).min(axis=2) < 200
+    moved_ink = np.asarray(translated).min(axis=2) < 200
+    ys, xs = np.where(legacy_ink)
+    moved_ys, moved_xs = np.where(moved_ink)
+    assert xs.mean() < 110
+    assert moved_xs.mean() > 150
+    assert abs((moved_ys.mean()) - ys.mean()) < 1.0
+
+
+def test_moved_styled_layer_uses_target_position():
+    image = Image.new("RGB", (260, 100), "white")
+    region = TextRegion(
+        id=1,
+        bbox=(20, 20, 80, 50),
+        translation="Текст",
+        block_type="narration",
+        text_position=(190, 45),
+        style=TextStyle(font_size_override=22, alignment="left", rotation=5),
+    )
+    result, overflow = Typesetter(min_font_size=22, max_font_size=22, lang="ru").render(image, [region])
+    assert overflow == []
+    ys, xs = np.where(np.asarray(result).min(axis=2) < 200)
+    assert xs.mean() > 150
+
+
+def test_render_layer_is_transparent_cropped_and_composes_to_same_pixels():
+    image = Image.new("RGB", (180, 90), (245, 240, 230))
+    region = TextRegion(
+        id=1,
+        bbox=(20, 20, 70, 45),
+        translation="Кир",
+        block_type="narration",
+        text_position=(130, 45),
+        style=TextStyle(font_size_override=18, stroke_mode="custom", stroke_width=2),
+    )
+    setter = Typesetter(min_font_size=18, max_font_size=18, lang="ru")
+    expected, overflow = setter.render(image.copy(), [TextRegion.from_dict(region.to_dict())], force=True)
+    layer, origin, layer_overflow = setter.render_layer(
+        image.copy(), [TextRegion.from_dict(region.to_dict())], force=True,
+    )
+    assert overflow == layer_overflow == []
+    assert layer.mode == "RGBA"
+    alpha = np.asarray(layer.getchannel("A"))
+    assert alpha.max() == 255 and alpha.min() == 0
+    assert origin[0] > 80
+    composed = image.copy().convert("RGBA")
+    composed.alpha_composite(layer, dest=origin)
+    assert np.array_equal(np.asarray(composed.convert("RGB")), np.asarray(expected))
+
+
+def test_render_layer_matches_full_render_for_overlapping_regions():
+    image = Image.new("RGB", (240, 130), (238, 238, 238))
+    regions = [
+        TextRegion(id=1, bbox=(25, 30, 100, 48), translation="LEFT", block_type="narration",
+                   style=TextStyle(font_size_override=18, fill_rgb=(20, 20, 20))),
+        TextRegion(id=2, bbox=(95, 42, 105, 50), translation="RIGHT", block_type="narration",
+                   style=TextStyle(font_size_override=18, fill_rgb=(180, 20, 20))),
+    ]
+    setter = Typesetter(min_font_size=18, max_font_size=18, lang="en")
+    expected, overflow = setter.render(image.copy(), [TextRegion.from_dict(r.to_dict()) for r in regions], force=True)
+    layer, origin, layer_overflow = setter.render_layer(
+        image.copy(), [TextRegion.from_dict(r.to_dict()) for r in regions], force=True,
+    )
+    composed = image.copy().convert("RGBA")
+    composed.alpha_composite(layer, dest=origin)
+    assert overflow == layer_overflow
+    assert np.array_equal(np.asarray(composed.convert("RGB")), np.asarray(expected))
+
+
+def test_render_records_per_region_bounds_after_movement_and_warp():
+    image = Image.new("RGB", (320, 160), "white")
+    regions = [
+        TextRegion(
+            id=1,
+            bbox=(15, 20, 80, 45),
+            translation="Первый",
+            block_type="narration",
+            style=TextStyle(font_size_override=18),
+        ),
+        TextRegion(
+            id=2,
+            bbox=(150, 35, 70, 50),
+            translation="Mesh",
+            block_type="narration",
+            text_position=(275, 95),
+            style=TextStyle(
+                font_size_override=18,
+                rotation=12,
+                warp={"kind": "mesh", "version": 2, "mesh": [
+                    [[0, 0], [23, -2], [46, 2], [69, 0]],
+                    [[-1, 16], [22, 14], [47, 18], [70, 16]],
+                    [[0, 32], [23, 30], [46, 34], [69, 32]],
+                    [[0, 49], [23, 47], [46, 51], [69, 49]],
+                ]},
+            ),
+        ),
+    ]
+    setter = Typesetter(min_font_size=18, max_font_size=18, lang="en")
+    setter.render(image, regions, force=True)
+    bounds = setter._last_region_bounds
+    assert set(bounds) == {1, 2}
+    alpha = np.asarray(setter._last_overlay.getchannel("A"))
+    for region_id in (1, 2):
+        ys, xs = np.where(alpha > 0)
+        left, top, right, bottom = bounds[region_id]
+        assert 0 <= left < right <= image.width
+        assert 0 <= top < bottom <= image.height
+    moved = bounds[2]
+    assert moved[0] > 180 and moved[1] > 45
+
+
+def test_overlay_crop_composition_matches_full_alpha_composition():
+    from src.components.typesetter import compose_overlay_crop
+
+    yy, xx = np.mgrid[:72, :144]
+    clean_array = np.stack(((xx * 3) % 256, (yy * 5) % 256, ((xx + yy) * 7) % 256), axis=2).astype(np.uint8)
+    clean = Image.fromarray(clean_array, "RGB")
+    old_overlay = Image.new("RGBA", clean.size, (0, 0, 0, 0))
+    ImageDraw.Draw(old_overlay).text((20, 24), "OLD", fill=(20, 40, 80, 255))
+    previous = Image.alpha_composite(clean.convert("RGBA"), old_overlay).convert("RGB")
+    new_overlay = Image.new("RGBA", clean.size, (0, 0, 0, 0))
+    ImageDraw.Draw(new_overlay).text((88, 30), "NEW", fill=(180, 30, 10, 210))
+    old_bounds = old_overlay.getchannel("A").getbbox()
+    new_bounds = new_overlay.getchannel("A").getbbox()
+    dirty = (
+        min(old_bounds[0], new_bounds[0]),
+        min(old_bounds[1], new_bounds[1]),
+        max(old_bounds[2], new_bounds[2]),
+        max(old_bounds[3], new_bounds[3]),
+    )
+
+    actual = compose_overlay_crop(clean, previous, new_overlay, dirty)
+    expected = Image.alpha_composite(clean.convert("RGBA"), new_overlay).convert("RGB")
+    assert np.array_equal(np.asarray(actual), np.asarray(expected))
+
+
+def test_version_two_mesh_uses_exact_forward_mapper(monkeypatch):
+    from src.components import text_mesh
+
+    calls = []
+    original = text_mesh.warp_mesh_forward
+
+    def spy(image, mesh):
+        calls.append(mesh)
+        return original(image, mesh)
+
+    monkeypatch.setattr(text_mesh, "warp_mesh_forward", spy)
+    region = TextRegion(
+        id=1,
+        bbox=(10, 10, 180, 60),
+        translation="Текст",
+        block_type="narration",
+        style=TextStyle(warp={"kind": "mesh", "version": 2, "mesh": [
+            [0, 0], [60, 0], [120, 0], [180, 0],
+            [0, 20], [60, 20], [120, 20], [180, 20],
+            [0, 40], [60, 40], [120, 40], [180, 40],
+            [0, 60], [60, 60], [120, 60], [180, 60],
+        ]}),
+    )
+    result, overflow = Typesetter(min_font_size=12, max_font_size=20).render(
+        Image.new("RGB", (220, 100), "white"), [region],
+    )
+    assert result.size == (220, 100)
+    assert overflow == []
+    assert calls
 
 
 def test_bubble_interior_stays_inside_the_outline():
@@ -375,3 +566,121 @@ def test_short_reply_cap_follows_neighbors():
     capped = _short_reply_cap(48, short, [short, neighbor], min_font=10, interior_h=48)
     assert capped <= int(round(18 * 1.15))
     assert capped >= 10
+
+
+def test_incremental_render_matches_full_for_moved_styled_text():
+    image = Image.new("RGB", (320, 180), (244, 238, 230))
+    previous = TextRegion(
+        id=1, bbox=(15, 20, 95, 55), translation="Старый текст",
+        block_type="narration", style=TextStyle(font_size_override=19, alignment="left"),
+    )
+    old_setter = Typesetter(min_font_size=19, max_font_size=19, lang="ru")
+    previous_result, _ = old_setter.render(image, [TextRegion.from_dict(previous.to_dict())], force=True)
+    previous_bounds = dict(old_setter._last_region_bounds)
+
+    current = TextRegion.from_dict(previous.to_dict())
+    current.translation = "Новый"
+    current.text_position = (220, 100)
+    current.style.rotation = 4
+    incremental_setter = Typesetter(min_font_size=19, max_font_size=19, lang="ru")
+    incremental, overflow, details = incremental_setter.render_incremental(
+        image, [TextRegion.from_dict(current.to_dict())], [TextRegion.from_dict(previous.to_dict())],
+        previous_result, previous_bounds, [1], force=True,
+    )
+    full_setter = Typesetter(min_font_size=19, max_font_size=19, lang="ru")
+    full, full_overflow = full_setter.render(image, [TextRegion.from_dict(current.to_dict())], force=True)
+    assert overflow == full_overflow == []
+    assert details["mode"] == "full"  # Старые и новые чернила дальше порога 25%.
+    assert np.array_equal(np.asarray(incremental), np.asarray(full))
+
+
+def test_dirty_bounds_include_dependent_bubbles_and_missing_metadata_falls_back():
+    a = TextRegion(id=1, bbox=(0, 0, 40, 30), bubble_bbox=(0, 0, 80, 50), translation="A")
+    b = TextRegion(id=2, bbox=(90, 0, 40, 30), bubble_bbox=(85, 0, 80, 50), translation="B")
+    bounds = {1: (5, 5, 20, 20), 2: (95, 5, 110, 20)}
+    same_a = TextRegion.from_dict(a.to_dict())
+    same_b = TextRegion.from_dict(b.to_dict())
+    same_a.translation = "Изменено"
+    dirty = incremental_dirty_bounds([a, b], [same_a, same_b], bounds, bounds, [1], (200, 100))
+    assert dirty == (5, 5, 110, 20)
+    assert incremental_dirty_bounds([a], [a], {}, {}, [1], (200, 100)) is None
+    assert incremental_dirty_bounds([a], [], bounds, {}, [1], (200, 100)) is None
+
+
+def test_incremental_render_uses_partial_crop_and_matches_full_pixels():
+    image = Image.new("RGB", (320, 180), (244, 238, 230))
+    old_region = TextRegion(
+        id=1, bbox=(35, 40, 100, 45), translation="ONE",
+        block_type="narration", style=TextStyle(font_size_override=20),
+    )
+    old_renderer = Typesetter(min_font_size=20, max_font_size=20, lang="en")
+    previous, _ = old_renderer.render(image, [TextRegion.from_dict(old_region.to_dict())], force=True)
+    current = TextRegion.from_dict(old_region.to_dict())
+    current.translation = "TWO"
+    incremental_renderer = Typesetter(min_font_size=20, max_font_size=20, lang="en")
+    partial, _, details = incremental_renderer.render_incremental(
+        image, [TextRegion.from_dict(current.to_dict())], [TextRegion.from_dict(old_region.to_dict())],
+        previous, old_renderer._last_region_bounds, [1], force=True,
+    )
+    full, _ = Typesetter(min_font_size=20, max_font_size=20, lang="en").render(
+        image, [TextRegion.from_dict(current.to_dict())], force=True,
+    )
+    assert details["mode"] == "partial"
+    assert details["dirty_pixels"] / (320 * 180) <= 0.25
+    assert np.array_equal(np.asarray(partial), np.asarray(full))
+
+
+def test_incremental_composition_matches_full_for_rotated_mesh_text():
+    image = Image.new("RGB", (320, 180), (240, 240, 240))
+    previous = TextRegion(
+        id=4, bbox=(70, 50, 90, 45), translation="MESH",
+        block_type="narration",
+        style=TextStyle(font_size_override=18, rotation=3, warp={
+            "kind": "mesh", "version": 2, "mesh": [
+                [0, 0], [29, -1], [59, 1], [89, 0],
+                [-1, 14], [29, 13], [60, 15], [90, 14],
+                [0, 29], [30, 30], [60, 28], [89, 29],
+                [1, 44], [30, 43], [59, 45], [90, 44],
+            ],
+        }),
+    )
+    old_renderer = Typesetter(min_font_size=18, max_font_size=18, lang="en")
+    old_result, _ = old_renderer.render(image, [TextRegion.from_dict(previous.to_dict())], force=True)
+    current = TextRegion.from_dict(previous.to_dict())
+    current.translation = "TEXT"
+    incremental, _, details = Typesetter(min_font_size=18, max_font_size=18, lang="en").render_incremental(
+        image, [TextRegion.from_dict(current.to_dict())], [TextRegion.from_dict(previous.to_dict())],
+        old_result, old_renderer._last_region_bounds, [4], force=True,
+    )
+    full, _ = Typesetter(min_font_size=18, max_font_size=18, lang="en").render(
+        image, [TextRegion.from_dict(current.to_dict())], force=True,
+    )
+    assert details["mode"] == "partial"
+    assert np.array_equal(np.asarray(incremental), np.asarray(full))
+
+
+def test_incremental_composition_matches_full_for_arc_and_perspective():
+    image = Image.new("RGB", (320, 180), (242, 242, 242))
+    warps = [
+        {"kind": "arc", "bend": 0.18, "quad": None, "mesh": None},
+        {"kind": "perspective", "bend": 0.0,
+         "quad": [[3, 2], [86, 0], [90, 42], [1, 43]], "mesh": None},
+    ]
+    for index, warp in enumerate(warps, start=1):
+        previous = TextRegion(
+            id=index, bbox=(70, 50, 90, 45), translation="OLD",
+            block_type="narration", style=TextStyle(font_size_override=18, warp=warp),
+        )
+        old_renderer = Typesetter(min_font_size=18, max_font_size=18, lang="en")
+        old_result, _ = old_renderer.render(image, [TextRegion.from_dict(previous.to_dict())], force=True)
+        current = TextRegion.from_dict(previous.to_dict())
+        current.translation = "NEW"
+        incremental, _, details = Typesetter(min_font_size=18, max_font_size=18, lang="en").render_incremental(
+            image, [TextRegion.from_dict(current.to_dict())], [TextRegion.from_dict(previous.to_dict())],
+            old_result, old_renderer._last_region_bounds, [index], force=True,
+        )
+        full, _ = Typesetter(min_font_size=18, max_font_size=18, lang="en").render(
+            image, [TextRegion.from_dict(current.to_dict())], force=True,
+        )
+        assert details["mode"] == "partial"
+        assert np.array_equal(np.asarray(incremental), np.asarray(full))

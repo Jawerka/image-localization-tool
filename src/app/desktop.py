@@ -714,6 +714,7 @@ def _build_server(dialogs: DialogBridge, *, port: int = 0) -> tuple[AppState, ob
         settings_warnings=warnings,
     )
     httpd, _port = serve(state, port=port)
+    threading.Thread(target=state.revalidate_components, name="ilt-auto-check", daemon=True).start()
     return state, httpd
 
 

@@ -21,11 +21,11 @@ from src.app import __version__
 from src.app.dialogs import DialogBridge
 from src.app.document import PageDocument
 from src.app.jobs import JobQueue
-from src.app.server import AppState, _merge_style, serve
+from src.app.server import AppState, _bootstrap, _merge_style, _page_action, serve
 from src.app.settings import AppSettings, get_api_key
 from src.app.store import ProjectStore
 from src.app.worker import FakeWorker
-from src.models import TextRegion
+from src.models import TextRegion, TextStyle
 
 
 class ProbeWorker(FakeWorker):
@@ -282,6 +282,25 @@ def test_bootstrap_requires_cookie(api: Api):
     assert status == 401
 
 
+def test_reveal_components_folder(api: Api, tmp_path, monkeypatch):
+    monkeypatch.setattr("src.utils.paths.components_root", lambda: tmp_path)
+    status, _, _ = api.json("POST", "/api/dialog/reveal", {"kind": "components"})
+    assert status == 200
+    assert api.dialogs.revealed[-1] == tmp_path
+
+
+def test_bootstrap_models_ready_respects_opencv(api: Api, monkeypatch):
+    from src.app import server
+
+    api.state.settings.inpainter_backend = "opencv"
+    monkeypatch.setattr(server.model_manager, "status", lambda _models_dir: {
+        "detector": {"present": True},
+        "font": {"present": True},
+        "lama": {"present": False},
+    })
+    assert _bootstrap(api.state)["models_ready"] is True
+
+
 def test_llm_probe_sends_status_after_check(api: Api, monkeypatch):
     """Пока проверка идёт, bootstrap не врёт «недоступен». Потом SSE ok: true."""
     started = threading.Event()
@@ -439,6 +458,56 @@ def test_put_translation_submits_typeset(api: Api, tmp_path):
     assert jobs[0].page_id == page_id
 
 
+def test_put_translation_attaches_previous_document_only_for_current_completed_result(api: Api, tmp_path):
+    payload, _image = _add_page(api, tmp_path)
+    project_id = payload["project"]["id"]
+    page_id = payload["pages"][0]["id"]
+    previous = api.store.write_document(
+        project_id,
+        page_id,
+        PageDocument(regions=[
+            TextRegion(id=1, bbox=(2, 2, 12, 10), text="Hi", translation="Привет", block_type="dialogue"),
+        ]),
+    )
+    clean = Image.new("RGB", (24, 16), "white")
+    api.store.save_image(project_id, page_id, "clean", clean)
+    api.store.save_image(project_id, page_id, "result", clean)
+    api.store.record_result_provenance(
+        project_id,
+        page_id,
+        document_version=previous.version,
+        region_bounds={1: (4, 4, 12, 10)},
+    )
+    api.store.update_status(project_id, page_id, status="done")
+
+    edited = previous.to_dict()
+    edited["regions"][0]["translation"] = "Здравствуй"
+    status, _, body = api.json(
+        "PUT",
+        f"/api/pages/{page_id}/document",
+        {"base_version": previous.version, "document": edited},
+    )
+
+    assert status == 200
+    assert body["plan"] == "typeset"
+    job = [item for item in api.worker.calls if item.kind == "apply_document"][-1]
+    assert job.payload["previous_document"] == previous.to_dict()
+    assert job.payload["changed_region_ids"] == [1]
+
+    # Пока страница помечена как выполняемая, следующая правка не считает
+    # незавершённый результат надёжной базой для partial composition.
+    next_doc = api.store.read_document(project_id, page_id).to_dict()
+    next_doc["regions"][0]["translation"] = "Добрый вечер"
+    status, _, _ = api.json(
+        "PUT",
+        f"/api/pages/{page_id}/document",
+        {"base_version": next_doc["version"], "document": next_doc},
+    )
+    assert status == 200
+    newest_job = [item for item in api.worker.calls if item.kind == "apply_document"][-1]
+    assert "previous_document" not in newest_job.payload
+
+
 def test_put_stale_version_is_conflict(api: Api, tmp_path):
     payload, _image = _add_page(api, tmp_path)
     project_id = payload["project"]["id"]
@@ -479,6 +548,74 @@ def test_translate_page_queued_then_done(api: Api, tmp_path):
     assert job.payload["store_root"] == str(api.store.root)
     assert job.page_id == page_id
     assert api.store.read_document(project_id, page_id).regions[0].translation == "Привет"
+
+
+def test_translate_readiness_gate_does_not_queue_page(api: Api, tmp_path, monkeypatch):
+    from src.app import preparation, worker
+
+    payload, _image = _add_page(api, tmp_path)
+    page_id = payload["pages"][0]["id"]
+
+    class _ManagedWorker:
+        pass
+
+    monkeypatch.setattr(worker, "ProcessWorker", _ManagedWorker)
+    monkeypatch.setattr(preparation, "plan", lambda _settings: {
+        "state": "idle", "items": [{"title": "PyTorch CUDA", "ready": False, "install_bytes": 0}],
+    })
+    api.state.queue.worker = _ManagedWorker()
+
+    status, _, body = api.json(
+        "POST", "/api/jobs/translate", {"scope": "page", "page_id": page_id},
+    )
+    assert status == 409
+    assert "проверка или активация: PyTorch CUDA" in body["error"]
+    assert api.store.page_status(payload["project"]["id"], page_id)["status"] == "idle"
+    assert api.worker.calls == []
+
+
+def test_revalidate_components_checks_installed_without_download(api: Api, monkeypatch):
+    from src.app import preparation
+
+    class _Manager:
+        def __init__(self):
+            self.started = []
+
+        def busy(self):
+            return False
+
+        def start(self, selection):
+            self.started.append(selection)
+
+    manager = _Manager()
+    api.state._preparation_manager = manager
+    monkeypatch.setattr(preparation, "plan", lambda _settings: {
+        "items": [{"ready": False, "install_bytes": 0}, {"ready": True, "install_bytes": 0}],
+    })
+    assert api.state.revalidate_components() is True
+    assert manager.started
+
+
+def test_revalidate_components_never_starts_downloads(api: Api, monkeypatch):
+    from src.app import preparation
+
+    class _Manager:
+        def __init__(self):
+            self.started = []
+
+        def busy(self):
+            return False
+
+        def start(self, selection):
+            self.started.append(selection)
+
+    manager = _Manager()
+    api.state._preparation_manager = manager
+    monkeypatch.setattr(preparation, "plan", lambda _settings: {
+        "items": [{"ready": False, "install_bytes": 1024}],
+    })
+    assert api.state.revalidate_components() is False
+    assert manager.started == []
 
 
 def test_thumb_and_unknown_image_kind(api: Api, tmp_path):
@@ -770,8 +907,6 @@ def test_drop_empty_archive_does_not_create_project(api: Api, tmp_path):
 
 
 def test_drop_portable_package_loads_project(api: Api, tmp_path):
-    from src.app.portable_project import pack_project
-
     a = tmp_path / "a.png"
     b = tmp_path / "b.png"
     Image.new("RGB", (20, 10), (1, 2, 3)).save(a)
@@ -827,6 +962,25 @@ def test_drop_cbz_adds_pages(api: Api, tmp_path):
     status, _, payload = api.json("POST", "/api/drop", {"paths": [str(archive)]})
     assert status == 200, payload
     assert [page["name"] for page in payload["pages"]] == ["page2.png", "page10.png"]
+
+
+def test_remove_pages_removes_selected_page(api: Api, tmp_path):
+    first = tmp_path / "first.png"
+    second = tmp_path / "second.png"
+    Image.new("RGB", (20, 10), "white").save(first)
+    Image.new("RGB", (20, 10), "black").save(second)
+    api.dialogs.files = [first, second]
+    status, _, opened = api.json("POST", "/api/dialog/files", {})
+    assert status == 200
+    removed_id = opened["pages"][0]["id"]
+    kept_id = opened["pages"][1]["id"]
+
+    status, _, result = api.json(
+        "POST", "/api/project/remove-pages", {"page_ids": [removed_id]},
+    )
+    assert status == 200
+    assert [page["id"] for page in result["pages"]] == [kept_id]
+    assert first.is_file() and second.is_file()
 
 
 def test_drop_empty_archive_with_image_warns(api: Api, tmp_path):
@@ -885,6 +1039,326 @@ def test_fonts_preview_region_and_remote_status(api: Api, monkeypatch):
         "recent": [],
         "clients": 0,
     }
+
+
+def test_preview_region_echoes_revision_and_includes_moved_text_bounds(api: Api, tmp_path):
+    from io import BytesIO
+
+    import numpy as np
+    from PIL import Image
+    from src.components.typesetter import Typesetter
+
+    payload, _image = _add_page(api, tmp_path)
+    page_id = payload["pages"][0]["id"]
+    page = api.store.read_document(api.state.project_id, page_id)
+    api.store.save_image(api.state.project_id, page_id, "clean", Image.new("RGB", (300, 120), "white"))
+    page.regions = [
+        TextRegion(
+            id=1,
+            bbox=(20, 20, 90, 40),
+            text="Hi",
+            translation="Привет",
+            block_type="narration",
+            style=TextStyle(font_size_override=16),
+        )
+    ]
+    api.store.write_document(api.state.project_id, page_id, page, base_version=page.version)
+
+    status, headers, body = api.call(
+        "POST",
+        f"/api/pages/{page_id}/preview-region",
+        {
+            "region_id": 1,
+            "revision": 17,
+            "draft": {
+                **page.regions[0].to_dict(),
+                "text_position": [20, 8],
+            },
+        },
+    )
+    assert status == 200
+    assert dict((key.lower(), value) for key, value in headers)["x-preview-revision"] == "17"
+    image = Image.open(BytesIO(body)).convert("RGB")
+    assert image.width > 90
+    settings = api.state.settings
+    expected, overflow = Typesetter(
+        min_font_size=settings.min_font_size,
+        max_font_size=settings.max_font_size,
+        lang=settings.target_lang,
+        stroke_ratio=settings.text_stroke_ratio,
+        margin_ratio=settings.text_margin,
+    ).render(
+        Image.new("RGB", (300, 120), "white"),
+        [TextRegion.from_dict({**page.regions[0].to_dict(), "text_position": [20, 8]})],
+        force=True,
+    )
+    assert overflow == []
+    response_headers = {key.lower(): value for key, value in headers}
+    x = int(response_headers["x-offset-x"])
+    y = int(response_headers["x-offset-y"])
+    expected_crop = expected.crop((x, y, x + image.width, y + image.height))
+    assert np.array_equal(np.asarray(image), np.asarray(expected_crop))
+
+    legacy_status, legacy_headers, _legacy_body = api.call(
+        "POST",
+        f"/api/pages/{page_id}/preview-region",
+        {"region_id": 1},
+    )
+    legacy_headers = {key.lower(): value for key, value in legacy_headers}
+    assert legacy_status == 200
+    assert legacy_headers["x-preview-revision"] == "0"
+    assert legacy_headers["x-offset-x"] == "20"
+
+
+def test_mesh_exact_preview_matches_full_export_render(api: Api, tmp_path):
+    """Exact preview mesh v2 равен соответствующему crop полноразмерного экспорта."""
+    from io import BytesIO
+
+    import numpy as np
+    from PIL import Image
+    from src.components.typesetter import Typesetter
+
+    payload, _image = _add_page(api, tmp_path)
+    page_id = payload["pages"][0]["id"]
+    clean = Image.new("RGB", (320, 180), (238, 240, 242))
+    api.store.save_image(api.state.project_id, page_id, "clean", clean)
+    page = api.store.read_document(api.state.project_id, page_id)
+    region = TextRegion(
+        id=1,
+        bbox=(50, 40, 200, 80),
+        text="Hello",
+        translation="Привет",
+        block_type="narration",
+        style=TextStyle(
+            font_size_override=18,
+            rotation=3,
+            warp={"kind": "mesh", "version": 2, "mesh": [
+                [0, 0], [66, -2], [134, 2], [200, 0],
+                [-2, 26], [66, 25], [134, 28], [202, 26],
+                [1, 53], [67, 54], [133, 52], [199, 53],
+                [0, 80], [66, 82], [134, 78], [200, 80],
+            ]},
+        ),
+    )
+    page.regions = [region]
+    api.store.write_document(api.state.project_id, page_id, page, base_version=page.version)
+
+    status, headers, body = api.call(
+        "POST",
+        f"/api/pages/{page_id}/preview-region",
+        {"region_id": 1, "revision": 29},
+    )
+    assert status == 200
+    preview = Image.open(BytesIO(body)).convert("RGB")
+    response_headers = {key.lower(): value for key, value in headers}
+    x = int(response_headers["x-offset-x"])
+    y = int(response_headers["x-offset-y"])
+    settings = api.state.settings
+    full_export, overflow = Typesetter(
+        min_font_size=settings.min_font_size,
+        max_font_size=settings.max_font_size,
+        lang=settings.target_lang,
+        stroke_ratio=settings.text_stroke_ratio,
+        margin_ratio=settings.text_margin,
+    ).render(clean, [TextRegion.from_dict(region.to_dict())], force=True)
+    assert overflow == []
+    expected = full_export.crop((x, y, x + preview.width, y + preview.height))
+    assert np.array_equal(np.asarray(preview), np.asarray(expected))
+
+
+def test_preview_region_base_layer_is_rgba_and_does_not_change_document(api: Api, tmp_path):
+    from io import BytesIO
+
+    import numpy as np
+    from PIL import Image
+
+    payload, _image = _add_page(api, tmp_path)
+    page_id = payload["pages"][0]["id"]
+    page = api.store.read_document(api.state.project_id, page_id)
+    api.store.save_image(api.state.project_id, page_id, "clean", Image.new("RGB", (300, 120), "red"))
+    page.regions = [
+        TextRegion(
+            id=1,
+            bbox=(20, 20, 90, 40),
+            text="Hi",
+            translation="Привет",
+            block_type="narration",
+            style=TextStyle(font_size_override=16, rotation=30, warp={"kind": "mesh", "version": 2}),
+            text_position=(200, 80),
+        )
+    ]
+    api.store.write_document(api.state.project_id, page_id, page, base_version=page.version)
+
+    status, headers, body = api.call(
+        "POST",
+        f"/api/pages/{page_id}/preview-region",
+        {"region_id": 1, "revision": 23, "mode": "base-layer"},
+    )
+    assert status == 200
+    response_headers = {key.lower(): value for key, value in headers}
+    assert response_headers["x-preview-revision"] == "23"
+    assert int(response_headers["x-preview-duration-ms"]) >= 0
+    assert int(response_headers["x-offset-x"]) < 200
+    layer = Image.open(BytesIO(body)).convert("RGBA")
+    pixels = np.asarray(layer)
+    assert pixels[:, :, 3].min() == 0
+    assert pixels[:, :, 3].max() == 255
+    assert np.all(pixels[:, :, :3][pixels[:, :, 3] == 0] == 0)
+
+    saved = api.store.read_document(api.state.project_id, page_id).regions[0]
+    assert saved.text_position == (200, 80)
+    assert saved.style.rotation == 30
+    assert saved.style.warp["kind"] == "mesh"
+    legacy_status, legacy_headers, _legacy_body = api.call(
+        "POST",
+        f"/api/pages/{page_id}/preview-region",
+        {"region_id": 1},
+    )
+    legacy_headers = {key.lower(): value for key, value in legacy_headers}
+    assert legacy_status == 200
+    assert legacy_headers["x-preview-revision"] == "0"
+    assert legacy_headers["x-offset-x"] == "20"
+
+
+def test_preview_cache_hits_and_invalidates_on_region_and_file_changes(api: Api, tmp_path, monkeypatch):
+    from PIL import Image
+    import src.app.server as server
+
+    payload, _image = _add_page(api, tmp_path)
+    page_id = payload["pages"][0]["id"]
+    page = api.store.read_document(api.state.project_id, page_id)
+    api.store.save_image(api.state.project_id, page_id, "clean", Image.new("RGB", (300, 120), "white"))
+    page.regions = [TextRegion(id=1, bbox=(20, 20, 90, 40), text="Hi", translation="Привет")]
+    api.store.write_document(api.state.project_id, page_id, page, base_version=page.version)
+
+    calls = []
+    def counted(*args, **kwargs):
+        calls.append(1)
+        return b"same-preview-png", 20, 20
+
+    monkeypatch.setattr(server, "_typeset_crop", counted)
+    base = {"region_id": 1, "revision": 1}
+    first = api.call("POST", f"/api/pages/{page_id}/preview-region", base)
+    second = api.call("POST", f"/api/pages/{page_id}/preview-region", {**base, "revision": 2})
+    assert first[0] == second[0] == 200
+    assert first[2] == second[2]
+    assert len(calls) == 1
+    assert dict((k.lower(), v) for k, v in second[1])["x-preview-revision"] == "2"
+
+    changed = api.call("POST", f"/api/pages/{page_id}/preview-region", {
+        **base, "draft": {**page.regions[0].to_dict(), "translation": "Другой текст"},
+    })
+    assert changed[0] == 200
+    assert len(calls) == 2
+
+    styled = api.call("POST", f"/api/pages/{page_id}/preview-region", {
+        **base, "draft": {**page.regions[0].to_dict(), "style": {"font_size_override": 24}},
+    })
+    assert styled[0] == 200
+    assert len(calls) == 3
+
+    base_calls = []
+    monkeypatch.setattr(server, "_typeset_base_layer", lambda *_args: (base_calls.append(1) or b"rgba-preview", 18, 19))
+    base_layer = api.call("POST", f"/api/pages/{page_id}/preview-region", {**base, "mode": "base-layer"})
+    base_layer_repeat = api.call("POST", f"/api/pages/{page_id}/preview-region", {**base, "mode": "base-layer", "revision": 3})
+    assert base_layer[0] == base_layer_repeat[0] == 200
+    assert base_layer[2] == base_layer_repeat[2]
+    assert len(base_calls) == 1
+
+    # Иная версия документа обязана пропустить старый preview даже при тех же полях региона.
+    current = api.store.read_document(api.state.project_id, page_id)
+    current.title = "new revision"
+    api.store.write_document(api.state.project_id, page_id, current, base_version=current.version)
+    after_version = api.call("POST", f"/api/pages/{page_id}/preview-region", base)
+    assert after_version[0] == 200
+    assert len(calls) == 4
+
+    # Изменение чистой страницы с тем же именем файла меняет fingerprint.
+    api.store.save_image(api.state.project_id, page_id, "clean", Image.new("RGB", (300, 120), "#eeeeee"))
+    after_file = api.call("POST", f"/api/pages/{page_id}/preview-region", base)
+    assert after_file[0] == 200
+    assert len(calls) == 5
+    assert api.state._render_cache.size_bytes <= api.state._render_cache.max_bytes
+
+
+def test_decoded_page_cache_returns_independent_rgb_copies(api: Api, tmp_path):
+    from PIL import Image
+    from src.app.server import _open_page_rgb
+
+    payload, _image = _add_page(api, tmp_path)
+    page_id = payload["pages"][0]["id"]
+    api.store.save_image(api.state.project_id, page_id, "clean", Image.new("RGB", (12, 8), "red"))
+    record = payload["pages"][0]
+    first = _open_page_rgb(api.state, page_id, record)
+    first.putpixel((0, 0), (0, 0, 0))
+    second = _open_page_rgb(api.state, page_id, record)
+    assert second.getpixel((0, 0)) == (255, 0, 0)
+    assert first is not second
+    assert api.state._render_cache.size_bytes >= 12 * 8 * 3
+
+def test_region_action_carries_base_version(api: Api, tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from src.app import server
+
+    payload, _image = _add_page(api, tmp_path)
+    page_id = payload["pages"][0]["id"]
+    captured = {}
+
+    def submit(_state, kind, submitted_page_id, body):
+        captured.update(kind=kind, page_id=submitted_page_id, body=body)
+        return SimpleNamespace(id="job-1")
+
+    monkeypatch.setattr(server, "_submit", submit)
+    result = _page_action(api.state, page_id, {"action": "retranslate", "region_id": 1, "base_version": 7})
+    assert result == {"job_id": "job-1"}
+    assert captured == {"kind": "retranslate", "page_id": page_id,
+                        "body": {"region_id": 1, "base_version": 7}}
+
+    with pytest.raises(ValueError, match="base_version"):
+        _page_action(api.state, page_id, {"action": "retranslate", "region_id": 1, "base_version": True})
+
+
+def test_preparation_plan_endpoint_passes_profile_and_does_not_save_it(api: Api, monkeypatch):
+    from src.app import preparation
+
+    seen = {}
+
+    def fake_plan(selection):
+        seen.update(selection)
+        return {"items": [{"id": "detector", "ready": False}], "total": 1234, "required_space": 5678}
+
+    monkeypatch.setattr(preparation, "plan", fake_plan)
+    before = api.state.settings.to_dict()
+    status, _, result = api.json("POST", "/api/preparation/plan", {
+        "source_lang": "en",
+        "target_lang": "ru",
+        "translator_backend": "argos",
+        "inpainter_backend": "lama",
+        "device": "cpu",
+        "models_dir": "",
+    })
+    assert status == 200
+    assert result["total"] == 1234
+    assert result["required_space"] == 5678
+    assert seen["translator_backend"] == "argos"
+    assert api.state.settings.to_dict() == before
+
+
+def test_unsupported_offline_preparation_does_not_change_settings(api: Api, monkeypatch):
+    from src.app import preparation
+
+    def unsupported(_selection):
+        raise ValueError("Это направление оффлайн-перевода пока не поддерживается")
+
+    monkeypatch.setattr(preparation, "plan", unsupported)
+    before = api.state.settings.to_dict()
+    status, _, payload = api.json("POST", "/api/preparation/plan", {
+        "source_lang": "en", "target_lang": "uk", "translator_backend": "argos",
+    })
+    assert status == 400
+    assert "не поддерживается" in payload["error"]
+    assert api.state.settings.to_dict() == before
 
 
 def test_package_save_load_reorder_close(api: Api, tmp_path):

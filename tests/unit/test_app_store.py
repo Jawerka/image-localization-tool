@@ -145,3 +145,28 @@ def test_write_json_retries_permission_error(tmp_path, monkeypatch):
     assert calls["n"] == 3
     assert store.page_status(project_id, page_id)["status"] == "edited"
     assert list(target.parent.glob("*.tmp")) == []
+
+
+def test_result_render_provenance_matches_document_clean_and_region_bounds(tmp_path):
+    store, project_id, page_id = _one_page(tmp_path)
+    clean = Image.new("RGB", (40, 20), "white")
+    result = clean.copy()
+    result.putpixel((4, 5), (0, 0, 0))
+    store.save_image(project_id, page_id, "clean", clean)
+    store.save_image(project_id, page_id, "result", result)
+
+    store.record_result_provenance(
+        project_id,
+        page_id,
+        document_version=7,
+        region_bounds={1: (2, 3, 9, 10)},
+    )
+
+    assert store.result_provenance_is_current(project_id, page_id, 7)
+    provenance = store.read_result_provenance(project_id, page_id)
+    assert provenance["document_version"] == 7
+    assert provenance["region_bounds"] == {"1": [2, 3, 9, 10]}
+    assert not store.result_provenance_is_current(project_id, page_id, 6)
+
+    store.save_image(project_id, page_id, "clean", Image.new("RGB", (40, 20), "black"))
+    assert not store.result_provenance_is_current(project_id, page_id, 7)

@@ -72,7 +72,9 @@ export function captureAllDetailsOpen(root) {
     if (!id) return;
     const warp = card.querySelector("details.region-card__warp");
     const styles = card.querySelector("details.region-card__styles");
+    const position = card.querySelector("details.region-card__position");
     map[id] = {
+      position: position ? Boolean(position.open) : null,
       warp: warp ? Boolean(warp.open) : null,
       styles: styles ? Boolean(styles.open) : null,
     };

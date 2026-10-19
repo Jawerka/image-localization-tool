@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+﻿﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
   Сквозная локальная приёмка рантайма (specs/032-runtime-wheelset).
