@@ -48,7 +48,7 @@
 - [x] T024 Прогон `e2e-runtime-local.ps1` — ЗЕЛЁНЫЙ: dev+frozen установка, dry-run публикации (9 ассетов), Tier 1 HEAD 74 URL, Tier 2 `import torch ok: 2.11.0+cpu`
 - [ ] T025 Installer smoke: GUI-мастер (размер/источник/время) — вручную; GPU-часть выполнена скриптом: cu128 установлен, `torch 2.11.0+cu128`, `cuda: True`, RTX 5060 Laptop
 - [x] T026 RC `v1.0.1-rc1`: CI run 38178462902 зелёный (linux-локи, tar.gz, `packs-linux.json` в draft); linux-локи закоммичены; `publish-release.ps1 -Phase Final -DryRun -TagOverride v1.0.1-rc1` — merge ок (5 паков, sums 10 файлов)
-- [ ] T027 Финальный `v1.0.1`: сборка/публикация (после T025–T026; по подтверждению)
+- [~] T027 Финальный `v1.0.1`: сборка/публикация (после T025–T026; по подтверждению) (superseded by 1.0.2/1.0.5)
 
 ## Зависимости
 

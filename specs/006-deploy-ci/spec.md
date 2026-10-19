@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-09
 
-**Status**: Draft
+**Status**: Implemented
 
 **Input**: User description: "Tech-debt mid items: unified deploy scripts for Windows apps mirror and LAN/CT113 sync with host fallback; GitHub Actions CI running unit tests (not full e2e). Closes inventory D17 and E21. Flutter out of scope. Inno installer still optional."
 

@@ -4,7 +4,9 @@
 
 **Created**: 2026-10-11
 
-**Status**: Draft
+**Status**: Blocked-acceptance
+
+> Open gate: T025 installer smoke. T027 (v1.0.1) is historical and superseded by 1.0.2/1.0.5.
 
 **Input**: Ревизия доставки рантайма по плану «универсальный релиз 1.0.0 с развёртыванием»: вместо сборки `.7z`-паков из чистых venv — фиксация официальных pip-колёс (torch, Argos-стек и зависимости) генератором локов (`pip download --only-binary --no-deps` с официальных индексов), манифест schema 2 (`format:"wheels"`, `files[]` с per-file sha256 и размером), клиент `runtime.py` распаковывает колёса пофайлово без `extractall`, релизный пайплайн публикует лок-артефакты вместо `.7z` (`publish-release.ps1`: «packs» → «locks», `SHA256SUMS` без `packs/*.7z`), а UI и документация показывают честные размеры (cu128 ≈ 2.56 ГБ) и источник (PyPI / PyTorch CDN).
 

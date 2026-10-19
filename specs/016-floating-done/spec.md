@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-10
 
-**Status**: Draft
+**Status**: Implemented
 
 **Input**: User description: "Move Done out of the toolbar to a floating top chip like bottom progress; horizontally draggable; can return to center."
 

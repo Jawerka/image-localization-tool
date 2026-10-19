@@ -2,7 +2,7 @@
 
 **Feature Branch**: `[codex/036-inspector-redesign]`  
 **Created**: 2026-10-18  
-**Status**: In Progress  
+**Status**: Implemented
 **Input**: T20 из `tasks/todo.md`: ограничить параллельную загрузку файлов подготовки; сохранить pause/resume, integrity checks и последовательную установку.
 
 ## User Scenarios & Testing

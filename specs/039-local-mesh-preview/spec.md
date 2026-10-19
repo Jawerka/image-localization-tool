@@ -2,7 +2,10 @@
 
 **Feature Branch**: `codex/036-inspector-redesign`  
 **Created**: 2026-10-18  
-**Status**: Draft  
+**Status**: Blocked-acceptance
+
+> Web renderer is implemented; WebView2/GPU measurement and Flutter mesh preview remain.
+
 **Input**: Во время редактирования mesh пользователь должен видеть деформацию без ожидания полного серверного preview; после жеста результат должен совпасть с экспортом.
 
 ## User Scenarios & Testing

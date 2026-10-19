@@ -2,7 +2,10 @@
 
 **Feature Branch**: `codex/036-inspector-redesign` (текущая ветка; создать отдельную ветку не удалось из-за доступа к `.git/index.lock`)  
 **Created**: 2026-10-18  
-**Status**: Ready  
+**Status**: Blocked-acceptance
+
+> Chromium synthetic acceptance passed; Firefox and live Reddit remain external gates.
+
 **Input**: Сохранить привязку кнопки расширения к видимой части изображения при изменении размеров, прокрутке и переносе изображения в lightbox.
 
 ## User Scenarios & Testing

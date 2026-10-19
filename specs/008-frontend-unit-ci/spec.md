@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-09
 
-**Status**: Draft
+**Status**: Implemented
 
 **Input**: "Frontend unit coverage for mask-draft / defer-related helpers and pipeline warning text; expand CI with a Node JS job; add missing typesetter pivot/rotation unit (inventory 23 + bit of 14). Playwright e2e Done/mask already exists. Flutter out of scope."
 

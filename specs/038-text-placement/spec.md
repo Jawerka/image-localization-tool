@@ -2,7 +2,10 @@
 
 **Feature Branch**: `codex/036-inspector-redesign` (текущая рабочая ветка)  
 **Created**: 2026-10-18  
-**Status**: Converged
+**Status**: Blocked-acceptance
+
+> Web/backend implementation is complete; Flutter text_position parity is required for 1.0.5.
+
 **Input**: Пользователь должен перемещать надпись отдельно от области распознавания и очистки; перемещение не меняет исходную маску, а старые проекты остаются совместимыми.
 
 ## User Scenarios & Testing

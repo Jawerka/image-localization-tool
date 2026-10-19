@@ -4,7 +4,9 @@
 
 **Created**: 2026-10-09
 
-**Status**: Draft
+**Status**: Superseded
+
+> Historical baseline audit; superseded by 002, 003 and 033. The `[~]` checks below are provenance, not current release work.
 
 **Input**: User description: "Зафиксировать обещанный контракт CLI, окна, расширения и LAN без направлений из roadmap."
 

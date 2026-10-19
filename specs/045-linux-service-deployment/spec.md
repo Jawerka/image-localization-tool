@@ -2,7 +2,10 @@
 
 **Feature Branch**: `codex/045-linux-bootstrap-rollback`
 **Created**: 2026-10-18
-**Status**: Draft
+**Status**: Blocked-acceptance
+
+> Linux/systemd acceptance on a clean host remains.
+
 **Input**: Roadmap tasks T21–T22: idempotent clean Linux server bootstrap, separate staged application updates, health validation and rollback while preserving user data and downloaded components.
 
 ## User Scenarios & Testing

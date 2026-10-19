@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-09
 
-**Status**: Draft
+**Status**: Implemented
 
 **Input**: User description: "Tech-debt B8: when the pipeline silently falls back (VLM→RapidOCR, LLM→Argos, LaMa→OpenCV), the page must carry clear warnings and the UI must surface them without requiring the user to dig for quality loss. OCR/Argos offline status already exists; close the LaMa gap and promote warnings to a visible banner. Flutter out of scope."
 

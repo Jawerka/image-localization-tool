@@ -1,5 +1,7 @@
 # Tasks: Baseline Product Contract
 
+> Historical baseline audit (2026-10-09). The `[~]` checks below are retained for provenance and are not current release work. See `specs/INDEX.md`.
+
 **Input**: Design documents from `/specs/001-baseline-contract/`
 
 **Prerequisites**: plan.md, spec.md, research.md, data-model.md, contracts/, quickstart.md
@@ -18,9 +20,9 @@
 
 **Purpose**: Confirm baseline artefacts are in place for analysis and convergence
 
-- [ ] T001 Confirm feature artefacts exist under `specs/001-baseline-contract/` (`spec.md`, `plan.md`, `research.md`, `data-model.md`, `quickstart.md`, `contracts/surfaces.md`)
-- [ ] T002 [P] Confirm `.specify/feature.json` points at `specs/001-baseline-contract`
-- [ ] T003 [P] Confirm constitution gates in `.specify/memory/constitution.md` are readable for later analysis
+- [~] T001 Confirm feature artefacts exist under `specs/001-baseline-contract/` (`spec.md`, `plan.md`, `research.md`, `data-model.md`, `quickstart.md`, `contracts/surfaces.md`)
+- [~] T002 [P] Confirm `.specify/feature.json` points at `specs/001-baseline-contract`
+- [~] T003 [P] Confirm constitution gates in `.specify/memory/constitution.md` are readable for later analysis
 
 ---
 
@@ -30,10 +32,10 @@
 
 **CRITICAL**: No user story verification can finish until this phase is complete
 
-- [ ] T004 Verify all translation surfaces enter through `src/page_pipeline.py` rather than a parallel page processor in `src/main.py` and `src/app/`
-- [ ] T005 [P] Verify RT-DETR size order handling around detector calls under `src/components/` matches `[width, height]`
-- [ ] T006 [P] Verify product-facing ink-recall wording in `README.md` and `docs/BENCHMARK_RESULTS.md` stays reference-only for arbitrary pages (FR-013, SC-008)
-- [ ] T007 Verify language-model API key write path keeps secrets out of settings JSON in `src/app/` (FR-010, SC-005)
+- [~] T004 Verify all translation surfaces enter through `src/page_pipeline.py` rather than a parallel page processor in `src/main.py` and `src/app/`
+- [~] T005 [P] Verify RT-DETR size order handling around detector calls under `src/components/` matches `[width, height]`
+- [~] T006 [P] Verify product-facing ink-recall wording in `README.md` and `docs/BENCHMARK_RESULTS.md` stays reference-only for arbitrary pages (FR-013, SC-008)
+- [~] T007 Verify language-model API key write path keeps secrets out of settings JSON in `src/app/` (FR-010, SC-005)
 
 **Checkpoint**: Shared-path and constitution-sensitive checks are ready
 
@@ -47,12 +49,12 @@
 
 ### Verification for User Story 1
 
-- [ ] T008 [US1] Verify CLI entry in `src/main.py` accepts PNG/JPG/BMP/TIFF and writes a result image (FR-001, FR-007, SC-001)
-- [ ] T009 [P] [US1] Verify balloon/text detection is invoked from the shared pipeline path in `src/page_pipeline.py` / `src/components/` (FR-002)
-- [ ] T010 [P] [US1] Verify OCR prefers the vision LLM path and falls back to offline recognition with a warning in `src/page_pipeline.py` / `src/components/` (FR-003, SC-002)
-- [ ] T011 [US1] Verify translation prefers the LLM path with glossary/speaker context and falls back to offline whole-block translation (FR-004)
-- [ ] T012 [US1] Verify letter-masking and typesetting apply only to translated regions in `src/page_pipeline.py` / `src/components/` (FR-005)
-- [ ] T013 [US1] Verify default sound-effect mode leaves SFX/object labels untranslated (FR-006, SC-003)
+- [~] T008 [US1] Verify CLI entry in `src/main.py` accepts PNG/JPG/BMP/TIFF and writes a result image (FR-001, FR-007, SC-001)
+- [~] T009 [P] [US1] Verify balloon/text detection is invoked from the shared pipeline path in `src/page_pipeline.py` / `src/components/` (FR-002)
+- [~] T010 [P] [US1] Verify OCR prefers the vision LLM path and falls back to offline recognition with a warning in `src/page_pipeline.py` / `src/components/` (FR-003, SC-002)
+- [~] T011 [US1] Verify translation prefers the LLM path with glossary/speaker context and falls back to offline whole-block translation (FR-004)
+- [~] T012 [US1] Verify letter-masking and typesetting apply only to translated regions in `src/page_pipeline.py` / `src/components/` (FR-005)
+- [~] T013 [US1] Verify default sound-effect mode leaves SFX/object labels untranslated (FR-006, SC-003)
 
 **Checkpoint**: CLI contract either holds or gaps are explicit for convergence
 
@@ -66,11 +68,11 @@
 
 ### Verification for User Story 2
 
-- [ ] T014 [US2] Verify desktop entry `src/app/` / `python -m src.app` creates or updates projects from files/folders and lists pages (FR-008, SC-004)
-- [ ] T015 [P] [US2] Verify page job statuses and translate/export actions through local HTTP handlers in `src/app/` (FR-008)
-- [ ] T016 [P] [US2] Verify empty-archive import refuses to create an empty project in `src/app/` (FR-017)
-- [ ] T017 [US2] Verify second-launch path handoff via instance lock in `src/app/` (FR-018)
-- [ ] T018 [US2] Verify export writes PNG/JPG with selected conflict rule from window export flow in `src/app/` / `web/` (SC-004)
+- [~] T014 [US2] Verify desktop entry `src/app/` / `python -m src.app` creates or updates projects from files/folders and lists pages (FR-008, SC-004)
+- [~] T015 [P] [US2] Verify page job statuses and translate/export actions through local HTTP handlers in `src/app/` (FR-008)
+- [~] T016 [P] [US2] Verify empty-archive import refuses to create an empty project in `src/app/` (FR-017)
+- [~] T017 [US2] Verify second-launch path handoff via instance lock in `src/app/` (FR-018)
+- [~] T018 [US2] Verify export writes PNG/JPG with selected conflict rule from window export flow in `src/app/` / `web/` (SC-004)
 
 **Checkpoint**: Window contract either holds or gaps are explicit
 
@@ -84,10 +86,10 @@
 
 ### Verification for User Story 3
 
-- [ ] T019 [US3] Verify extension pairing and bearer usage against `/v1/pair` and translate routes as implemented in `extension/` and `src/app/` (FR-011, FR-012, SC-007)
-- [ ] T020 [P] [US3] Verify two-second hover delay and compact icon-without-text control in `extension/` (FR-016)
-- [ ] T021 [P] [US3] Verify result fetch substitutes the image and preserves original toggle in `extension/` (SC-007)
-- [ ] T022 [US3] Verify Ozon host exclusion prevents content-script injection in `extension/` manifests/content script
+- [~] T019 [US3] Verify extension pairing and bearer usage against `/v1/pair` and translate routes as implemented in `extension/` and `src/app/` (FR-011, FR-012, SC-007)
+- [~] T020 [P] [US3] Verify two-second hover delay and compact icon-without-text control in `extension/` (FR-016)
+- [~] T021 [P] [US3] Verify result fetch substitutes the image and preserves original toggle in `extension/` (SC-007)
+- [~] T022 [US3] Verify Ozon host exclusion prevents content-script injection in `extension/` manifests/content script
 
 **Checkpoint**: Extension contract either holds or gaps are explicit
 
@@ -101,10 +103,10 @@
 
 ### Verification for User Story 4
 
-- [ ] T023 [US4] Verify local UI server bind and host/origin guards remain loopback-only in `src/app/` (FR-009, SC-006)
-- [ ] T024 [P] [US4] Verify remote listener stays off until settings/flag enablement in `src/app/` (FR-009)
-- [ ] T025 [P] [US4] Verify protected `/v1` routes reject missing/invalid bearer tokens in `src/app/` (US4 acceptance)
-- [ ] T026 [US4] Verify user-facing remote HTTP/firewall warning text exists in window settings copy under `web/` / docs referenced by README (FR-015)
+- [~] T023 [US4] Verify local UI server bind and host/origin guards remain loopback-only in `src/app/` (FR-009, SC-006)
+- [~] T024 [P] [US4] Verify remote listener stays off until settings/flag enablement in `src/app/` (FR-009)
+- [~] T025 [P] [US4] Verify protected `/v1` routes reject missing/invalid bearer tokens in `src/app/` (US4 acceptance)
+- [~] T026 [US4] Verify user-facing remote HTTP/firewall warning text exists in window settings copy under `web/` / docs referenced by README (FR-015)
 
 **Checkpoint**: Access-boundary contract either holds or gaps are explicit
 
@@ -114,9 +116,9 @@
 
 **Purpose**: Close the baseline verification loop without rewriting product code in this feature
 
-- [ ] T027 [P] Run `/speckit-analyze` over `specs/001-baseline-contract/{spec,plan,tasks}.md` and record findings in the session report
-- [ ] T028 Run `/speckit-converge` against the codebase and append only unmet contract gaps to this `tasks.md`
-- [ ] T029 [P] Ensure `specs/001-baseline-contract/quickstart.md` still matches the verified surfaces after convergence notes
+- [~] T027 [P] Run `/speckit-analyze` over `specs/001-baseline-contract/{spec,plan,tasks}.md` and record findings in the session report
+- [~] T028 Run `/speckit-converge` against the codebase and append only unmet contract gaps to this `tasks.md`
+- [~] T029 [P] Ensure `specs/001-baseline-contract/quickstart.md` still matches the verified surfaces after convergence notes
 
 ---
 

@@ -2,6 +2,7 @@
 
 **Branch**: `010-lama-ring-tighten`  
 **Created**: 2026-10-09  
+**Status**: Implemented
 **Input**: Inventory item 6 — uniformity ring / mask dilation can pull in neighbor glyphs so LaMa redraws letters. Tighten ring stats and neural-mask dilation without breaking flat-fill on clean white balloons.
 
 ## User Stories

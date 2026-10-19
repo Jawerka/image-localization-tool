@@ -7,6 +7,7 @@ from __future__ import annotations
 
 
 import ast
+import json
 
 import os
 
@@ -60,9 +61,23 @@ def test_read_app_version_matches_package():
 
     from src.app import __version__
 
-
-
     assert read_app_version() == __version__
+
+
+def test_extension_manifests_match_app_version():
+
+    from src.app import __version__
+
+    for name in ("manifest.chromium.json", "manifest.firefox.json"):
+        data = json.loads((ROOT / "extension" / name).read_text(encoding="utf-8"))
+        assert data["version"] == __version__
+
+
+def test_build_extension_stamps_app_version():
+
+    text = (ROOT / "scripts" / "build-extension.py").read_text(encoding="utf-8")
+    assert 'chromium["version"] = version' in text
+    assert 'firefox["version"] = version' in text
 
 
 def test_portable_package_has_windows_update_contract():

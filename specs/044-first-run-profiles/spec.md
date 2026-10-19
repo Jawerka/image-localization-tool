@@ -2,7 +2,10 @@
 
 **Feature Branch**: `044-first-run-profiles`
 **Created**: 2026-10-18
-**Status**: Ready
+**Status**: Blocked-acceptance
+
+> Web first-run profile is implemented; clean-profile acceptance and Flutter parity remain.
+
 **Input**: Make first-run local/server/offline preparation clear, preserve the default fallback, and show resource volume before preparation.
 
 ## User Scenarios & Testing

@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-10
 
-**Status**: Draft
+**Status**: Implemented
 
 **Input**: VLM free-text page-pass scrambles box ids (warning + crop reread); inspector «Оригинал» is readonly so manual OCR fixes are rejected.
 

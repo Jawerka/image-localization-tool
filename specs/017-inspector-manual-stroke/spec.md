@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-10
 
-**Status**: Draft
+**Status**: Implemented
 
 **Input**: Stabilize right inspector against re-renders; protect manual translations from LLM overwrite; add stroke width in region styles.
 

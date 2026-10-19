@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-10
 
-**Status**: Draft
+**Status**: Implemented
 
 **Input**: Plan (сплит 022–026): 024 = интерьеры правого рельса вместо заглушек 022. Область зафиксирована в 025 spec: `style.html`/`sfx.html` и рельс отчёта `batch-run` — это режимы инспектора, они уходят в 024. Референсы: `web/js/inspector.js` (поведение), `web/js/inspector_render.js` (skip-перерисовки, `details`), `web/js/state.js` (правки/сохранение), `web/mockups/next/main-editor.html` (карточки «Текст»/«Страница»), `style.html` (стиль региона), `sfx.html` (звук), `batch-run.html` (отчёт). Механика: `ChangeNotifier` без новых пакетов; документ/черновик/история/409 — из 023 (`ViewerState.editDocument`); выделение — единый id с канвасом 023; экраны/диалоги — 025. Правит тот же документ, что канвас; отдельных API-контрактов не добавляется, кроме серверных gap-fix (см. FR-020).
 

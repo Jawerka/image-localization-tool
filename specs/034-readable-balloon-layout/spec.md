@@ -1,7 +1,7 @@
 # Feature Specification: Читаемый текст в облачках
 **Feature Branch**: `codex/034-readable-balloon-layout`
 **Created**: 2026-10-18
-**Status**: Approved for implementation by user request
+**Status**: Implemented
 **Input**: Закрепить удачный вариант масок и попробовать способы крупного заполнения облачков текстом.
 
 ## User Scenarios & Testing

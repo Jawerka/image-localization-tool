@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-10
 
-**Status**: Draft
+**Status**: Implemented
 
 **Input**: Plan: 025 = «контейнерные экраны и диалоги». Split fixed after reviewing `web/mockups/next`: settings, glossary, export, remote, first-run and the dialog set are **screens/overlays of this feature**; `style.html`/`sfx.html` and the `batch-run` report rail are **inspector modes**, so they move to 024 (documented deviation from the 022 spec's tentative list). Export folder picking uses `file_selector` + an explicit-path gap-fix in the API (the server's dialog bridge is a no-op under `--api`). Mechanics: `ChangeNotifier` only, strings and structure follow the mockups, tokens from `web/tokens.json`.
 

@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-09
 
-**Status**: Draft
+**Status**: Implemented
 
 **Input**: User description: "Style card polish from PROBLEMS: project style presets on the region card, font names shown in their own typeface in the font chooser, distinct flag vs wave warp geometry. Remove dead styleLibrary-only load. Flutter shell out of scope."
 

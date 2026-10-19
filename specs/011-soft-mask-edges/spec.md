@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-09
 
-**Status**: Draft
+**Status**: Implemented
 
 **Input**: Soft paste feather for LaMa/OpenCV inpaint so hole edges blend into the original and do not hard-cut or stretch the background. Binary hole mask into the model unchanged. Flat-fill path unchanged. Flutter out of scope.
 

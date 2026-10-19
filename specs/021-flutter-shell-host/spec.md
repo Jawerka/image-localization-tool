@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-10
 
-**Status**: Draft
+**Status**: Implemented
 
 **Input**: Flutter Windows host + Python `--api` sidecar. Python: `python -m src.app --api` runs local HTTP without window, writes `api.json` `{port, token}`, never writes `instance.json`, optional one-line stdout handshake, `--parent-pid` orphan watchdog. Flutter: spawn sidecar, poll handshake, `Cookie: ilt_session` REST, self-written SSE reader on `package:http`, ChangeNotifier state, shell v2 chrome skeleton, single-instance via own IPC → `/api/drop`, dev attach `--dart-define=ILT_ATTACH=1`. Flutter pin ≥ 3.47.7. `python -m src.app` (pywebview) stays untouched.
 

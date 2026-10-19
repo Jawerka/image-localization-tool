@@ -4,7 +4,9 @@
 
 **Created**: 2026-10-10
 
-**Status**: Draft
+**Status**: Implemented
+
+> T016 (jank profiling) is deferred; it does not block 1.0.5.
 
 **Input**: Plan (сплит 022–026): 023 = реальная сцена просмотрщика вместо карточки-заглушки из 022. Обязательный jank-spike выполнен до спецификации: `specs/023-viewer/spike.md` — решение «`InteractiveViewer` → `CustomPaint` без `RepaintBoundary`» (кэш слоя даёт всплески 34–62 мс на каждом шаге зума; без слоя — стабильные ≤ 7,3 мс). Референсы: `web/mockups/next/main-editor.html`, `web/js/viewer.js`, `web/js/state.js` (документ, undo, сохранение), `web/js/keys.js` (хоткеи). Механика: `ChangeNotifier` без новых пакетов; REST/SSE из 021; инспектор — 024; экраны/диалоги — 025. Текстовые правки (автосохранение) и карточки регионов — 024; канвас только предоставляет им модель документа и выделение.
 

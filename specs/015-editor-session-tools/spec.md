@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-10
 
-**Status**: Draft
+**Status**: Implemented
 
 **Input**: User description: "Saving must not jump to the first page; persist selected page, zoom, and pan. Add Fit-width. Merge brush/eraser and lasso add/subtract via LMB/RMB with tooltips."
 

@@ -2,7 +2,7 @@
 
 **Feature Branch**: `codex/041-performance-instrumentation`
 **Created**: 2026-10-18
-**Status**: Ready
+**Status**: Implemented
 **Input**: Расширить профильные измерения очереди, I/O, preview и памяти.
 
 ## User Scenarios & Testing
