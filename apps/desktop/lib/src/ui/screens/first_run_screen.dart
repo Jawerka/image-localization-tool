@@ -20,10 +20,17 @@ class FirstRunScreen extends StatefulWidget {
 }
 
 class _FirstRunScreenState extends State<FirstRunScreen> {
-  List<String> get steps => ['Тема', 'Перевод', if (_draft['translator_backend'] != 'argos') 'Сервер LLM', 'Языки', 'Подготовка'];
+  List<String> get steps => [
+    'Тема',
+    'Перевод',
+    if (_draft['translator_backend'] != 'argos') 'Сервер LLM',
+    'Языки',
+    'Подготовка',
+  ];
 
   int _step = 0;
   late Map<String, dynamic> _draft;
+  late String _profile;
   bool _checking = false;
   bool? _llmOk;
   String _llmReason = '';
@@ -47,6 +54,7 @@ class _FirstRunScreenState extends State<FirstRunScreen> {
       'inpainter_backend': settings['inpainter_backend'] ?? 'lama',
       'models_dir': settings['models_dir'] ?? '',
     };
+    _profile = _initialProfile(settings);
     unawaited(state.secondary.refreshModels());
     unawaited(state.secondary.refreshRuntime());
   }
@@ -54,6 +62,26 @@ class _FirstRunScreenState extends State<FirstRunScreen> {
   void _set(String key, Object? value) {
     setState(() => _draft[key] = value);
     if (key == 'theme') state.workspace.previewSettings(_draft);
+  }
+
+  String _initialProfile(Map<String, dynamic> settings) {
+    if ('${settings['translator_backend'] ?? ''}' == 'argos') return 'offline';
+    final url = '${settings['llm_base_url'] ?? ''}';
+    if (url.isEmpty || url.contains('127.0.0.1') || url.contains('localhost')) {
+      return 'local';
+    }
+    return 'server';
+  }
+
+  void _setProfile(String value) {
+    setState(() {
+      _profile = value;
+      _draft['translator_backend'] = value == 'offline' ? 'argos' : 'llm';
+      if (value == 'local' &&
+          '${_draft['llm_base_url'] ?? ''}'.trim().isEmpty) {
+        _draft['llm_base_url'] = 'http://127.0.0.1:1234/v1';
+      }
+    });
   }
 
   Future<void> _skip() async {
@@ -99,7 +127,10 @@ class _FirstRunScreenState extends State<FirstRunScreen> {
     });
     try {
       await _saveApiKey();
-      await state.workspace.updateSettings({'llm_base_url': base, 'llm_model': '${_draft['llm_model'] ?? ''}'});
+      await state.workspace.updateSettings({
+        'llm_base_url': base,
+        'llm_model': '${_draft['llm_model'] ?? ''}',
+      });
       final data = await api.postJson('/api/llm/check');
       if (!mounted) return;
       setState(() {
@@ -150,7 +181,10 @@ class _FirstRunScreenState extends State<FirstRunScreen> {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Добро пожаловать', style: theme.textTheme.titleSmall),
+                      Text(
+                        'Добро пожаловать',
+                        style: theme.textTheme.titleSmall,
+                      ),
                       Text(
                         'подготовим нужные компоненты · прогресс загрузки сохранится',
                         style: theme.textTheme.labelSmall,
@@ -223,8 +257,14 @@ class _FirstRunScreenState extends State<FirstRunScreen> {
                     child: switch (_step) {
                       0 => _themeStep(context),
                       1 => _modeStep(context),
-                      2 => _draft['translator_backend'] == 'argos' ? _languagesStep(context) : _llmStep(context),
-                      3 => _draft['translator_backend'] == 'argos' ? _preparationStep(context) : _languagesStep(context),
+                      2 =>
+                        _draft['translator_backend'] == 'argos'
+                            ? _languagesStep(context)
+                            : _llmStep(context),
+                      3 =>
+                        _draft['translator_backend'] == 'argos'
+                            ? _preparationStep(context)
+                            : _languagesStep(context),
                       _ => _preparationStep(context),
                     },
                   ),
@@ -269,60 +309,89 @@ class _FirstRunScreenState extends State<FirstRunScreen> {
   }
 
   Widget _card(BuildContext context, List<Widget> children) => PanelCard(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: children,
-        ),
-      );
+    padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: children,
+    ),
+  );
 
   Widget _themeStep(BuildContext context) => _card(context, [
-        const SectionHeader(
-          title: 'Тема',
-          lead: 'Окно обновится сразу — можно сравнить варианты.',
-        ),
-        Row(
-          children: [
-            for (final (value, label) in const [
-              ('dark', 'Тёмная'),
-              ('light', 'Светлая'),
-              ('system', 'Как в системе'),
-            ]) ...[
-              Expanded(
-                child: ChoiceCard<String>(
-                  value: value,
-                  selected: '${_draft['theme'] ?? 'system'}',
-                  title: label,
-                  onChanged: (value) => _set('theme', value),
-                ),
-              ),
-              if (value != 'system') const SizedBox(width: 8),
-            ],
-          ],
-        ),
-      ]);
+    const SectionHeader(
+      title: 'Тема',
+      lead: 'Окно обновится сразу — можно сравнить варианты.',
+    ),
+    Row(
+      children: [
+        for (final (value, label) in const [
+          ('dark', 'Тёмная'),
+          ('light', 'Светлая'),
+          ('system', 'Как в системе'),
+        ]) ...[
+          Expanded(
+            child: ChoiceCard<String>(
+              value: value,
+              selected: '${_draft['theme'] ?? 'system'}',
+              title: label,
+              onChanged: (value) => _set('theme', value),
+            ),
+          ),
+          if (value != 'system') const SizedBox(width: 8),
+        ],
+      ],
+    ),
+  ]);
 
   Widget _modeStep(BuildContext context) => _card(context, [
-    const SectionHeader(title: 'Способ перевода', lead: 'Нужные компоненты будут выбраны автоматически.'),
-    SegmentedButton<String>(
-      segments: const [
-        ButtonSegment(value: 'llm', label: Text('Сервер LLM')),
-        ButtonSegment(value: 'argos', label: Text('Оффлайн')),
-      ],
-      selected: {'${_draft['translator_backend']}'},
-      onSelectionChanged: (values) => _set('translator_backend', values.first),
+    const SectionHeader(
+      title: 'Где будет работать перевод',
+      lead:
+          'Профиль определяет, какие компоненты подготовить и какой fallback оставить.',
+    ),
+    ChoiceCard<String>(
+      value: 'local',
+      selected: _profile,
+      title: 'На этом компьютере',
+      subtitle: 'LLM/VLM в LM Studio, llama.cpp или Ollama на localhost.',
+      onChanged: _setProfile,
+    ),
+    const SizedBox(height: 6),
+    ChoiceCard<String>(
+      value: 'server',
+      selected: _profile,
+      title: 'Подключиться к серверу',
+      subtitle: 'LLM/VLM на другом компьютере или в локальной сети.',
+      onChanged: _setProfile,
+    ),
+    const SizedBox(height: 6),
+    ChoiceCard<String>(
+      value: 'offline',
+      selected: _profile,
+      title: 'Офлайн',
+      subtitle: 'RapidOCR + Argos без сети; LLM не используется.',
+      onChanged: _setProfile,
     ),
     const SizedBox(height: 12),
-    const Text('Оффлайн-перевод работает после загрузки языковой модели. Для LLM укажите свой сервер.'),
+    const Text(
+      'Для локального и серверного профиля укажите адрес LLM на следующем шаге. '
+      'Офлайн-перевод доступен после загрузки языковой пары.',
+    ),
   ]);
 
   Widget _preparationStep(BuildContext context) => _card(context, [
-    PreparationPanel(state: state.secondary, selection: _draft, onDeviceChanged: (value) => _set('device', value)),
+    PreparationPanel(
+      state: state.secondary,
+      selection: _draft,
+      onDeviceChanged: (value) => _set('device', value),
+    ),
     const SizedBox(height: 12),
-    Material(type: MaterialType.transparency, child: ExpansionTile(
-      title: const Text('Дополнительные настройки компонентов'),
-      children: [_componentsStep(context)],
-    )),
+    Material(
+      type: MaterialType.transparency,
+      child: ExpansionTile(
+        title: const Text('Дополнительные настройки компонентов'),
+        children: [_componentsStep(context)],
+      ),
+    ),
   ]);
 
   /// Конфликт torch-паков: cpu и cu128 не ставятся одновременно.
@@ -344,7 +413,8 @@ class _FirstRunScreenState extends State<FirstRunScreen> {
     return _card(context, [
       const SectionHeader(
         title: 'Компоненты',
-        lead: 'PyTorch ускоряет очистку (NVIDIA), Argos даёт офлайн-перевод. '
+        lead:
+            'PyTorch ускоряет очистку (NVIDIA), Argos даёт офлайн-перевод. '
             'Ставятся отдельно — можно пропустить и вернуться в настройках.',
       ),
       if (runtime.reason.isNotEmpty) ...[
@@ -372,8 +442,9 @@ class _FirstRunScreenState extends State<FirstRunScreen> {
                     children: [
                       Text(
                         pack.title,
-                        style: theme.textTheme.bodySmall
-                            ?.copyWith(color: palette.textPrimary),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: palette.textPrimary,
+                        ),
                       ),
                       Text(
                         '${_formatBytes(pack.sizeBytes)}'
@@ -481,7 +552,8 @@ class _FirstRunScreenState extends State<FirstRunScreen> {
     return _card(context, [
       const SectionHeader(
         title: 'Сервер LLM',
-        lead: 'OpenAI-совместимый сервер (LM Studio, llama.cpp, Ollama). '
+        lead:
+            'OpenAI-совместимый сервер (LM Studio, llama.cpp, Ollama). '
             'Можно пропустить — офлайн-режим RapidOCR + Argos.',
       ),
       FieldRow(
@@ -502,9 +574,7 @@ class _FirstRunScreenState extends State<FirstRunScreen> {
               )
             : IltSelect(
                 value: '${_draft['llm_model'] ?? ''}',
-                options: [
-                  for (final model in _llmModels) (model, model),
-                ],
+                options: [for (final model in _llmModels) (model, model)],
                 onChanged: (value) => _set('llm_model', value),
               ),
       ),
@@ -532,8 +602,9 @@ class _FirstRunScreenState extends State<FirstRunScreen> {
           if (_llmOk == true)
             Text(
               'Сервер отвечает · моделей: ${_llmModels.length}',
-              style: theme.textTheme.labelSmall
-                  ?.copyWith(color: palette.textSuccess),
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: palette.textSuccess,
+              ),
             ),
           if (_llmOk == false)
             Expanded(
@@ -543,8 +614,9 @@ class _FirstRunScreenState extends State<FirstRunScreen> {
                     : 'Недоступен: $_llmReason',
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.labelSmall
-                    ?.copyWith(color: palette.textError),
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: palette.textError,
+                ),
               ),
             ),
         ],
@@ -553,35 +625,35 @@ class _FirstRunScreenState extends State<FirstRunScreen> {
   }
 
   Widget _languagesStep(BuildContext context) => _card(context, [
-        const SectionHeader(
-          title: 'Языки',
-          lead: 'Язык оригинала можно оставить автоопределению.',
-        ),
-        FieldRow(
-          label: 'Откуда',
-          child: IltSelect(
-            value: '${_draft['source_lang'] ?? 'en'}',
-            options: const [
-              ('en', 'English'),
-              ('ru', 'Русский'),
-              ('uk', 'Українська'),
-            ],
-            onChanged: (value) => _set('source_lang', value),
-          ),
-        ),
-        FieldRow(
-          label: 'Куда',
-          child: IltSelect(
-            value: '${_draft['target_lang'] ?? 'ru'}',
-            options: const [
-              ('ru', 'Русский'),
-              ('en', 'English'),
-              ('uk', 'Українська'),
-            ],
-            onChanged: (value) => _set('target_lang', value),
-          ),
-        ),
-      ]);
+    const SectionHeader(
+      title: 'Языки',
+      lead: 'Язык оригинала можно оставить автоопределению.',
+    ),
+    FieldRow(
+      label: 'Откуда',
+      child: IltSelect(
+        value: '${_draft['source_lang'] ?? 'en'}',
+        options: const [
+          ('en', 'English'),
+          ('ru', 'Русский'),
+          ('uk', 'Українська'),
+        ],
+        onChanged: (value) => _set('source_lang', value),
+      ),
+    ),
+    FieldRow(
+      label: 'Куда',
+      child: IltSelect(
+        value: '${_draft['target_lang'] ?? 'ru'}',
+        options: const [
+          ('ru', 'Русский'),
+          ('en', 'English'),
+          ('uk', 'Українська'),
+        ],
+        onChanged: (value) => _set('target_lang', value),
+      ),
+    ),
+  ]);
 }
 
 String _formatBytes(int value) {

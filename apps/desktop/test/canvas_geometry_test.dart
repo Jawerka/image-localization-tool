@@ -14,10 +14,7 @@ void main() {
       );
       final expected = (600 - 16) / 2000;
       expect(transform.scale, closeTo(expected, 1e-9));
-      expect(
-        transform.tx,
-        closeTo((800 - 1000 * expected) / 2, 1e-9),
-      );
+      expect(transform.tx, closeTo((800 - 1000 * expected) / 2, 1e-9));
     });
 
     test('fitWidth считает по ширине', () {
@@ -41,8 +38,14 @@ void main() {
       const focal = Offset(100, 80);
       final zoomed = transform.zoomAt(2, focal);
       expect(zoomed.scale, 2);
-      expect(zoomed.toScene(focal).dx, closeTo(transform.toScene(focal).dx, 1e-9));
-      expect(zoomed.toScene(focal).dy, closeTo(transform.toScene(focal).dy, 1e-9));
+      expect(
+        zoomed.toScene(focal).dx,
+        closeTo(transform.toScene(focal).dx, 1e-9),
+      );
+      expect(
+        zoomed.toScene(focal).dy,
+        closeTo(transform.toScene(focal).dy, 1e-9),
+      );
     });
 
     test('clamped не оставляет пустых полей при увеличении', () {
@@ -56,8 +59,9 @@ void main() {
     });
 
     test('clamped центрирует лист меньше вьюпорта', () {
-      final clamped = const ViewTransform(scale: 0.5)
-          .clamped(const Size(200, 200), const Size(600, 400));
+      final clamped = const ViewTransform(
+        scale: 0.5,
+      ).clamped(const Size(200, 200), const Size(600, 400));
       expect(clamped.tx, closeTo(250, 1e-9));
       expect(clamped.ty, closeTo(150, 1e-9));
     });
@@ -66,28 +70,36 @@ void main() {
       const image = Size(100, 400);
       const viewport = Size(300, 300);
       // sh = 400, запас 100: ty ∈ [-200, 100].
-      final up = const ViewTransform(scale: 1, ty: -900)
-          .clamped(image, viewport, verticalMargin: 0.25);
+      final up = const ViewTransform(
+        scale: 1,
+        ty: -900,
+      ).clamped(image, viewport, verticalMargin: 0.25);
       expect(up.ty, closeTo(-200, 1e-9));
-      final down = const ViewTransform(scale: 1, ty: 900)
-          .clamped(image, viewport, verticalMargin: 0.25);
+      final down = const ViewTransform(
+        scale: 1,
+        ty: 900,
+      ).clamped(image, viewport, verticalMargin: 0.25);
       expect(down.ty, closeTo(100, 1e-9));
       // Дефолт 0 — прежнее поведение без запаса.
-      final tight =
-          const ViewTransform(scale: 1, ty: 900).clamped(image, viewport);
+      final tight = const ViewTransform(
+        scale: 1,
+        ty: 900,
+      ).clamped(image, viewport);
       expect(tight.ty, 0);
       // Лист меньше вьюпорта по-прежнему центрируется.
-      final small = const ViewTransform(scale: 0.5, ty: 900)
-          .clamped(const Size(200, 200), viewport, verticalMargin: 0.25);
+      final small = const ViewTransform(
+        scale: 0.5,
+        ty: 900,
+      ).clamped(const Size(200, 200), viewport, verticalMargin: 0.25);
       expect(small.ty, closeTo(100, 1e-9));
     });
   });
 
   group('хит-тест регионов', () {
     Region region(String id, Rect bbox) => Region({
-          'id': id,
-          'bbox': [bbox.left, bbox.top, bbox.width, bbox.height],
-        });
+      'id': id,
+      'bbox': [bbox.left, bbox.top, bbox.width, bbox.height],
+    });
 
     test('тело региона и запас 8 px', () {
       final regions = [region('1', const Rect.fromLTWH(100, 100, 200, 100))];
@@ -143,11 +155,7 @@ void main() {
     test('applyHandleDrag: перенос и изменение размера', () {
       const start = Rect.fromLTWH(10, 10, 100, 50);
       expect(
-        applyHandleDrag(
-          handle: '',
-          start: start,
-          delta: const Offset(5, 6),
-        ),
+        applyHandleDrag(handle: '', start: start, delta: const Offset(5, 6)),
         const Rect.fromLTWH(15, 16, 100, 50),
       );
       expect(
@@ -159,11 +167,7 @@ void main() {
         const Rect.fromLTWH(10, 10, 110, 70),
       );
       expect(
-        applyHandleDrag(
-          handle: 'nw',
-          start: start,
-          delta: const Offset(4, 5),
-        ),
+        applyHandleDrag(handle: 'nw', start: start, delta: const Offset(4, 5)),
         const Rect.fromLTWH(14, 15, 96, 45),
       );
     });
@@ -211,6 +215,17 @@ void main() {
         },
       });
       expect(warpPointsFor(region), isEmpty);
+    });
+
+    test('mesh preview: 18 треугольников и текстурные координаты 4×4', () {
+      expect(meshPreviewIndices(), hasLength(54));
+      expect(meshPreviewIndices().take(6).toList(), [0, 1, 5, 0, 5, 4]);
+      final coords = meshTextureCoordinates(301, 201);
+      expect(coords, hasLength(16));
+      expect(coords.first, Offset.zero);
+      expect(coords[3], const Offset(300, 0));
+      expect(coords[12], const Offset(0, 200));
+      expect(coords.last, const Offset(300, 200));
     });
   });
 }

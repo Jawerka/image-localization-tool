@@ -146,6 +146,8 @@ void main() {
     expect(skipRegion['skip'], true);
 
     // Пресет искривления — в черновик, пилюля «N правок».
+    await tester.ensureVisible(find.byKey(const Key('style-warp-wave')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('style-warp-wave')));
     await tester.pump();
     expect(state.workspace.viewer.hasDeferredDraft, isTrue);

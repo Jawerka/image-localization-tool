@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:ui' show Offset, Rect;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -8,13 +9,11 @@ import 'package:ilt_desktop/src/model/page_document.dart';
 import 'package:ilt_desktop/src/sidecar/handshake.dart';
 import 'package:ilt_desktop/src/state/viewer_state.dart';
 
-Map<String, dynamic> _document({
-  int version = 3,
-  List<dynamic>? regions,
-}) =>
+Map<String, dynamic> _document({int version = 3, List<dynamic>? regions}) =>
     <String, dynamic>{
       'version': version,
-      'regions': regions ??
+      'regions':
+          regions ??
           [
             {
               'id': '1',
@@ -61,8 +60,12 @@ void main() {
       }
       return http.Response(jsonEncode(payload), code, headers: headers);
     });
-    return ViewerState()
-      ..bind(IltApi(ready: const ApiReady(port: 1, token: 't'), client: client));
+    return ViewerState()..bind(
+      IltApi(
+        ready: const ApiReady(port: 1, token: 't'),
+        client: client,
+      ),
+    );
   }
 
   setUp(() {
@@ -75,9 +78,9 @@ void main() {
 
   test('текст: пауза 500 мс, коалесинг, translation_locked', () async {
     handler = (path) => {
-          'page': {'id': 'p1'},
-          'document': _document(),
-        };
+      'page': {'id': 'p1'},
+      'document': _document(),
+    };
     final viewer = build();
     await viewer.openPage('p1');
     viewer.setRegionText('1', 'he');
@@ -86,10 +89,12 @@ void main() {
     await viewer.whenSaved('p1');
     final puts = requests.where((r) => r.startsWith('PUT')).toList();
     expect(puts, hasLength(1));
-    final body = jsonDecode(bodies[requests.indexOf(puts.first)])
-        as Map<String, dynamic>;
-    final region = ((body['document'] as Map)['regions'] as List).first
-        as Map<String, dynamic>;
+    final body =
+        jsonDecode(bodies[requests.indexOf(puts.first)])
+            as Map<String, dynamic>;
+    final region =
+        ((body['document'] as Map)['regions'] as List).first
+            as Map<String, dynamic>;
     expect(region['text'], 'hello');
     // коалесинг: одна запись истории на серию
     expect(viewer.canUndo, isTrue);
@@ -100,9 +105,9 @@ void main() {
 
   test('translation_locked следует за непустым переводом', () async {
     handler = (path) => {
-          'page': {'id': 'p1'},
-          'document': _document(),
-        };
+      'page': {'id': 'p1'},
+      'document': _document(),
+    };
     final viewer = build();
     await viewer.openPage('p1');
     viewer.setRegionTranslation('1', 'привет');
@@ -114,9 +119,9 @@ void main() {
 
   test('тип и говорящий: немедленное сохранение без паузы', () async {
     handler = (path) => {
-          'page': {'id': 'p1'},
-          'document': _document(),
-        };
+      'page': {'id': 'p1'},
+      'document': _document(),
+    };
     final viewer = build();
     await viewer.openPage('p1');
     viewer.setRegionType('1', 'thought');
@@ -124,10 +129,12 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 600));
     final puts = requests.where((r) => r.startsWith('PUT')).toList();
     expect(puts, hasLength(1));
-    final body = jsonDecode(bodies[requests.indexOf(puts.first)])
-        as Map<String, dynamic>;
-    final region = ((body['document'] as Map)['regions'] as List).first
-        as Map<String, dynamic>;
+    final body =
+        jsonDecode(bodies[requests.indexOf(puts.first)])
+            as Map<String, dynamic>;
+    final region =
+        ((body['document'] as Map)['regions'] as List).first
+            as Map<String, dynamic>;
     expect(region['type'], 'thought');
     expect(region['block_type'], 'thought');
     expect(region['speaker'], 'Кирби');
@@ -136,9 +143,9 @@ void main() {
 
   test('стиль: черновик, пресеты, кламп кегля, счётчик пилюли', () async {
     handler = (path) => {
-          'page': {'id': 'p1'},
-          'document': _document(),
-        };
+      'page': {'id': 'p1'},
+      'document': _document(),
+    };
     final viewer = build();
     await viewer.openPage('p1');
     viewer.setFontBounds(10, 64);
@@ -158,10 +165,15 @@ void main() {
     expect(viewer.editCount, 2); // коалесинг серии bend
 
     viewer.setRegionFontSize('1', 200);
-    expect(viewer.document!.findRegion('1')!.styleMap()['font_size_override'],
-        64);
+    expect(
+      viewer.document!.findRegion('1')!.styleMap()['font_size_override'],
+      64,
+    );
     viewer.setRegionFontSize('1', 0);
-    expect(viewer.document!.findRegion('1')!.styleMap()['font_size_override'], 0);
+    expect(
+      viewer.document!.findRegion('1')!.styleMap()['font_size_override'],
+      0,
+    );
 
     viewer.commitDeferredEdits();
     await viewer.whenSaved('p1');
@@ -170,11 +182,45 @@ void main() {
     viewer.dispose();
   });
 
+  test('text_position: независимый якорь, сброс и режим перемещения', () async {
+    handler = (path) => {
+      'page': {'id': 'p1'},
+      'document': _document(
+        regions: [
+          {
+            'id': '1',
+            'bbox': [10, 10, 100, 100],
+            'bubble_bbox': [0, 0, 120, 120],
+            'text': 'hi',
+            'translation': '',
+          },
+        ],
+      ),
+    };
+    final viewer = build();
+    await viewer.openPage('p1');
+    viewer.selectRegion('1');
+    final region = viewer.document!.findRegion('1')!;
+    expect(viewer.textAnchorFor(region), const Offset(60, 60));
+    viewer.setTextPosition('1', const Offset(80, 90));
+    final moved = viewer.document!.findRegion('1')!;
+    expect(moved.textPosition, const Offset(80, 90));
+    expect(moved.bbox, const Rect.fromLTWH(10, 10, 100, 100));
+    expect(viewer.hasDeferredDraft, isTrue);
+    viewer.resetTextPosition('1');
+    expect(viewer.document!.findRegion('1')!.textPosition, isNull);
+    viewer.toggleTextMove('1');
+    expect(viewer.isTextMoveActive('1'), isTrue);
+    viewer.selectRegion('2');
+    expect(viewer.isTextMoveActive('1'), isFalse);
+    viewer.dispose();
+  });
+
   test('clipboard стиля: копировать/вставить, warp слиянием', () async {
     handler = (path) => {
-          'page': {'id': 'p1'},
-          'document': _document(),
-        };
+      'page': {'id': 'p1'},
+      'document': _document(),
+    };
     final viewer = build();
     await viewer.openPage('p1');
     viewer.selectRegion('1');
@@ -192,9 +238,9 @@ void main() {
 
   test('skip сохраняется сразу, delete идёт в черновик', () async {
     handler = (path) => {
-          'page': {'id': 'p1'},
-          'document': _document(),
-        };
+      'page': {'id': 'p1'},
+      'document': _document(),
+    };
     final viewer = build();
     await viewer.openPage('p1');
     viewer.toggleRegionSkip('1');
@@ -204,8 +250,9 @@ void main() {
     expect(requests.where((r) => r.startsWith('PUT')), hasLength(1));
     final index = requests.indexOf('PUT /api/pages/p1/document');
     final body = jsonDecode(bodies[index]) as Map<String, dynamic>;
-    final region = ((body['document'] as Map)['regions'] as List).first
-        as Map<String, dynamic>;
+    final region =
+        ((body['document'] as Map)['regions'] as List).first
+            as Map<String, dynamic>;
     expect(region['skip'], true);
 
     viewer.selectRegion('1');
@@ -218,9 +265,9 @@ void main() {
 
   test('действие региона: тело запроса и сброс состояния ожидания', () async {
     handler = (path) => {
-          'page': {'id': 'p1'},
-          'document': _document(),
-        };
+      'page': {'id': 'p1'},
+      'document': _document(),
+    };
     final viewer = build();
     await viewer.openPage('p1');
     await viewer.regionAction('2', 'shorten');
@@ -233,44 +280,49 @@ void main() {
     viewer.dispose();
   });
 
-  test('sfx: подбор стиля применяет черновик и перечитывает документ', () async {
-    var version = 3;
-    handler = (path) {
-      if (path == '/api/pages/p1') {
-        return {
-          'page': {'id': 'p1'},
-          'document': _document(
-            version: version,
-            regions: [
-              {
-                'id': '2',
-                'bbox': [200, 200, 80, 60],
-                'type': 'sfx',
-                'translation': 'РРРРР',
-                'style': {'font_id': 'unsightly', 'fill_rgb': [17, 17, 17]},
-              },
-            ],
-          ),
-        };
-      }
-      return <String, dynamic>{};
-    };
-    final viewer = build();
-    await viewer.openPage('p1');
-    viewer.setRegionText('2', 'новый');
-    await viewer.restyleSfx('2');
-    expect(
-      requests,
-      contains('POST /api/pages/p1/regions/2/sfx-style'),
-    );
-    // черновик применён одним PUT до подбора
-    expect(requests.where((r) => r.startsWith('PUT')), isNotEmpty);
-    expect(viewer.sfxStatus, 'ready');
-    expect(viewer.document!.findRegion('2')!.styleMap()['font_id'],
-        'unsightly');
-    expect(viewer.hasDeferredDraft, isFalse);
-    viewer.dispose();
-  });
+  test(
+    'sfx: подбор стиля применяет черновик и перечитывает документ',
+    () async {
+      var version = 3;
+      handler = (path) {
+        if (path == '/api/pages/p1') {
+          return {
+            'page': {'id': 'p1'},
+            'document': _document(
+              version: version,
+              regions: [
+                {
+                  'id': '2',
+                  'bbox': [200, 200, 80, 60],
+                  'type': 'sfx',
+                  'translation': 'РРРРР',
+                  'style': {
+                    'font_id': 'unsightly',
+                    'fill_rgb': [17, 17, 17],
+                  },
+                },
+              ],
+            ),
+          };
+        }
+        return <String, dynamic>{};
+      };
+      final viewer = build();
+      await viewer.openPage('p1');
+      viewer.setRegionText('2', 'новый');
+      await viewer.restyleSfx('2');
+      expect(requests, contains('POST /api/pages/p1/regions/2/sfx-style'));
+      // черновик применён одним PUT до подбора
+      expect(requests.where((r) => r.startsWith('PUT')), isNotEmpty);
+      expect(viewer.sfxStatus, 'ready');
+      expect(
+        viewer.document!.findRegion('2')!.styleMap()['font_id'],
+        'unsightly',
+      );
+      expect(viewer.hasDeferredDraft, isFalse);
+      viewer.dispose();
+    },
+  );
 
   test('reset страницы очищает историю и перечитывает документ', () async {
     var version = 3;
@@ -334,13 +386,21 @@ void main() {
         if (stylesPut > 0) {
           return {
             'styles': [
-              {'name': 'Стиль 1', 'style': {'fill_rgb': [0, 0, 0]}},
+              {
+                'name': 'Стиль 1',
+                'style': {
+                  'fill_rgb': [0, 0, 0],
+                },
+              },
             ],
           };
         }
         return {
           'styles': [
-            {'name': 'Крик', 'style': {'uppercase': true}},
+            {
+              'name': 'Крик',
+              'style': {'uppercase': true},
+            },
           ],
         };
       }

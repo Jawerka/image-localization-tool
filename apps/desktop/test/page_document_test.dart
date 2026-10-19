@@ -45,6 +45,22 @@ void main() {
     expect(document.toJson()['extra_top'], true);
   });
 
+  test('text_position и bubble_bbox читаются и пишутся независимо от bbox', () {
+    final region = Region(<String, dynamic>{
+      'id': '1',
+      'bbox': [10, 20, 100, 50],
+      'bubble_bbox': [8, 18, 104, 54],
+      'text_position': [60.5, 45.25],
+    });
+    expect(region.bbox, const Rect.fromLTWH(10, 20, 100, 50));
+    expect(region.bubbleBbox, const Rect.fromLTWH(8, 18, 104, 54));
+    expect(region.textPosition, const Offset(60.5, 45.25));
+    region.textPosition = const Offset(70, 55);
+    expect(region.data['text_position'], [70.0, 55.0]);
+    region.textPosition = null;
+    expect(region.textPosition, isNull);
+  });
+
   test('blankRegion и nextRegionId', () {
     final document = PageDocument.fromJson(<String, dynamic>{
       'regions': [
@@ -53,9 +69,7 @@ void main() {
       ],
     });
     expect(document.nextRegionId(), 8);
-    final region = Region(
-      blankRegion(8, const Rect.fromLTWH(5, 5, 2, 2)),
-    );
+    final region = Region(blankRegion(8, const Rect.fromLTWH(5, 5, 2, 2)));
     expect(region.id, '8');
     expect(region.edited, isTrue);
     expect(region.skip, isFalse);

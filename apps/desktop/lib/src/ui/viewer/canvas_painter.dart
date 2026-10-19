@@ -94,12 +94,23 @@ class ScenePainter extends CustomPainter {
         preview.width.toDouble(),
         preview.height.toDouble(),
       );
-      canvas.drawImageRect(
-        preview,
-        src,
-        src.shift(viewer.stylePreviewOffset),
-        _imagePaint,
-      );
+      final textOffset = session.previewTextId == viewer.selectedRegionId
+          ? session.previewTextOffset ?? Offset.zero
+          : Offset.zero;
+      final region = viewer.document?.findRegion(viewer.selectedRegionId);
+      final meshPoints = session.previewWarpPoints;
+      if (meshPoints != null &&
+          meshPoints.length == 16 &&
+          region?.warp?['kind'] == 'mesh') {
+        _drawMeshPreview(canvas, preview, meshPoints);
+      } else {
+        canvas.drawImageRect(
+          preview,
+          src,
+          src.shift(viewer.stylePreviewOffset + textOffset),
+          _imagePaint,
+        );
+      }
     }
 
     final document = viewer.document;
@@ -117,6 +128,31 @@ class ScenePainter extends CustomPainter {
       image.height.toDouble(),
     );
     canvas.drawImageRect(image, rect, rect, _imagePaint);
+  }
+
+  // shortcut: черновой mesh-превью искажает точный crop вместе с фоном.
+  // Заменить на RGBA base-layer, когда 039 получит полноценную приёмку.
+  void _drawMeshPreview(Canvas canvas, ui.Image image, List<Offset> points) {
+    final vertices = ui.Vertices(
+      ui.VertexMode.triangles,
+      points,
+      textureCoordinates: meshTextureCoordinates(image.width, image.height),
+      indices: meshPreviewIndices(),
+    );
+    final shader = ui.ImageShader(
+      image,
+      ui.TileMode.clamp,
+      ui.TileMode.clamp,
+      Matrix4.identity().storage,
+      filterQuality: FilterQuality.medium,
+    );
+    canvas.drawVertices(
+      vertices,
+      BlendMode.srcOver,
+      Paint()
+        ..shader = shader
+        ..filterQuality = FilterQuality.medium,
+    );
   }
 
   void _drawPlaceholder(Canvas canvas, ui.Size imageSize, double scale) {
@@ -237,10 +273,10 @@ class ScenePainter extends CustomPainter {
     final ringColor = selected
         ? palette.primary
         : overflow
-            ? palette.textWarning
-            : sfx
-                ? const Color(0xFFE05252)
-                : null;
+        ? palette.textWarning
+        : sfx
+        ? const Color(0xFFE05252)
+        : null;
     canvas.drawRect(
       rect,
       Paint()
@@ -278,10 +314,10 @@ class ScenePainter extends CustomPainter {
     final flag = skip
         ? 'пропущен'
         : overflow
-            ? 'не влез'
-            : sfx
-                ? 'звук'
-                : '';
+        ? 'не влез'
+        : sfx
+        ? 'звук'
+        : '';
     if (flag.isNotEmpty) {
       _chip(
         canvas,
@@ -291,8 +327,8 @@ class ScenePainter extends CustomPainter {
         overflow
             ? palette.textWarning
             : sfx
-                ? const Color(0xFFE05252)
-                : const Color(0xFF11151C),
+            ? const Color(0xFFE05252)
+            : const Color(0xFF11151C),
         scale,
         rightAlign: true,
       );
@@ -341,8 +377,8 @@ class ScenePainter extends CustomPainter {
   }
 
   void _paintWarpPoints(Canvas canvas, Region region, double scale) {
-    final points = session.previewWarpId == region.id &&
-            session.previewWarpPoints != null
+    final points =
+        session.previewWarpId == region.id && session.previewWarpPoints != null
         ? session.previewWarpPoints!
         : warpPointsFor(region);
     if (points.isEmpty) return;
@@ -399,10 +435,7 @@ class ScenePainter extends CustomPainter {
           path.lineTo(point.dx, point.dy);
         }
         path.close();
-        canvas.drawPath(
-          path,
-          Paint()..color = color.withValues(alpha: 0.28),
-        );
+        canvas.drawPath(path, Paint()..color = color.withValues(alpha: 0.28));
       }
       if (points.length >= 2) {
         final outline = ui.Path()..moveTo(points.first.dx, points.first.dy);
@@ -476,7 +509,11 @@ class ScenePainter extends CustomPainter {
     canvas.restore();
   }
 
-  TextPainter _label(String text, {required double size, required Color color}) {
+  TextPainter _label(
+    String text, {
+    required double size,
+    required Color color,
+  }) {
     final key = '$text|$size|${color.toARGB32()}';
     final cached = _labelCache[key];
     if (cached != null) return cached;

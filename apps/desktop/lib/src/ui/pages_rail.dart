@@ -7,15 +7,21 @@ import 'page_thumb.dart';
 import 'theme.dart';
 
 /// Левая панель: список страниц, поиск, batch-блок и подвал.
-class PagesRail extends StatelessWidget {
-  const PagesRail({
-    super.key,
-    required this.workspace,
-    required this.metrics,
-  });
+class PagesRail extends StatefulWidget {
+  const PagesRail({super.key, required this.workspace, required this.metrics});
 
   final WorkspaceState workspace;
   final ChromeMetrics metrics;
+
+  @override
+  State<PagesRail> createState() => _PagesRailState();
+}
+
+class _PagesRailState extends State<PagesRail> {
+  String _tab = 'pages';
+
+  WorkspaceState get workspace => widget.workspace;
+  ChromeMetrics get metrics => widget.metrics;
 
   @override
   Widget build(BuildContext context) {
@@ -32,14 +38,80 @@ class PagesRail extends StatelessWidget {
         children: [
           _Header(workspace: workspace, metrics: metrics),
           const Divider(height: 1),
+          if (workspace.hasProject)
+            _RailTabs(
+              active: _tab,
+              onChanged: (value) => setState(() => _tab = value),
+            ),
           if (!workspace.hasProject)
             const Expanded(child: _Empty())
-          else ...[
+          else if (_tab == 'pages') ...[
             _Search(workspace: workspace),
             if (workspace.busy) _BatchBlock(workspace: workspace),
             Expanded(child: _PageList(workspace: workspace)),
             _Footer(workspace: workspace),
+          ] else ...[
+            _BatchBlock(workspace: workspace),
+            Expanded(child: _QueueList(workspace: workspace)),
+            _Footer(workspace: workspace),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+class _RailTabs extends StatelessWidget {
+  const _RailTabs({required this.active, required this.onChanged});
+
+  final String active;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = IltPalette.of(context);
+    final theme = Theme.of(context);
+    Widget tab(String value, String label, Key key) {
+      final selected = active == value;
+      return Expanded(
+        child: InkWell(
+          key: key,
+          onTap: () => onChanged(value),
+          child: Container(
+            alignment: Alignment.center,
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            decoration: BoxDecoration(
+              color: selected ? palette.surface2 : Colors.transparent,
+              border: Border(
+                bottom: BorderSide(
+                  color: selected ? palette.primary : Colors.transparent,
+                  width: 1.5,
+                ),
+              ),
+            ),
+            child: Text(
+              label,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: selected ? palette.textPrimary : palette.textMuted,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(8, 6, 8, 2),
+      padding: const EdgeInsets.all(2),
+      decoration: BoxDecoration(
+        color: palette.bgSecondary,
+        borderRadius: BorderRadius.circular(7),
+        border: Border.all(color: palette.line),
+      ),
+      child: Row(
+        children: [
+          tab('pages', 'Страницы', const Key('pages-tab-pages')),
+          tab('queue', 'Очередь', const Key('pages-tab-queue')),
         ],
       ),
     );
@@ -64,8 +136,16 @@ class _Header extends StatelessWidget {
         children: [
           Icon(Icons.image_outlined, size: 16, color: palette.textMuted),
           const SizedBox(width: 6),
-          Text('Страницы', style: Theme.of(context).textTheme.labelMedium),
-          const Spacer(),
+          Expanded(
+            child: Text(
+              (workspace.project?.name ?? '').trim().isEmpty
+                  ? 'Проект'
+                  : workspace.project!.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.labelMedium,
+            ),
+          ),
           if (workspace.hasProject)
             Text(
               '${workspace.pages.length}',
@@ -158,8 +238,9 @@ class _BatchBlock extends StatelessWidget {
               Expanded(
                 child: Text(
                   workspace.paused ? 'Очередь на паузе' : 'Очередь',
-                  style: theme.textTheme.labelSmall
-                      ?.copyWith(color: palette.textPrimary),
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: palette.textPrimary,
+                  ),
                 ),
               ),
               Text('${batch.percent} %', style: theme.textTheme.labelSmall),
@@ -177,8 +258,18 @@ class _BatchBlock extends StatelessWidget {
             spacing: 4,
             runSpacing: 4,
             children: [
-              _counter(context, 'готово', batch.done + batch.offline, palette.textSuccess),
-              _counter(context, 'в работе', batch.running, palette.primaryHover),
+              _counter(
+                context,
+                'готово',
+                batch.done + batch.offline,
+                palette.textSuccess,
+              ),
+              _counter(
+                context,
+                'в работе',
+                batch.running,
+                palette.primaryHover,
+              ),
               _counter(context, 'в очереди', batch.queued, palette.textMuted),
               _counter(context, 'ошибки', batch.errors, palette.textError),
             ],
@@ -194,8 +285,8 @@ class _BatchBlock extends StatelessWidget {
                     onPressed: workspace.busyAction
                         ? null
                         : (workspace.paused
-                            ? workspace.resume
-                            : workspace.pause),
+                              ? workspace.resume
+                              : workspace.pause),
                     child: Icon(
                       workspace.paused ? Icons.play_arrow : Icons.pause,
                       size: 16,
@@ -224,12 +315,7 @@ class _BatchBlock extends StatelessWidget {
     );
   }
 
-  Widget _counter(
-    BuildContext context,
-    String label,
-    int value,
-    Color color,
-  ) {
+  Widget _counter(BuildContext context, String label, int value, Color color) {
     final palette = IltPalette.of(context);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -240,11 +326,47 @@ class _BatchBlock extends StatelessWidget {
       ),
       child: Text(
         '$label $value',
-        style: Theme.of(context)
-            .textTheme
-            .labelSmall
-            ?.copyWith(color: value > 0 ? color : palette.textMuted),
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+          color: value > 0 ? color : palette.textMuted,
+        ),
       ),
+    );
+  }
+}
+
+class _QueueList extends StatelessWidget {
+  const _QueueList({required this.workspace});
+
+  final WorkspaceState workspace;
+
+  @override
+  Widget build(BuildContext context) {
+    final rows = [
+      for (final page in workspace.pages)
+        if (page.isQueued || page.isRunning || page.isProblem) page,
+    ];
+    if (rows.isEmpty) {
+      return Center(
+        child: Text(
+          'Очередь пуста',
+          key: const Key('queue-empty'),
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+      );
+    }
+    return ListView.builder(
+      key: const Key('queue-list'),
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      itemCount: rows.length,
+      itemBuilder: (context, index) {
+        final page = rows[index];
+        return _PageTile(
+          key: ValueKey('queue-${page.id}'),
+          workspace: workspace,
+          page: page,
+          index: workspace.pages.indexOf(page),
+        );
+      },
     );
   }
 }
@@ -268,7 +390,8 @@ class _PageList extends StatelessWidget {
         ),
       );
     }
-    final reorderable = workspace.query.trim().isEmpty &&
+    final reorderable =
+        workspace.query.trim().isEmpty &&
         !workspace.problemsOnly &&
         pages.length == workspace.pages.length;
     final tiles = <Widget>[];
@@ -342,16 +465,15 @@ class _PageTile extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(10, 8, 10, 4),
             child: Text(
               header!.isEmpty ? 'Без главы' : header!,
-              style: theme.textTheme.labelSmall
-                  ?.copyWith(color: palette.textMuted),
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: palette.textMuted,
+              ),
             ),
           ),
         InkWell(
           key: Key('page-row-${page.id}'),
-          onTap: () => workspace.selectPage(
-            page.id,
-            toggle: _ctrlPressed(context),
-          ),
+          onTap: () =>
+              workspace.selectPage(page.id, toggle: _ctrlPressed(context)),
           child: Container(
             height: 83,
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -414,8 +536,9 @@ class _PageTile extends StatelessWidget {
                         page.name,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodySmall
-                            ?.copyWith(color: palette.textPrimary),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: palette.textPrimary,
+                        ),
                       ),
                       Text(
                         status,
@@ -488,7 +611,11 @@ class _RowMenu extends StatelessWidget {
       },
       itemBuilder: (context) => [
         PopupMenuItem(value: 'up', enabled: canUp, child: const Text('Выше')),
-        PopupMenuItem(value: 'down', enabled: canDown, child: const Text('Ниже')),
+        PopupMenuItem(
+          value: 'down',
+          enabled: canDown,
+          child: const Text('Ниже'),
+        ),
         const PopupMenuDivider(),
         const PopupMenuItem(value: 'remove', child: Text('Удалить')),
       ],
@@ -540,7 +667,10 @@ class _Footer extends StatelessWidget {
     final palette = IltPalette.of(context);
     final theme = Theme.of(context);
     final batch = workspace.batch;
-    final problems = [for (final page in workspace.pages) if (page.isProblem) page];
+    final problems = [
+      for (final page in workspace.pages)
+        if (page.isProblem) page,
+    ];
     return Container(
       key: const Key('pages-footer'),
       padding: const EdgeInsets.all(8),

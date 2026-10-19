@@ -29,9 +29,12 @@ class CanvasView extends StatefulWidget {
 class _Drag {
   _Drag(this.kind);
 
-  final String kind; // pan | stroke | draft | curtain | move | resize | rotate | warp
+  final String
+  kind; // pan | stroke | draft | curtain | move | resize | rotate | warp | text
   Offset lastLocal = Offset.zero;
   Offset startScene = Offset.zero;
+  Offset textOrigin = Offset.zero;
+  Offset textFinal = Offset.zero;
   Rect startRect = Rect.zero;
   Rect bbox = Rect.zero;
   String handle = '';
@@ -98,7 +101,8 @@ class _CanvasViewState extends State<CanvasView> {
   bool _isDoubleTap(PointerDownEvent event) {
     final lastTime = _lastTapTime;
     final lastLocal = _lastTapLocal;
-    final isDouble = lastTime != null &&
+    final isDouble =
+        lastTime != null &&
         lastLocal != null &&
         event.timeStamp - lastTime < const Duration(milliseconds: 350) &&
         (event.localPosition - lastLocal).distance < 8;
@@ -201,6 +205,18 @@ class _CanvasViewState extends State<CanvasView> {
           ..startRotation = selected.rotation;
         return;
       }
+      if (viewer.isTextMoveActive(selected.id)) {
+        final anchorBox = selected.bubbleBbox ?? selected.bbox;
+        if (anchorBox.inflate(8 / scale).contains(scene)) {
+          final origin = viewer.textAnchorFor(selected);
+          _drag = _Drag('text')
+            ..regionId = selected.id
+            ..startScene = scene
+            ..textOrigin = origin
+            ..textFinal = origin;
+          return;
+        }
+      }
     }
     final hit = viewer.showBoxes
         ? hitTestRegion(
@@ -260,10 +276,24 @@ class _CanvasViewState extends State<CanvasView> {
         drag.moved = true;
         session.setPreviewRect(drag.regionId, next);
       case 'rotate':
-        final angle = drag.startRotation +
+        final angle =
+            drag.startRotation +
             (pointerAngle(scene, drag.bbox) - drag.startAngle);
         drag.moved = true;
         session.setPreviewRotation(drag.regionId, angle);
+      case 'text':
+        var dx = scene.dx - drag.startScene.dx;
+        var dy = scene.dy - drag.startScene.dy;
+        if (HardwareKeyboard.instance.isShiftPressed) {
+          if (dx.abs() >= dy.abs()) {
+            dy = 0;
+          } else {
+            dx = 0;
+          }
+        }
+        drag.textFinal = drag.textOrigin.translate(dx, dy);
+        drag.moved = dx.abs() >= 0.5 || dy.abs() >= 0.5;
+        session.setPreviewText(drag.regionId, Offset(dx, dy));
       case 'warp':
         final points = session.previewWarpPoints;
         if (points == null || drag.warpIndex >= points.length) return;
@@ -271,13 +301,12 @@ class _CanvasViewState extends State<CanvasView> {
         next[drag.warpIndex] = scene;
         if (HardwareKeyboard.instance.isShiftPressed) {
           final region = viewer.document?.findRegion(drag.regionId);
-          final mesh =
-              region?.warp?['kind'] == 'mesh';
+          final mesh = region?.warp?['kind'] == 'mesh';
           final opposite = warpOppositeIndex(drag.warpIndex, mesh: mesh);
           if (opposite < next.length) {
             final localPoint = scene - drag.bbox.topLeft;
-            next[opposite] = drag.bbox.bottomRight -
-                Offset(localPoint.dx, localPoint.dy);
+            next[opposite] =
+                drag.bbox.bottomRight - Offset(localPoint.dx, localPoint.dy);
           }
         }
         drag.moved = true;
@@ -311,6 +340,11 @@ class _CanvasViewState extends State<CanvasView> {
           viewer.commitRegionRotation(drag.regionId, angle);
         }
         session.clearPreviews();
+      case 'text':
+        if (drag.moved) {
+          viewer.setTextPosition(drag.regionId, drag.textFinal);
+        }
+        session.setPreviewText(null, null);
       case 'warp':
         final points = session.previewWarpPoints;
         if (drag.moved && points != null) {
@@ -420,8 +454,7 @@ class _CanvasViewState extends State<CanvasView> {
                           scaleEnabled: false,
                           minScale: ViewTransform.minScale,
                           maxScale: ViewTransform.maxScale,
-                          boundaryMargin:
-                              const EdgeInsets.all(double.infinity),
+                          boundaryMargin: const EdgeInsets.all(double.infinity),
                           child: SizedBox(
                             width: sceneSize.width,
                             height: sceneSize.height,
@@ -464,8 +497,10 @@ class _BrushCursor extends StatelessWidget {
   Widget build(BuildContext context) {
     final cursor = session.cursor;
     if (cursor == null) return const SizedBox.shrink();
-    final diameter =
-        math.max(4.0, viewer.brushSize * 2 * session.transform.scale);
+    final diameter = math.max(
+      4.0,
+      viewer.brushSize * 2 * session.transform.scale,
+    );
     return Positioned(
       left: cursor.dx - diameter / 2,
       top: cursor.dy - diameter / 2,

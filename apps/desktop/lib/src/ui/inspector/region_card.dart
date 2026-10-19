@@ -82,15 +82,19 @@ class _RegionCardState extends State<RegionCard> {
     final title = '${region.data['text'] ?? ''}'.trim().isNotEmpty
         ? '${region.data['text']}'
         : ('${region.data['translation'] ?? ''}'.trim().isNotEmpty
-            ? '${region.data['translation']}'
-            : 'Пустой регион');
+              ? '${region.data['translation']}'
+              : 'Пустой регион');
     final borderColor = selected
         ? palette.primary
         : region.overflow
-            ? palette.textWarning.withValues(alpha: 0.7)
-            : palette.line;
+        ? palette.textWarning.withValues(alpha: 0.7)
+        : palette.line;
 
-    _sync(_translation, '${region.data['translation'] ?? ''}', _translationFocus);
+    _sync(
+      _translation,
+      '${region.data['translation'] ?? ''}',
+      _translationFocus,
+    );
     _sync(_original, '${region.data['text'] ?? ''}', _originalFocus);
     _sync(_speaker, '${region.data['speaker'] ?? ''}', _speakerFocus);
 
@@ -292,7 +296,9 @@ class _RegionCardState extends State<RegionCard> {
           key: Key('region-retranslate-$_id'),
           label: 'Перевести заново',
           icon: Icons.translate,
-          onPressed: busy ? null : () => viewer.regionAction(_id, 'retranslate'),
+          onPressed: busy
+              ? null
+              : () => viewer.regionAction(_id, 'retranslate'),
         ),
         InspectorAction(
           key: Key('region-shorten-$_id'),
@@ -308,8 +314,15 @@ class _RegionCardState extends State<RegionCard> {
           onPressed: () => viewer.toggleRegionSkip(_id),
         ),
         InspectorAction(
+          key: Key('region-text-move-$_id'),
+          label: 'Двигать текст',
+          icon: Icons.open_with,
+          active: viewer.isTextMoveActive(_id),
+          onPressed: () => viewer.toggleTextMove(_id),
+        ),
+        InspectorAction(
           key: Key('region-reset-style-$_id'),
-          label: 'Сбросить стили',
+          label: 'Сбросить стиль',
           icon: Icons.refresh,
           onPressed: () => viewer.resetRegionStyle(_id),
         ),

@@ -21,8 +21,8 @@ class PageDocument {
   set version(int value) => data['version'] = value;
 
   List<String> get warnings => [
-        for (final item in (data['warnings'] as List? ?? const [])) '$item',
-      ];
+    for (final item in (data['warnings'] as List? ?? const [])) '$item',
+  ];
 
   /// Живые представления регионов поверх тех же map'ов.
   List<Region> get regions {
@@ -120,12 +120,31 @@ class Region {
     );
   }
 
-  set bbox(Rect value) => data['bbox'] = [
-        value.left,
-        value.top,
-        value.width,
-        value.height,
-      ];
+  set bbox(Rect value) =>
+      data['bbox'] = [value.left, value.top, value.width, value.height];
+
+  /// Область баллона, если сервер её вернул; иначе null.
+  Rect? get bubbleBbox {
+    final raw = data['bubble_bbox'];
+    if (raw is! List || raw.length < 4) return null;
+    return Rect.fromLTWH(
+      _double(raw[0]),
+      _double(raw[1]),
+      _double(raw[2]),
+      _double(raw[3]),
+    );
+  }
+
+  /// Независимый якорь текста в координатах страницы (038).
+  Offset? get textPosition {
+    final raw = data['text_position'];
+    if (raw is! List || raw.length < 2) return null;
+    if (raw[0] is! num || raw[1] is! num) return null;
+    return Offset(_double(raw[0]), _double(raw[1]));
+  }
+
+  set textPosition(Offset? value) =>
+      data['text_position'] = value == null ? null : [value.dx, value.dy];
 
   /// Стиль: живой map (создаётся при первой правке).
   Map<String, dynamic> styleMap({bool create = false}) {
@@ -167,11 +186,11 @@ class Region {
 
   /// Дефолтные точки quad-искажения (4 угла bbox).
   static List<List<double>> defaultQuad(double w, double h) => [
-        [0, 0],
-        [w, 0],
-        [w, h],
-        [0, h],
-      ];
+    [0, 0],
+    [w, 0],
+    [w, h],
+    [0, h],
+  ];
 
   /// Дефолтная mesh-сетка 4×4.
   static List<List<double>> defaultMesh(double w, double h) {
@@ -187,7 +206,11 @@ class Region {
 
 /// Штрих маски: кисть (`paint`/`erase`) или заливка лассо (`fill`/`erase_fill`).
 class Stroke {
-  const Stroke({required this.mode, required this.radius, required this.points});
+  const Stroke({
+    required this.mode,
+    required this.radius,
+    required this.points,
+  });
 
   final String mode;
   final double radius;
@@ -213,12 +236,12 @@ class Stroke {
   }
 
   Map<String, dynamic> toJson() => {
-        'mode': mode,
-        'radius': radius,
-        'points': [
-          for (final point in points) [point.dx, point.dy],
-        ],
-      };
+    'mode': mode,
+    'radius': radius,
+    'points': [
+      for (final point in points) [point.dx, point.dy],
+    ],
+  };
 }
 
 /// Нормализация документа (зеркало `normalizeDocument` в web/js/state.js).
@@ -240,7 +263,8 @@ Map<String, dynamic> normalizeDocument(Map<String, dynamic> raw) {
   data['reading_direction'] = data['reading_direction'] ?? 'ltr';
   final warningsRaw = data['warnings'];
   data['warnings'] = <String>[
-    if (warningsRaw is List) for (final item in warningsRaw) '$item',
+    if (warningsRaw is List)
+      for (final item in warningsRaw) '$item',
   ];
   final timings = data['timings'];
   data['timings'] = timings is Map ? {...timings} : <String, dynamic>{};
@@ -258,8 +282,9 @@ Map<String, dynamic> normalizeRegion(Map<String, dynamic> raw) {
       ? [for (var i = 0; i < 4; i++) _double(bbox[i])]
       : <double>[0, 0, 0, 0];
   data['text'] = data['text'] == null ? '' : '${data['text']}';
-  data['translation'] =
-      data['translation'] == null ? '' : '${data['translation']}';
+  data['translation'] = data['translation'] == null
+      ? ''
+      : '${data['translation']}';
   final type = data['type'] ?? data['block_type'] ?? 'dialogue';
   data['type'] = type;
   data['block_type'] = type;
@@ -271,7 +296,9 @@ Map<String, dynamic> normalizeRegion(Map<String, dynamic> raw) {
   data['translation_locked'] = data['translation_locked'] == true;
   final styleRaw = data['style'];
   final style = styleRaw is Map
-      ? styleRaw.cast<String, dynamic>().map((key, value) => MapEntry(key, value))
+      ? styleRaw.cast<String, dynamic>().map(
+          (key, value) => MapEntry(key, value),
+        )
       : <String, dynamic>{};
   style.putIfAbsent('font_size_override', () => 0);
   style.putIfAbsent('uppercase', () => false);
@@ -281,33 +308,33 @@ Map<String, dynamic> normalizeRegion(Map<String, dynamic> raw) {
 
 /// Новый пустой регион (зеркало `blankRegion`).
 Map<String, dynamic> blankRegion(int id, Rect bbox) => {
-      'id': id,
-      'bbox': [bbox.left, bbox.top, bbox.width, bbox.height],
-      'class_name': 'text_free',
-      'confidence': 1,
-      'text': '',
-      'translation': '',
-      'type': 'dialogue',
-      'block_type': 'dialogue',
-      'speaker': '',
-      'speaker_gender': '',
-      'bubble_bbox': null,
-      'order': 0,
-      'skip': false,
-      'manual': true,
-      'edited': true,
-      'overflow': false,
-      'translation_locked': false,
-      'style': {
-        'fill_rgb': [0, 0, 0],
-        'stroke_rgb': null,
-        'font_size': 16,
-        'alignment': 'center',
-        'uppercase': false,
-        'line_height': 18,
-        'font_size_override': 0,
-      },
-    };
+  'id': id,
+  'bbox': [bbox.left, bbox.top, bbox.width, bbox.height],
+  'class_name': 'text_free',
+  'confidence': 1,
+  'text': '',
+  'translation': '',
+  'type': 'dialogue',
+  'block_type': 'dialogue',
+  'speaker': '',
+  'speaker_gender': '',
+  'bubble_bbox': null,
+  'order': 0,
+  'skip': false,
+  'manual': true,
+  'edited': true,
+  'overflow': false,
+  'translation_locked': false,
+  'style': {
+    'fill_rgb': [0, 0, 0],
+    'stroke_rgb': null,
+    'font_size': 16,
+    'alignment': 'center',
+    'uppercase': false,
+    'line_height': 18,
+    'font_size_override': 0,
+  },
+};
 
 /// Кламп bbox по границам листа (зеркало `clampBox`): минимум 4 px.
 Rect clampBox(Rect box, double width, double height) {

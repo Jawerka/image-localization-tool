@@ -8,8 +8,9 @@ import 'package:ilt_desktop/src/ui/viewer/canvas_view.dart';
 import 'support/fake_host.dart';
 
 void main() {
-  testWidgets('просмотрщик: канвас, чипы, док, пилюля и уход со страницы',
-      (tester) async {
+  testWidgets('просмотрщик: канвас, чипы, док, пилюля и уход со страницы', (
+    tester,
+  ) async {
     sizeWindow(tester);
     final bootstrap = <String, dynamic>{
       'settings': settingsDone(<String, dynamic>{}),
@@ -62,10 +63,7 @@ void main() {
       tester.getSize(find.byKey(const Key('pages-thumb-a'))),
       const Size(55, 75),
     );
-    expect(
-      tester.getSize(find.byKey(const Key('page-row-a'))).height,
-      83,
-    );
+    expect(tester.getSize(find.byKey(const Key('page-row-a'))).height, 83);
     expect(
       tester.getSize(find.byKey(const Key('inspector-add-region'))).height,
       48,
@@ -113,8 +111,9 @@ void main() {
     expect(state.workspace.viewer.hasDeferredDraft, isFalse);
   });
 
-  testWidgets('док перетаскивается к верхнему краю и сохраняется',
-      (tester) async {
+  testWidgets('док перетаскивается к верхнему краю и сохраняется', (
+    tester,
+  ) async {
     sizeWindow(tester);
     final (state, host) = await readyHost(
       bootstrap: <String, dynamic>{
@@ -154,7 +153,9 @@ void main() {
     expect(host.requests, contains('PUT /api/settings'));
     expect(host.bodies.last, contains('"dock_position":"top"'));
     // Малый сдвиг вниз — сторона не меняется, PUT не дублируется.
-    final putsBefore = host.requests.where((r) => r == 'PUT /api/settings').length;
+    final putsBefore = host.requests
+        .where((r) => r == 'PUT /api/settings')
+        .length;
     await tester.drag(
       find.byKey(const Key('viewer-dock-grip')),
       const Offset(0, 40),
@@ -175,8 +176,9 @@ void main() {
     expect(host.bodies.last, contains('"dock_position":"bottom"'));
   });
 
-  testWidgets('Space — временная «Рука»: курсор, инструмент, кружок кисти',
-      (tester) async {
+  testWidgets('Space — временная «Рука»: курсор, инструмент, кружок кисти', (
+    tester,
+  ) async {
     sizeWindow(tester);
     final (state, host) = await readyHost(
       bootstrap: <String, dynamic>{
@@ -211,11 +213,11 @@ void main() {
     await tester.pump();
 
     MouseRegion canvasRegion() => tester.widget<MouseRegion>(
-          find.descendant(
-            of: find.byType(CanvasView),
-            matching: find.byType(MouseRegion),
-          ),
-        );
+      find.descendant(
+        of: find.byType(CanvasView),
+        matching: find.byType(MouseRegion),
+      ),
+    );
     expect(canvasRegion().cursor, SystemMouseCursors.precise);
     expect(find.byKey(const Key('viewer-brush-cursor')), findsOneWidget);
 
@@ -230,5 +232,38 @@ void main() {
     await tester.pump();
     expect(canvasRegion().cursor, SystemMouseCursors.precise);
     expect(find.byKey(const Key('viewer-brush-cursor')), findsOneWidget);
+  });
+
+  testWidgets('вкладки «Страницы» и «Очередь» переключают содержимое', (
+    tester,
+  ) async {
+    sizeWindow(tester);
+    final (state, host) = await readyHost(
+      bootstrap: <String, dynamic>{
+        'settings': settingsDone(<String, dynamic>{}),
+        'project': {'id': 'pr', 'name': 'Глава'},
+        'pages': [
+          {'id': 'a', 'name': '001.jpg', 'status': 'queued', 'progress': 0},
+          {'id': 'b', 'name': '002.jpg', 'status': 'running', 'progress': 40},
+          {'id': 'c', 'name': '003.jpg', 'status': 'done', 'progress': 100},
+        ],
+      },
+    );
+    addTearDown(() {
+      state.dispose();
+      host.events.close();
+    });
+    await tester.pumpWidget(IltApp(state: state));
+    await tester.pump();
+
+    expect(find.byKey(const Key('pages-tab-pages')), findsOneWidget);
+    expect(find.byKey(const Key('pages-search')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('pages-tab-queue')));
+    await tester.pump();
+    expect(find.byKey(const Key('queue-list')), findsOneWidget);
+    expect(find.byKey(const Key('pages-search')), findsNothing);
+    await tester.tap(find.byKey(const Key('pages-tab-pages')));
+    await tester.pump();
+    expect(find.byKey(const Key('pages-search')), findsOneWidget);
   });
 }
