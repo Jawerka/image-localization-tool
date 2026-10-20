@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ui' as ui;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -80,6 +81,52 @@ void main() {
     expect(state.themeName, 'light');
     expect(state.workspace.project?.name, 'Тест');
     expect(state.eventCount, 0);
+  });
+
+  test('confirmExit ждёт записи слоёв', () async {
+    final putStarted = Completer<void>();
+    final release = Completer<void>();
+    final state = ShellState(
+      sidecar: _FakeSidecar(),
+      apiFactory: (ready) => IltApi(
+        ready: ready,
+        client: MockClient((request) async {
+          if (request.url.path == '/api/bootstrap') {
+            return http.Response('{}', 200, headers: _jsonUtf8);
+          }
+          if (request.url.path == '/api/events') {
+            return http.Response('', 200);
+          }
+          if (request.method == 'PUT' &&
+              request.url.path == '/api/settings') {
+            if (!putStarted.isCompleted) putStarted.complete();
+            await release.future;
+            return http.Response(
+              jsonEncode({'settings': <String, dynamic>{}}),
+              200,
+              headers: _jsonUtf8,
+            );
+          }
+          return http.Response('{}', 404, headers: _jsonUtf8);
+        }),
+      ),
+    );
+    addTearDown(state.dispose);
+    await state.start();
+    state.workspace.viewer.setShowBoxes(false);
+    await putStarted.future;
+
+    var done = false;
+    final exit = state.confirmExit().then((value) {
+      done = true;
+      return value;
+    });
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+    expect(done, isFalse);
+
+    release.complete();
+    expect(await exit, ui.AppExitResponse.exit);
+    expect(done, isTrue);
   });
 
   test('401 от bootstrap → authError', () async {

@@ -89,14 +89,23 @@ def test_portable_package_has_windows_update_contract():
     assert "Remove-Item -LiteralPath $topLevelModels -Recurse -Force" in script
     assert "sidecar\\_internal\\rapidocr\\models" in script
     assert "platform = 'windows-x64'" in script
+
     assert "host = 'desktop/ImageLocalizationTool.exe'" in script
+
     assert "sidecar = 'sidecar/ImageLocalizationTool.exe'" in script
+
     assert "web = 'web/index.html'" in script
+
+    assert "foreach ($folder in @('data', 'models', 'runtime'))" in script
+
     for name in ("update-windows.ps1", "rollback-windows.ps1", "windows-update-common.ps1"):
         assert name in script
 
-
-
+def test_server_package_writes_data_beside_exe():
+    script = (ROOT / "scripts" / "package-server.ps1").read_text(encoding="utf-8")
+    assert "foreach ($folder in @('data', 'models', 'runtime'))" in script
+    assert "ImageLocalizationTool.exe --deploy all" in script
+    assert "ImageLocalizationTool.exe --headless --remote" in script
 
 
 def test_read_app_version_parses_assignment(tmp_path):
@@ -163,17 +172,17 @@ def test_build_script_is_ascii_and_checks_exit_codes():
 
     assert "SkipPyInstaller" in text
 
-    assert "SkipInno" in text
-
     assert "SkipModels" in text
 
     assert "read_app_version" in text
 
-    assert "/DAppVersion=" in text
-
     assert "smoke_dist.py" in text
 
-    assert "ISCC.exe not found" in text
+    assert "package-portable.ps1" in text
+
+    assert "ISCC.exe" not in text
+
+    assert "SkipInno" not in text
 
 
 

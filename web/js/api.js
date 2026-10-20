@@ -77,6 +77,10 @@ export function startPreparation(selection) {
   return request("POST", "/api/preparation/start", selection || {});
 }
 
+export function verifyPreparation(selection) {
+  return request("POST", "/api/preparation/verify", selection || {});
+}
+
 export function pausePreparation() {
   return request("POST", "/api/preparation/pause", {});
 }

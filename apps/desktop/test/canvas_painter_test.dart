@@ -46,4 +46,33 @@ void main() {
     image.dispose();
     viewer.dispose();
   });
+
+  test('ScenePainter: выключенная маска скрывает и цветной след', () async {
+    final viewer = ViewerState();
+    final session = viewer.session;
+    session.setImageSize(const Size(400, 400));
+    viewer.setView('original');
+    viewer.setShowMask(false);
+    final sizeRecorder = ui.PictureRecorder();
+    Canvas(sizeRecorder);
+    final sizeImage = await sizeRecorder.endRecording().toImage(400, 400);
+    viewer.noteDisplayedImage(sizeImage);
+    session.beginStroke(Stroke.paint, const Offset(200, 200));
+
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    ScenePainter(
+      viewer: viewer,
+      session: session,
+      palette: IltPalette.dark,
+    ).paint(canvas, const Size(400, 400));
+    final image = await recorder.endRecording().toImage(400, 400);
+    final data = (await image.toByteData(format: ui.ImageByteFormat.rawRgba))!;
+    expect(data.getUint8((200 * 400 + 200) * 4 + 1), lessThan(10));
+    expect(data.getUint8((200 * 400 + 200) * 4 + 3), lessThan(10));
+
+    image.dispose();
+    sizeImage.dispose();
+    viewer.dispose();
+  });
 }

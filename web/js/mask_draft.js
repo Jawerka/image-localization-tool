@@ -37,12 +37,14 @@ export function normalizeMaskStroke(stroke) {
  * либо заливка полигона для mode=fill.
  * ``ctx`` — CanvasRenderingContext2D или совместимый мок.
  */
-export function paintStrokeOnMask(ctx, stroke) {
+export function paintStrokeOnMask(ctx, stroke, color) {
   if (!ctx) return;
-  const { mode, radius, points, color } = normalizeMaskStroke(stroke);
+  const normalized = normalizeMaskStroke(stroke);
+  const { mode, radius, points } = normalized;
+  const ink = color || normalized.color;
   if (!points.length) return;
-  ctx.fillStyle = color;
-  ctx.strokeStyle = color;
+  ctx.fillStyle = ink;
+  ctx.strokeStyle = ink;
   ctx.lineWidth = Math.max(1, radius * 2);
   ctx.lineCap = "round";
   ctx.lineJoin = "round";

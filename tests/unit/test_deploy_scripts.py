@@ -19,10 +19,11 @@ def test_deploy_windows_script_is_ascii_and_skips_models_by_default():
     text = data.decode("ascii")
     assert "$ErrorActionPreference = 'Stop'" in text
     assert "IncludeModels" in text
-    assert "SkipInno" in text
+    assert "SkipInno" not in text
     assert "-Build" in text or "$Build" in text
     assert "robocopy" in text
     assert "models" in text
+    assert "data" in text
     assert "ImageLocalizationTool.exe" in text
     assert r"D:\Documents\apps\ImageLocalizationTool" in text or "apps\\ImageLocalizationTool" in text
 
@@ -70,7 +71,7 @@ def test_check_inno_script_reports_or_installs():
     text = data.decode("ascii")
     assert "$ErrorActionPreference = 'Stop'" in text
     assert "ISCC.exe" in text
-    assert "SkipInno" in text
+    assert "portable ZIP" in text
     assert "winget" in text
     assert "JRSoftware.InnoSetup" in text
 
@@ -88,6 +89,7 @@ def test_publish_release_script_uploads_per_file_and_gates_clobber():
     assert "-Replace:$Replace" in text
     assert "@assets --clobber" not in text
     assert "upload $tag @assets" not in text
+    assert "windows-x64-setup.exe" not in text
 
 
 def test_publish_release_uses_fixed_catalog_without_late_merge():
@@ -98,6 +100,13 @@ def test_publish_release_uses_fixed_catalog_without_late_merge():
     assert "'--packs' $winSummary '--packs' $linuxSummary" not in text
     assert "packs-all.json" not in text
     assert "$seen" not in text
+
+
+def test_update_probe_keeps_keyring_and_temp_data_in_app():
+    text = (ROOT / "scripts" / "windows-update-common.ps1").read_text(encoding="utf-8")
+    assert "ILT_SKIP_KEYRING_MIGRATION" in text
+    assert "data\\tmp" in text
+    assert "ilt-probe-" in text
 
 
 def test_spec_guards_find_spec_for_missing_webview():

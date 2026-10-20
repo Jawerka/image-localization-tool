@@ -1,4 +1,4 @@
-﻿﻿#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
   Сквозная локальная приёмка рантайма (specs/032-runtime-wheelset).
@@ -10,12 +10,12 @@
   2. канонические win-локи в dist/locks, сверка locks/ с закоммиченными;
   3. локальная копия сводки с file://-базой для установки;
   4. dev-`--deploy cpu`/`argos`, идемпотентность, битый sha;
-  5. полная сборка (`build-windows.ps1 -SkipModels -Portable -ServerZip`) и
+  5. полная сборка (`build-windows.ps1 -SkipModels -ServerZip`) и
      frozen-установка из portable (`sidecar --deploy cpu`, импорт torch);
   6. `publish-release.ps1 -DryRun` (ничего не трогает в git/gh);
   7. гейт `check_release.py --deep` (Tier 1 HEAD + Tier 2 установка/import).
 
-  Требуются: Flutter, PyInstaller, Inno Setup 6, интернет к PyPI и PyTorch CDN.
+  Требуются: Flutter, PyInstaller, интернет к PyPI и PyTorch CDN.
   Любой сбой — non-zero.
 
 .EXAMPLE
@@ -32,6 +32,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Диагностические прогоны не переносят ключ LLM из keyring.
+$env:ILT_SKIP_KEYRING_MIGRATION = '1'
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $RepoRoot
@@ -177,12 +179,12 @@ open(dst, 'w', encoding='utf-8').write(json.dumps(data, ensure_ascii=False, inde
 }
 
 # --- 5. сборка и frozen-установка ---------------------------------------------
-Step '5. Сборка (Flutter + PyInstaller + Inno + portable/server) и frozen-деплой'
+Step '5. Сборка (Flutter + PyInstaller + portable/server) и frozen-деплой'
 if (-not $SkipBuild) {
     Invoke-Checked {
         & (Join-Path $RepoRoot 'scripts\build-windows.ps1') -SkipModels `
-            -BuildPython $BuildPython -Portable -ServerZip
-    } 'build-windows.ps1 -SkipModels -Portable -ServerZip'
+            -BuildPython $BuildPython -ServerZip
+    } 'build-windows.ps1 -SkipModels -ServerZip'
 }
 $portableZip = Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'dist') -Filter '*-portable.zip' |
     Sort-Object Name | Select-Object -Last 1

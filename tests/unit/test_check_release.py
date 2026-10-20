@@ -47,11 +47,11 @@ def test_url_jobs_use_files_and_archives() -> None:
 def test_cache_key_stable_and_sensitive(tmp_path: Path) -> None:
     manifest = tmp_path / "ilt-runtime-manifest-1.0.1.json"
     manifest.write_text("{}", encoding="utf-8")
-    setup = tmp_path / "ImageLocalizationTool-1.0.1-windows-x64-setup.exe"
-    setup.write_bytes(b"setup")
+    portable = tmp_path / "ImageLocalizationTool-1.0.1-windows-x64-portable.zip"
+    portable.write_bytes(b"portable")
     first = gate.cache_key(tmp_path, manifest)
     assert gate.cache_key(tmp_path, manifest) == first
-    setup.write_bytes(b"setup-2")
+    portable.write_bytes(b"portable-2")
     assert gate.cache_key(tmp_path, manifest) != first
 
 

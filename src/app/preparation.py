@@ -162,10 +162,7 @@ def catalog_hash() -> str:
     return hashlib.sha256(resources + manifest).hexdigest()
 
 
-def plan(selection: dict) -> dict:
-    """Зафиксировать набор до начала загрузки, без секретов и сетевого resolve."""
-    from src.app.hardware import detect
-
+def _selection(selection: dict) -> dict:
     selected = {"source_lang": str(selection.get("source_lang") or "en"),
                 "target_lang": str(selection.get("target_lang") or "ru"),
                 "translator_backend": str(selection.get("translator_backend") or "llm"),
@@ -176,6 +173,49 @@ def plan(selection: dict) -> dict:
         selected["device"] = "cuda"
     if selected["translator_backend"] not in ("llm", "argos") or selected["device"] not in ("auto", "cpu", "cuda"):
         raise ValueError("Неизвестный режим подготовки")
+    return selected
+
+
+def missing(selection: dict) -> list[str]:
+    """Обязательные компоненты, которых нет на диске. Без сети, хешей и GPU."""
+    selected = _selection(selection)
+    resources = {component.id: component for component in component_catalog.load()}
+    ids = ["detector", "rapidocr", "font", "font-pack"]
+    titles = []
+    if selected["inpainter_backend"] != "opencv":
+        packs = [pack for pack in runtime.platform_packs() if pack.kind == "torch"]
+        if packs:
+            if not any(runtime.is_installed(pack.id) for pack in packs):
+                titles.append("PyTorch")
+        elif not getattr(sys, "frozen", False):
+            try:
+                has_torch = importlib.util.find_spec("torch") is not None
+            except (ImportError, ValueError):
+                has_torch = False
+            if not has_torch:
+                titles.append("PyTorch")
+        ids.append("lama")
+    language_source = "en" if selected["source_lang"] == "auto" else selected["source_lang"]
+    language_id = f"language-{language_source}-{selected['target_lang']}"
+    if language_source != selected["target_lang"]:
+        if language_id in resources:
+            if not runtime.argos_ready():
+                titles.append("Argos Translate")
+            ids.append(language_id)
+        elif selected["translator_backend"] == "argos":
+            raise ValueError("Это направление оффлайн-перевода пока не поддерживается. Выберите сервер LLM.")
+    for component_id in ids:
+        component = resources.get(component_id)
+        if component is not None and not component_catalog.installed(component):
+            titles.append(component.title)
+    return titles
+
+
+def plan(selection: dict) -> dict:
+    """Зафиксировать набор до начала загрузки, без секретов и сетевого resolve."""
+    from src.app.hardware import detect
+
+    selected = _selection(selection)
     available = runtime.platform_packs()
     recommended = str(detect().get("recommended") or "torch-cpu")
     torch_id = "torch-cpu" if selected["device"] == "cpu" else recommended
@@ -199,6 +239,19 @@ def plan(selection: dict) -> dict:
             raise ValueError("Это направление оффлайн-перевода пока не поддерживается. Выберите сервер LLM.")
         else:
             warnings.append("Для выбранных языков доступен перевод через LLM; оффлайн-фолбэк пока не подготовлен.")
+    def cached_bytes(files):
+        """Оценка без хеширования: размер кэша, а не его содержимое."""
+        count = 0
+        cache = downloads.cache_root()
+        for file in files:
+            blob = cache / f"{file.sha256}.blob"
+            if blob.is_file() and blob.stat().st_size == file.size_bytes:
+                continue
+            partial = cache / f"{file.sha256}.part"
+            offset = min(file.size_bytes, partial.stat().st_size) if partial.is_file() else 0
+            count += file.size_bytes - offset
+        return count
+
     items = []
     for pack_id in runtime_ids:
         if pack_id not in {p.id for p in available} and not getattr(sys, "frozen", False):
@@ -209,49 +262,38 @@ def plan(selection: dict) -> dict:
             check = "torch-cuda" if pack_id.startswith("torch-cu") else "torch" if module == "torch" else "argos"
             revision = hashlib.sha256(f"{module}:{version}:{runtime.python_tag()}:{check}".encode()).hexdigest()
             builtin_path = components_root() / ".builtin" / f"{revision}.json"
-            from src.app.component_check import validation_identity
-            try:
-                checked = json.loads(builtin_path.read_text()).get("checker") == validation_identity()
-            except (OSError, ValueError):
-                checked = False
             items.append({"id": module, "title": "Компонент из окружения разработки", "type": "builtin",
                 "revision": revision, "check": check, "size_bytes": 0, "unpacked_bytes": 0,
-                "download_bytes": 0, "install_bytes": 0, "ready": checked})
+                "download_bytes": 0, "install_bytes": 0, "ready": builtin_path.is_file(),
+                "installed": builtin_path.is_file()})
             continue
         pack = runtime.pack_by_id(pack_id)
-        items.append({"id": pack.id, "title": pack.title, "type": "runtime", "revision": pack.revision,
-                      "size_bytes": pack.effective_size, "unpacked_bytes": pack.unpacked_bytes or pack.effective_size * 4,
-                      "ready": runtime.ready(pack) and (pack.kind != "torch" or runtime.selected_torch_id() == pack.id)})
+        installed_pack = runtime.matches(pack)
+        item = {"id": pack.id, "title": pack.title, "type": "runtime", "revision": pack.revision,
+                "size_bytes": pack.effective_size, "unpacked_bytes": pack.unpacked_bytes or pack.effective_size * 4,
+                "installed": installed_pack,
+                "ready": runtime.ready(pack) and (pack.kind != "torch" or runtime.selected_torch_id() == pack.id)}
+        if pack.is_wheels:
+            artifacts = [downloads.Artifact(wheel.name, (wheel.url, *wheel.mirrors), wheel.sha256, wheel.size_bytes)
+                         for wheel in pack.files]
+        elif pack.url and pack.sha256:
+            artifacts = [downloads.Artifact(pack.id, (pack.url,), pack.sha256, pack.size_bytes)]
+        else:
+            artifacts = []
+        item["download_bytes"] = 0 if item["installed"] else cached_bytes(artifacts)
+        item["install_bytes"] = 0 if item["installed"] else item["unpacked_bytes"]
+        items.append(item)
     for component_id in ids:
         component = next((c for c in resources if c.id == component_id), None)
         if component is None:
             raise ValueError(f"В каталоге нет компонента {component_id}")
-        items.append({"id": component.id, "title": component.title, "type": "resource", "revision": component.revision,
-                      "size_bytes": component.size_bytes, "unpacked_bytes": component.size_bytes * (4 if component.kind == "language" else 1),
-                      "ready": component_catalog.ready(component)})
-    # Runtime идёт прежде моделей, чтобы чистые probes видели нужные библиотеки.
-    def missing(files):
-        count = 0
-        cache = downloads.cache_root()
-        for item in files:
-            if downloads.valid(cache / f"{item.sha256}.blob", item):
-                continue
-            partial = cache / f"{item.sha256}.part"
-            offset = min(item.size_bytes, partial.stat().st_size) if partial.is_file() else 0
-            count += item.size_bytes - offset
-        return count
-
-    for item in items:
-        if item["type"] == "builtin":
-            continue
-        files = (runtime.pack_by_id(item["id"]).files if item["type"] == "runtime"
-                 else component_catalog.by_id(item["id"]).files)
-        artifacts = [downloads.Artifact(f.name, (f.url,), f.sha256, f.size_bytes)
-                     if isinstance(f, runtime.WheelFile) else f for f in files]
-        existing = (runtime.matches(runtime.pack_by_id(item["id"])) if item["type"] == "runtime"
-                    else component_catalog.ready(component_catalog.by_id(item["id"]), ignore_checker=True))
-        item["download_bytes"] = 0 if existing else missing(artifacts)
-        item["install_bytes"] = 0 if existing else item["unpacked_bytes"]
+        installed_component = component_catalog.installed(component)
+        item = {"id": component.id, "title": component.title, "type": "resource", "revision": component.revision,
+                "size_bytes": component.size_bytes, "unpacked_bytes": component.size_bytes * (4 if component.kind == "language" else 1),
+                "installed": installed_component, "ready": component_catalog.ready(component)}
+        item["download_bytes"] = 0 if installed_component else cached_bytes(component.files)
+        item["install_bytes"] = 0 if installed_component else item["unpacked_bytes"]
+        items.append(item)
     total = sum(item["download_bytes"] for item in items)
     return {"schema": 1, "selection": selected, "catalog_sha": catalog_hash(), "items": items,
             "total": total, "done": 0, "index": 0, "current": "", "state": "ready" if all(i["ready"] for i in items) else "idle",
@@ -273,6 +315,7 @@ class Manager:
         self._pause = threading.Event()
         self._thread = None
         self._last_saved = 0.0
+        self._verify = False
         self._state = {"state": "idle", "items": [], "total": 0, "done": 0, "error": "", "error_kind": ""}
         try:
             saved = json.loads(self.path.read_text(encoding="utf-8"))
@@ -292,7 +335,7 @@ class Manager:
         with self._lock:
             return self._thread is not None and self._thread.is_alive()
 
-    def start(self, selection: dict | None = None):
+    def start(self, selection: dict | None = None, verify: bool = False):
         with self._lock:
             if self.busy():
                 raise downloads.BusyError("Подготовка уже идёт")
@@ -303,7 +346,10 @@ class Manager:
             elif self._state.get("catalog_sha") != catalog_hash():
                 raise ValueError("Каталог изменился. Создайте новый план подготовки; скачанные файлы сохранятся.")
             self._pause.clear()
+            self._verify = bool(verify)
             self._state.update(state="planning", error="", error_kind="")
+            if verify:
+                self._state["verified_at"] = 0
             self._save()
             self._thread = threading.Thread(target=self._run, name="ilt-preparation", daemon=True)
             self._thread.start()
@@ -333,12 +379,52 @@ class Manager:
         if self.fanout:
             self.fanout(WorkerEvent("preparation.progress", snapshot))
 
+    def _verify_installed(self, items: list[dict]) -> list[str]:
+        """Полная проверка установленного; вернуть id для переустановки."""
+        repairs = []
+        for item in items:
+            if not item.get("installed"):
+                continue
+            self._update(state="checking", current=item["title"], total=0, done=0)
+            if item["type"] == "runtime":
+                pack = runtime.pack_by_id(item["id"])
+                result = runtime.verify(pack)
+            elif item["type"] == "resource":
+                component = component_catalog.by_id(item["id"])
+                result = component_catalog.verify(component)
+            else:
+                from src.app.component_check import probe
+
+                try:
+                    probe({"kind": item["check"]})
+                    result = {"ok": True, "kind": "", "error": ""}
+                except Exception as exc:
+                    result = {"ok": False, "kind": "compatibility", "error": str(exc)}
+            if result.get("ok"):
+                continue
+            if result.get("kind") == "compatibility":
+                raise RuntimeError(f"{item['title']}: {result.get('error') or 'проверка совместимости не прошла'}")
+            if item["type"] == "runtime":
+                runtime.invalidate(runtime.pack_by_id(item["id"]))
+            elif item["type"] == "resource":
+                component_catalog.invalidate(component_catalog.by_id(item["id"]))
+            else:
+                (components_root() / ".builtin" / f"{item['revision']}.json").unlink(missing_ok=True)
+            repairs.append(item["id"])
+        return repairs
+
     def _run(self):
         try:
+            verify = self._verify
+            self._verify = False
             with downloads.installer_lock():
                 state = self.current()
                 # Пересчитать остаток: в кэше могли появиться файлы после паузы.
                 remaining = plan(state["selection"])
+                if verify:
+                    repairs = self._verify_installed(remaining["items"])
+                    if repairs:
+                        remaining = plan(state["selection"])
                 downloads.ensure_space(components_root(), remaining["required_space"])
                 items = remaining["items"]
                 total = remaining["total"]
@@ -362,12 +448,12 @@ class Manager:
                         self._update(done=done, state="checking" if stage == "installed" else "installing")
 
                     if item["type"] == "builtin":
-                        from src.app.component_check import probe, validation_identity
+                        from src.app.component_check import COMPONENT_REQUIREMENTS, probe
 
                         self._update(state="checking")
                         probe({"kind": item["check"]})
                         downloads.atomic_json(components_root() / ".builtin" / f"{item['revision']}.json",
-                                              {"checker": validation_identity()})
+                                              {"requirements": COMPONENT_REQUIREMENTS})
                     elif item["type"] == "runtime":
                         pack = runtime.pack_by_id(item["id"])
                         if pack.revision != item["revision"]:
@@ -385,7 +471,10 @@ class Manager:
                 if self.on_ready:
                     self.on_ready()
                 downloads.clear_cache(max_bytes=Config().download_cache_limit_mb * 1024 * 1024)
-                self._update(state="ready", current="", done=total, error="", error_kind="")
+                values = {"state": "ready", "current": "", "done": total, "error": "", "error_kind": ""}
+                if verify:
+                    values["verified_at"] = time.time()
+                self._update(**values)
                 with self._lock:
                     self._save()
         except downloads.Paused:

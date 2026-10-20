@@ -7,7 +7,7 @@
   .\scripts\deploy-windows.ps1
 
 .EXAMPLE
-  .\scripts\deploy-windows.ps1 -Build -SkipInno
+  .\scripts\deploy-windows.ps1 -Build
 
 .EXAMPLE
   .\scripts\deploy-windows.ps1 -Dest "D:\Documents\apps\ImageLocalizationTool" -IncludeModels
@@ -15,7 +15,6 @@
 param(
     [string] $Dest = "D:\Documents\apps\ImageLocalizationTool",
     [switch] $Build,
-    [switch] $SkipInno,
     [switch] $IncludeModels
 )
 
@@ -29,8 +28,7 @@ $ExeName = 'ImageLocalizationTool.exe'
 
 if ($Build) {
     $buildScript = Join-Path $PSScriptRoot 'build-windows.ps1'
-    # Hashtable splat so -SkipInno binds as a switch, not as OutputDir.
-    $buildArgs = @{ SkipInno = $true }
+    $buildArgs = @{}
     if (-not $IncludeModels) {
         $buildArgs['SkipModels'] = $true
     }
@@ -48,6 +46,10 @@ if (-not (Test-Path -LiteralPath $builtExe)) {
 
 if (-not (Test-Path -LiteralPath $Dest)) {
     New-Item -ItemType Directory -Path $Dest -Force | Out-Null
+}
+$dataDir = Join-Path $Dest 'data'
+if (-not (Test-Path -LiteralPath $dataDir)) {
+    New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
 }
 
 # User data that lives beside the app and must survive /MIR. Full destination

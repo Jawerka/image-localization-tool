@@ -55,6 +55,11 @@ try {
     $movedFolders = @(Move-WindowsPersistentFolders $previous $stage)
     Move-Item -LiteralPath $stage -Destination $layout.Root
     $activated = $true
+    foreach ($name in $movedFolders) {
+        if (-not (Test-Path -LiteralPath (Join-Path $layout.Root $name) -PathType Container)) {
+            throw "Пользовательские данные не попали в папку приложения: $name"
+        }
+    }
 
     $activeProbe = Test-WindowsReleaseHealth $layout.Root $HealthTimeoutSec
     if (-not $activeProbe.Ready) { throw "Кандидат не прошёл проверку после активации: $($activeProbe.Detail)" }

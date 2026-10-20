@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -9,7 +9,7 @@ void main() {
   test('acquire пишет instance.json и принимает пути', () async {
     final dir = Directory.systemTemp.createTempSync('ilt-instance');
     addTearDown(() => dir.deleteSync(recursive: true));
-    final env = {'ILT_DATA_DIR': dir.path, 'LOCALAPPDATA': '${dir.path}/local'};
+    final env = {'ILT_DATA_DIR': dir.path};
     final first = SingleInstance(environment: env, executableDir: dir.path);
     final received = <List<String>>[];
     final gotPaths = Completer<void>();
@@ -39,7 +39,7 @@ void main() {
     File('${dir.path}/instance.json')
         .writeAsStringSync('{"pid": 999999937, "port": $deadPort}');
     final second = SingleInstance(
-      environment: {'ILT_DATA_DIR': dir.path, 'LOCALAPPDATA': '${dir.path}/local'},
+      environment: {'ILT_DATA_DIR': dir.path},
       executableDir: dir.path,
     );
     expect(await second.forwardIfRunning([]), isFalse);
@@ -49,9 +49,24 @@ void main() {
     final dir = Directory.systemTemp.createTempSync('ilt-instance-none');
     addTearDown(() => dir.deleteSync(recursive: true));
     final second = SingleInstance(
-      environment: {'ILT_DATA_DIR': dir.path, 'LOCALAPPDATA': '${dir.path}/local'},
+      environment: {'ILT_DATA_DIR': dir.path},
       executableDir: dir.path,
     );
     expect(await second.forwardIfRunning([]), isFalse);
+  });
+
+  test('недоступный каталог данных → FileSystemException', () async {
+    final dir = Directory.systemTemp.createTempSync('ilt-instance-blocked');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final blocked = File('${dir.path}/data')..writeAsStringSync('not a dir');
+    final single = SingleInstance(
+      environment: {'ILT_DATA_DIR': blocked.path},
+      executableDir: dir.path,
+    );
+    addTearDown(single.dispose);
+    await expectLater(
+      single.acquire(onPaths: (_) {}),
+      throwsA(isA<FileSystemException>()),
+    );
   });
 }

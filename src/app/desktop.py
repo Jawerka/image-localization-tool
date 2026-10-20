@@ -25,7 +25,7 @@ from src.app.dialogs import DialogBridge
 from src.app.events import JOB_CANCELLED, JOB_FINISHED
 from src.app.paths import data_root, logs_dir, settings_path
 from src.app.server import AppState, _bootstrap, serve
-from src.app.settings import AppSettings
+from src.app.settings import AppSettings, migration_warning
 
 logger = logging.getLogger("image_localization.desktop")
 
@@ -705,6 +705,9 @@ def _build_server(dialogs: DialogBridge, *, port: int = 0) -> tuple[AppState, ob
 
     file_path = settings_path()
     settings, warnings = AppSettings.load(file_path)
+    warning = migration_warning()
+    if warning:
+        warnings = [*warnings, warning]
     state = AppState(
         settings=settings,
         settings_path=file_path,
@@ -714,7 +717,6 @@ def _build_server(dialogs: DialogBridge, *, port: int = 0) -> tuple[AppState, ob
         settings_warnings=warnings,
     )
     httpd, _port = serve(state, port=port)
-    threading.Thread(target=state.revalidate_components, name="ilt-auto-check", daemon=True).start()
     return state, httpd
 
 

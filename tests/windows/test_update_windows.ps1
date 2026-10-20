@@ -150,9 +150,13 @@ try {
         New-Item -ItemType Directory -Path (Join-Path $InstallRoot $folder) -Force | Out-Null
         Set-Content -LiteralPath (Join-Path (Join-Path $InstallRoot $folder) 'preserve.txt') -Encoding utf8 -Value "preserve $folder"
     }
+    $keyPath = Join-Path $InstallRoot 'data\llm-api-key.txt'
+    [IO.File]::WriteAllText($keyPath, 'synthetic-key', (New-Object Text.UTF8Encoding($false)))
     $before = @{}
-    Get-ChildItem -LiteralPath $InstallRoot -Recurse -Filter preserve.txt | ForEach-Object {
-        $before[$_.FullName.Substring($InstallRoot.Length)] = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+    foreach ($leaf in @('preserve.txt', 'llm-api-key.txt')) {
+        Get-ChildItem -LiteralPath $InstallRoot -Recurse -Filter $leaf | ForEach-Object {
+            $before[$_.FullName.Substring($InstallRoot.Length)] = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+        }
     }
 
     $code = Invoke-Updater $UpdateScript @('-Bundle', $goodArchive, '-InstallRoot', $InstallRoot, '-HealthTimeoutSec', '30')
@@ -164,6 +168,9 @@ try {
     if ($pointer.version -ne $legacyVersion) { throw "Expected probed legacy version $legacyVersion, got $($pointer.version)" }
 
     Assert-DataUnchanged
+    if ((Get-Content -LiteralPath $keyPath -Raw).Trim() -ne 'synthetic-key') {
+        throw 'LLM key file changed during update'
+    }
     $activeVersion = '1.0.3'
 
     if ($runRollback) {

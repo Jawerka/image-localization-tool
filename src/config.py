@@ -24,6 +24,10 @@ class Config:
     # Максимальный размер шрифта
     max_font_size: int = 128
 
+    # Видимость слоёв рамок и маски в просмотрщике.
+    viewer_show_boxes: bool = True
+    viewer_show_mask: bool = True
+
     # Путь к конфигу файлу
     _config_path: Path = field(default_factory=lambda: Path("config.json"), repr=False)
 

@@ -10,20 +10,26 @@ import {
   polylineModeFromButton,
   resolveActivePageId,
 } from "./editor_session.js";
-import { maskDraftAction, paintStrokeOnMask } from "./mask_draft.js";
+import { paintStrokeOnMask } from "./mask_draft.js";
+import {
+  grayToBlackOverlay,
+  maskBaseKey,
+  modeColor,
+  unbakedStrokes,
+} from "./mask_overlay.js";
 import {
   blankRegion,
   clampBox,
   editDocument,
   findRegion,
   getState,
-  isDirty,
   isReadyStatus,
   nextRegionId,
   patch,
   sameId,
   selectRegion,
   stageLabel,
+  strokeCountForVersion,
   subscribe,
 } from "./state.js";
 import { isSpaceDown } from "./keys.js";
@@ -36,10 +42,6 @@ const ZOOM_MAX_PERCENT = 200;
 const ZOOM_STEP_PERCENT = 5;
 const MASK_DRAW_TOOLS = new Set(["brush", "polyline"]);
 const BRUSH_SIZE_TOOLS = new Set(["brush"]);
-/** Превью добавления в маску. */
-const MASK_PAINT_COLOR = "#16a34a";
-/** Превью удаления из маски (ластик). */
-const MASK_ERASE_COLOR = "#2563eb";
 
 let stageHost;
 let stage;
@@ -75,8 +77,14 @@ let meshBaseRegion = null;
 let spaceDown = false;
 let seenPageId = "";
 let scrollHome = false;
-/** Локальная маска на время deferApply / ожидания серверного обновления после «Готово». */
-let maskDraft = null;
+/** Кэш чёрной основы: getImageData только на новую маску/размер. */
+let maskBaseCanvas = null;
+let maskBaseCacheKey = "";
+/** Версия маски, реально декодированная в maskImage (не по src). */
+let maskLoadedVersion = null;
+let maskLoadedPageId = "";
+let maskPendingVersion = null;
+let maskPendingPageId = "";
 /** Черновик ломаной: вершины + точка под курсором для резинки. */
 let polyDraft = null;
 /** Отложенное восстановление scroll после layout. */
@@ -170,7 +178,13 @@ export function init() {
   baseImage.addEventListener("error", onBaseError);
   curtainImage.addEventListener("load", onOriginalLoad);
   maskImage.addEventListener("load", onMaskImageLoad);
-  maskImage.addEventListener("error", () => maskImage.classList.add("is-missing"));
+  maskImage.addEventListener("error", () => {
+    maskImage.classList.add("is-missing");
+    maskBaseCacheKey = "";
+    maskLoadedVersion = null;
+    maskLoadedPageId = "";
+    syncMaskDraft(getState(), activePage(getState()));
+  });
   window.addEventListener("resize", layout);
   if (window.ResizeObserver) new ResizeObserver(() => layout()).observe(stage);
   subscribe(sync);
@@ -418,6 +432,8 @@ function sync(state) {
   const version = state.document?.version || page.version || 0;
   setSrc(baseImage, page, state.view === "original" ? "original" : "result", version);
   setSrc(curtainImage, page, "original", version);
+  maskPendingVersion = version;
+  maskPendingPageId = page.id;
   setSrc(maskImage, page, "mask", version);
   baseImage.alt = `${state.view === "original" ? "Оригинал" : "Результат"} страницы ${page.name}`;
   frame.classList.toggle("frame--mask", state.showMask);
@@ -504,12 +520,23 @@ function setSrc(image, page, kind, version) {
 
 function onMaskImageLoad() {
   maskImage.classList.remove("is-missing");
-  const state = getState();
-  if (state.deferredApply || maskDraft) syncMaskDraft(state, state.pages.find((item) => item.id === state.activePageId));
+  maskBaseCacheKey = "";
+  maskLoadedVersion = maskPendingVersion;
+  maskLoadedPageId = maskPendingPageId;
+  syncMaskDraft(getState(), activePage(getState()));
+}
+
+function activePage(state) {
+  return state.pages.find((item) => item.id === state.activePageId);
 }
 
 function clearMaskDraft() {
-  maskDraft = null;
+  maskBaseCanvas = null;
+  maskBaseCacheKey = "";
+  maskLoadedVersion = null;
+  maskLoadedPageId = "";
+  maskPendingVersion = null;
+  maskPendingPageId = "";
   if (maskLocal) {
     maskLocal.hidden = true;
     if (maskLocal.width && maskLocal.height) {
@@ -520,62 +547,85 @@ function clearMaskDraft() {
   frame?.classList.remove("frame--mask-draft");
 }
 
-function syncMaskDraft(state, page) {
+function maskBaseFor(page) {
+  if (
+    !maskImage
+    || !maskImage.complete
+    || !maskImage.naturalWidth
+    || maskImage.classList.contains("is-missing")
+    || !currentSrcIsPage(maskImage, page.id)
+  ) {
+    maskBaseCanvas = null;
+    maskBaseCacheKey = "missing";
+    return null;
+  }
+  const key = maskBaseKey(
+    maskImage.currentSrc || maskImage.src || "",
+    natural.w,
+    natural.h,
+  );
+  if (maskBaseCanvas && maskBaseCacheKey === key) return maskBaseCanvas;
+  const canvas = document.createElement("canvas");
+  canvas.width = natural.w;
+  canvas.height = natural.h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  try {
+    ctx.drawImage(maskImage, 0, 0, natural.w, natural.h);
+    const data = ctx.getImageData(0, 0, natural.w, natural.h);
+    grayToBlackOverlay(data.data);
+    ctx.putImageData(data, 0, 0);
+  } catch (_error) {
+    /* same-origin; ignore rare decode races */
+    return null;
+  }
+  maskBaseCanvas = canvas;
+  maskBaseCacheKey = key;
+  return canvas;
+}
+
+function syncMaskDraft(state, page, activeStroke = null) {
   if (!maskLocal || !frame) return;
   const pageId = state.activePageId || "";
-  if (!pageId || !page) {
+  if (!pageId || !page || page.id !== pageId || !natural.w || !natural.h) {
     clearMaskDraft();
     return;
   }
-  if (!natural.w || !natural.h) return;
-  const busy = !isReadyStatus(page.status) || isDirty(pageId);
-  const action = maskDraftAction({
-    deferredApply: state.deferredApply,
-    pageId,
-    draftPageId: maskDraft?.pageId || "",
-    pageBusy: busy,
-  });
-  if (action === "paint") {
-    if (!maskDraft || maskDraft.pageId !== pageId) {
-      maskDraft = { pageId, waitingServer: false };
-    } else {
-      maskDraft.waitingServer = false;
-    }
-    paintLocalMask(state.document?.strokes || []);
+  if (!state.showMask) {
+    maskLocal.hidden = true;
+    frame.classList.remove("frame--mask-draft");
     return;
   }
-  if (action === "wait") {
-    maskDraft.waitingServer = true;
-    maskLocal.hidden = false;
-    frame.classList.add("frame--mask-draft");
-    return;
-  }
-  clearMaskDraft();
+  paintLocalMask(state.document?.strokes || [], activeStroke, page);
 }
 
-function paintLocalMask(strokes) {
-  if (!maskLocal || !natural.w || !natural.h) return;
+function bakedStrokeCount(strokes, page, hasBase) {
+  const current = getState().document?.version || page.version || 0;
+  const version = hasBase && maskLoadedPageId === page.id && maskLoadedVersion != null
+    ? maskLoadedVersion
+    : current;
+  const count = strokeCountForVersion(page.id, version);
+  return count == null ? strokes.length : count;
+}
+
+function paintLocalMask(strokes, activeStroke = null, page = activePage(getState())) {
+  if (!maskLocal || !natural.w || !natural.h || !page) return;
   if (maskLocal.width !== natural.w || maskLocal.height !== natural.h) {
     maskLocal.width = natural.w;
     maskLocal.height = natural.h;
   }
   const ctx = maskLocal.getContext("2d");
   if (!ctx) return;
-  ctx.fillStyle = "#000";
-  ctx.fillRect(0, 0, natural.w, natural.h);
-  if (
-    maskImage
-    && maskImage.complete
-    && maskImage.naturalWidth > 0
-    && !maskImage.classList.contains("is-missing")
-  ) {
-    try {
-      ctx.drawImage(maskImage, 0, 0, natural.w, natural.h);
-    } catch (_error) {
-      /* same-origin; ignore rare decode races */
-    }
+  ctx.clearRect(0, 0, natural.w, natural.h);
+  const base = maskBaseFor(page);
+  if (base) ctx.drawImage(base, 0, 0);
+  const baked = bakedStrokeCount(strokes, page, Boolean(base));
+  for (const stroke of unbakedStrokes(strokes, baked)) {
+    paintStrokeOnMask(ctx, stroke, modeColor(stroke.mode));
   }
-  for (const stroke of strokes) paintStrokeOnMask(ctx, stroke);
+  if (activeStroke && activeStroke.points?.length) {
+    paintStrokeOnMask(ctx, activeStroke, modeColor(activeStroke.mode));
+  }
   maskLocal.hidden = false;
   frame.classList.add("frame--mask-draft");
 }
@@ -610,9 +660,7 @@ function onImageLoad() {
   }
   layout();
   applyPendingScroll();
-  if (state.deferredApply || maskDraft) {
-    syncMaskDraft(state, state.pages.find((item) => item.id === state.activePageId));
-  }
+  syncMaskDraft(state, state.pages.find((item) => item.id === state.activePageId));
 }
 
 /** Оригинал задаёт размер листа, даже когда result ещё не готов. */
@@ -638,7 +686,7 @@ function applyOriginalNatural() {
   patch({ imageSize: { ...natural } });
   layout();
   applyPendingScroll();
-  if (state.deferredApply || maskDraft) syncMaskDraft(state, page);
+  syncMaskDraft(state, page);
 }
 
 function fitScale() {
@@ -1445,11 +1493,13 @@ function clearDraft() {
 
 function drawStroke() {
   if (!drag || drag.kind !== "stroke" || !natural.w) return;
-  strokeLayer.setAttribute("viewBox", `0 0 ${natural.w} ${natural.h}`);
-  const points = drag.points.map((point) => `${Math.round(point[0])},${Math.round(point[1])}`).join(" ");
-  const width = Math.max(1, getState().brushSize || 12) * 2;
-  const color = drag.mode === "erase" ? MASK_ERASE_COLOR : MASK_PAINT_COLOR;
-  strokeLayer.innerHTML = `<polyline points="${points}" fill="none" stroke="${color}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round" opacity="0.55"></polyline>`;
+  if (strokeLayer) strokeLayer.innerHTML = "";
+  const state = getState();
+  syncMaskDraft(state, activePage(state), {
+    mode: drag.mode,
+    radius: Math.max(1, state.brushSize || 12),
+    points: drag.points,
+  });
 }
 
 function drawPolylineDraft() {
@@ -1462,13 +1512,13 @@ function drawPolylineDraft() {
   }
   strokeLayer.setAttribute("viewBox", `0 0 ${natural.w} ${natural.h}`);
   const joined = points.map((point) => `${Math.round(point[0])},${Math.round(point[1])}`).join(" ");
-  const color = polyDraft.mode === "erase_fill" ? MASK_ERASE_COLOR : MASK_PAINT_COLOR;
+  const color = modeColor(polyDraft.mode);
   const dots = polyDraft.points.map((point) => (
     `<circle cx="${Math.round(point[0])}" cy="${Math.round(point[1])}" r="3" fill="${color}" opacity="0.85"></circle>`
   )).join("");
   let shape = "";
   if (points.length >= 3) {
-    shape = `<polygon points="${joined}" fill="${color}" fill-opacity="0.28" stroke="${color}" stroke-width="2" stroke-linejoin="round" opacity="0.9"></polygon>`;
+    shape = `<polygon points="${joined}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" opacity="0.9"></polygon>`;
   } else if (points.length >= 2) {
     shape = `<polyline points="${joined}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.7"></polyline>`;
   }

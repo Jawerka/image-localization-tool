@@ -154,7 +154,8 @@ class ViewerDock extends StatelessWidget {
               _layerToggle(
                 palette,
                 icon: Icons.opacity_outlined,
-                tooltip: 'Слой маски (M)',
+                tooltip:
+                    'Маска (M): чёрный — вне маски, зелёный — добавлено, красный — исключено',
                 active: viewer.showMask,
                 onTap: viewer.toggleMask,
                 keyName: 'dock-mask',

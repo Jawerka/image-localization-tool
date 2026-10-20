@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Report whether Inno Setup (ISCC.exe) is available for installer builds.
+  Report whether Inno Setup (ISCC.exe) is available for the legacy installer.
 
 .EXAMPLE
   .\scripts\check-inno.ps1
@@ -38,12 +38,12 @@ $iscc = Find-Iscc
 if ($iscc) {
     Write-Host "Inno Setup found:" -ForegroundColor Green
     Write-Host "  $iscc"
-    Write-Host "Installer builds: .\scripts\build-windows.ps1"
+    Write-Host "Installer builds are no longer part of the Windows release; ship the portable ZIP."
     exit 0
 }
 
 Write-Host "Inno Setup (ISCC.exe) not found." -ForegroundColor Yellow
-Write-Host "Without it, use: .\scripts\build-windows.ps1 -SkipInno"
+Write-Host "The Windows release uses only the portable ZIP: .\scripts\build-windows.ps1"
 Write-Host "Install Inno Setup 6.1+: https://jrsoftware.org/isdl.php"
 Write-Host "Or winget: winget install --id JRSoftware.InnoSetup -e"
 

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -258,12 +260,89 @@ void main() {
 
     expect(find.byKey(const Key('pages-tab-pages')), findsOneWidget);
     expect(find.byKey(const Key('pages-search')), findsOneWidget);
+    // 049: во время обработки очередь не дублируется на «Страницах».
+    expect(find.byKey(const Key('pages-batch')), findsNothing);
     await tester.tap(find.byKey(const Key('pages-tab-queue')));
     await tester.pump();
     expect(find.byKey(const Key('queue-list')), findsOneWidget);
+    expect(find.byKey(const Key('pages-batch')), findsOneWidget);
     expect(find.byKey(const Key('pages-search')), findsNothing);
     await tester.tap(find.byKey(const Key('pages-tab-pages')));
     await tester.pump();
     expect(find.byKey(const Key('pages-search')), findsOneWidget);
+    expect(find.byKey(const Key('pages-batch')), findsNothing);
+  });
+
+  testWidgets('слои: кнопки, клавиши, страница и регион сохраняются', (
+    tester,
+  ) async {
+    sizeWindow(tester);
+    final (state, host) = await readyHost(
+      bootstrap: <String, dynamic>{
+        'settings': settingsDone(<String, dynamic>{}),
+        'project': {'id': 'pr', 'name': 'Глава'},
+        'pages': [
+          {'id': 'a', 'name': '001.jpg', 'status': 'done', 'progress': 100},
+          {'id': 'b', 'name': '002.jpg', 'status': 'done', 'progress': 100},
+        ],
+      },
+      reply: (path, method) => path.startsWith('/api/pages/')
+          ? <String, dynamic>{
+              'page': {'id': path.split('/').last},
+              'document': {
+                'version': 1,
+                'regions': <dynamic>[],
+                'strokes': <dynamic>[],
+              },
+            }
+          : <String, dynamic>{},
+    );
+    addTearDown(() {
+      state.dispose();
+      host.events.close();
+    });
+    await tester.pumpWidget(IltApp(state: state));
+    await tester.tap(find.byKey(const Key('page-row-a')));
+    await tester.pumpAndSettle();
+    final viewer = state.workspace.viewer;
+    Map<String, dynamic> lastBody() {
+      for (var i = host.requests.length - 1; i >= 0; i--) {
+        if (host.requests[i] == 'PUT /api/settings') {
+          return jsonDecode(host.bodies[i]) as Map<String, dynamic>;
+        }
+      }
+      throw StateError('нет PUT /api/settings');
+    }
+
+    await tester.tap(find.byKey(const Key('dock-boxes')));
+    await tester.pumpAndSettle();
+    expect(viewer.showBoxes, isFalse);
+    expect(lastBody()['viewer_show_boxes'], isFalse);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.keyL);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.keyL);
+    await tester.pumpAndSettle();
+    expect(viewer.showBoxes, isTrue);
+    expect(lastBody()['viewer_show_boxes'], isTrue);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.keyM);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.keyM);
+    await tester.pumpAndSettle();
+    expect(viewer.showMask, isFalse);
+    expect(lastBody()['viewer_show_mask'], isFalse);
+
+    // Смена страницы не сбрасывает выбор слоёв.
+    await tester.tap(find.byKey(const Key('page-row-b')));
+    await tester.pumpAndSettle();
+    expect(viewer.showBoxes, isTrue);
+    expect(viewer.showMask, isFalse);
+
+    // Создание региона включает рамки и сохраняет включённое состояние.
+    viewer.setShowBoxes(false);
+    await tester.pumpAndSettle();
+    viewer.addRegionAtViewCenter();
+    await tester.pumpAndSettle();
+    expect(viewer.showBoxes, isTrue);
+    expect(lastBody()['viewer_show_boxes'], isTrue);
   });
 }

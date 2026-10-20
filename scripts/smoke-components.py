@@ -40,6 +40,7 @@ def main():
     env = dict(os.environ)
     for key in ("ILT_RUNTIME_MANIFEST_URL", "ILT_COMPONENT_ROOT", "ILT_INSTALL_ROOT", "ILT_DATA_DIR"):
         env.pop(key, None)
+    env["ILT_SKIP_KEYRING_MIGRATION"] = "1"
     # CLI-сайдкар в sidecar/: минимальный marker определяет корень переносимой раскладки.
     command = [str(exe), "--deploy", "cpu" if not args.cuda else "cuda"]
     print("Frozen runtime smoke:", "CPU" if not args.cuda else "CUDA", flush=True)

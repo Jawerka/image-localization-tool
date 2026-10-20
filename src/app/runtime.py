@@ -447,6 +447,8 @@ def installed_ids() -> list[str]:
     return sorted(pack_id for pack_id in ids if is_installed(pack_id))
 
 def _installed_dir_ok(directory: Path) -> bool:
+    """Быстрая проверка маркера: inventory сверяется только в verify()."""
+    # shortcut: готовность доверяет маркеру; повреждение ловит ручной verify().
     marker = directory / MARKER_NAME
     if not marker.is_file() or not (directory / "site-packages").is_dir():
         return False
@@ -454,25 +456,34 @@ def _installed_dir_ok(directory: Path) -> bool:
         data = json.loads(marker.read_text(encoding="utf-8"))
         if not isinstance(data, dict) or not data.get("id"):
             return False
+        return data.get("checked") is not False
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
+def _verify_inventory(directory: Path) -> tuple[bool, str]:
+    if not _installed_dir_ok(directory):
+        return False, "маркер установки отсутствует"
+    try:
+        data = json.loads((directory / MARKER_NAME).read_text(encoding="utf-8"))
         inventory = data.get("inventory")
         if inventory is None:
-            return True
-        if not isinstance(inventory, dict) or not inventory or data.get("checked") is not True:
-            return False
+            return True, ""
+        if not isinstance(inventory, dict) or not inventory:
+            return False, "пустой inventory"
         site = directory / "site-packages"
         for name, info in inventory.items():
             pure = PurePosixPath(name)
             if pure.is_absolute() or ".." in pure.parts or ":" in name or "\\" in name:
-                return False
+                return False, f"недопустимый путь {name}"
             path = site.joinpath(*pure.parts)
-            stat = path.stat()
-            if not path.is_file() or stat.st_size != info["size"]:
-                return False
-            if stat.st_mtime_ns != info["mtime"] and downloads.digest(path) != info["sha256"]:
-                return False
-        return True
-    except (OSError, ValueError, KeyError, TypeError):
-        return False
+            if not path.is_file() or path.stat().st_size != info["size"]:
+                return False, f"повреждён файл {name}"
+            if downloads.digest(path) != info["sha256"]:
+                return False, f"не совпал sha256 файла {name}"
+        return True, ""
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        return False, str(exc)
 
 
 def matches(pack: Pack) -> bool:
@@ -480,12 +491,15 @@ def matches(pack: Pack) -> bool:
     directory = pack_dir(pack.id)
     if not _installed_dir_ok(directory):
         return False
-    data = json.loads((directory / MARKER_NAME).read_text(encoding="utf-8"))
-    if data.get("revision"):
-        return data["revision"] == pack.revision
-    if pack.files:
-        return data.get("files") == {f.name: f.sha256 for f in pack.files}
-    return data.get("version") == pack.version and data.get("sha256") == pack.sha256
+    try:
+        data = json.loads((directory / MARKER_NAME).read_text(encoding="utf-8"))
+        if data.get("revision"):
+            return data["revision"] == pack.revision
+        if pack.files:
+            return data.get("files") == {f.name: f.sha256 for f in pack.files}
+        return data.get("version") == pack.version and data.get("sha256") == pack.sha256
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
 
 
 def ready(pack: Pack) -> bool:
@@ -493,10 +507,47 @@ def ready(pack: Pack) -> bool:
         return False
     if not pack.check:
         return True
-    from src.app.component_check import validation_identity
+    from src.app.component_check import requirements_ok
 
-    data = json.loads((pack_dir(pack.id) / MARKER_NAME).read_text(encoding="utf-8"))
-    return data.get("checker") == validation_identity()
+    try:
+        data = json.loads((pack_dir(pack.id) / MARKER_NAME).read_text(encoding="utf-8"))
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+    return requirements_ok(data)
+
+
+def verify(pack: Pack) -> dict:
+    """Полная проверка установленного пака: inventory, затем probe."""
+    if not matches(pack):
+        return {"ok": False, "kind": "missing", "error": "компонент не установлен"}
+    directory = pack_dir(pack.id)
+    ok, error = _verify_inventory(directory)
+    if not ok:
+        return {"ok": False, "kind": "integrity", "error": error}
+    if pack.check:
+        try:
+            from src.app.component_check import probe
+
+            probe({"kind": pack.check, "site": str(directory / "site-packages")})
+        except Exception as exc:
+            return {"ok": False, "kind": "compatibility", "error": str(exc)}
+    from src.app.component_check import COMPONENT_REQUIREMENTS
+
+    try:
+        marker = json.loads((directory / MARKER_NAME).read_text(encoding="utf-8"))
+        marker["requirements"] = COMPONENT_REQUIREMENTS
+        downloads.atomic_json(directory / MARKER_NAME, marker)
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    return {"ok": True, "kind": "", "error": ""}
+
+
+def invalidate(pack: Pack) -> None:
+    """Пометить пак неустановленным, сохранив файлы для переустановки из кэша."""
+    try:
+        (pack_dir(pack.id) / MARKER_NAME).unlink()
+    except FileNotFoundError:
+        pass
 
 
 def selected_torch_id(ids: list[str] | None = None) -> str | None:
@@ -665,9 +716,9 @@ def download_and_install(pack: Pack | str, progress=None, retries: int = 3, paus
         if matches(pack):
             directory = pack_dir(pack.id)
             marker = json.loads((directory / MARKER_NAME).read_text(encoding="utf-8"))
-            from src.app.component_check import validation_identity
+            from src.app.component_check import requirements_ok
 
-            if pack.check and marker.get("checker") != validation_identity():
+            if pack.check and not requirements_ok(marker):
                 from src.app.component_check import probe
 
                 checked = probe({"kind": pack.check, "site": str(directory / "site-packages")})
@@ -930,13 +981,12 @@ def _write_marker(directory: Path, pack: Pack, checked: dict | None = None) -> N
             stat = path.stat()
             inventory[path.relative_to(site).as_posix()] = {
                 "size": stat.st_size, "mtime": stat.st_mtime_ns, "sha256": downloads.digest(path)}
+    from src.app.component_check import COMPONENT_REQUIREMENTS
+
     payload = {"id": pack.id, "version": pack.version, "revision": pack.revision,
                "python": pack.python, "platform": pack.platform,
                "installed_at": time.time(), "inventory": inventory, "checked": True,
-               "cuda": bool((checked or {}).get("cuda"))}
-    from src.app.component_check import validation_identity
-
-    payload["checker"] = validation_identity()
+               "requirements": COMPONENT_REQUIREMENTS, "cuda": bool((checked or {}).get("cuda"))}
     if pack.is_wheels:
         payload.update(format="wheels", files={f.name: f.sha256 for f in pack.files})
     else:

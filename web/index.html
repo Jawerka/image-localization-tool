@@ -202,7 +202,7 @@
               <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#layers"></use></svg>
               Рамки
             </button>
-            <button type="button" class="btn btn-ghost" data-role="layer-mask" data-view-control aria-pressed="false" disabled>
+            <button type="button" class="btn btn-ghost" data-role="layer-mask" data-view-control aria-pressed="false" disabled title="Маска: чёрный — вне маски, зелёный — добавлено, красный — исключено">
               <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#mask"></use></svg>
               Маска
             </button>
@@ -604,13 +604,13 @@
               <button type="button" class="btn btn-primary" data-role="settings-preparation-start">Подготовить компоненты</button>
               <button type="button" class="btn btn-accent" data-role="settings-preparation-pause" hidden>Пауза</button>
               <button type="button" class="btn btn-accent" data-role="settings-preparation-resume" hidden>Продолжить</button>
-              <button type="button" class="btn btn-accent" data-role="settings-preparation-refresh">Проверить</button>
+              <button type="button" class="btn btn-accent" data-role="settings-preparation-refresh">Проверить и восстановить</button>
               <button type="button" class="btn btn-accent" data-role="open-components-dir">
                 <svg class="icon" aria-hidden="true"><use href="icons/icons.svg#folder"></use></svg>
                 Открыть папку компонентов
               </button>
             </div>
-            <p class="field-hint">Проверка уже установленных компонентов не требует повторной загрузки.</p>
+            <p class="field-hint">Полная проверка запускается вручную; целые файлы повторно не скачиваются.</p>
           </section>
           <section class="settings__section" id="sec-network" role="tabpanel" data-tabpanel="network" aria-labelledby="nav-network" hidden>
             <h2>Доступ по сети</h2>

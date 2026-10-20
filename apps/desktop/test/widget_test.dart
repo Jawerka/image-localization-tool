@@ -132,6 +132,9 @@ void main() {
     await tester.pumpWidget(IltApp(state: state));
     await tester.pump();
     expect(find.byKey(const Key('top-job-pill')), findsOneWidget);
+    expect(find.byKey(const Key('pages-batch')), findsNothing);
+    await tester.tap(find.byKey(const Key('pages-tab-queue')));
+    await tester.pump();
     expect(find.byKey(const Key('pages-batch')), findsOneWidget);
     expect(find.byKey(const Key('batch-pause')), findsOneWidget);
     expect(find.byKey(const Key('batch-stop')), findsOneWidget);

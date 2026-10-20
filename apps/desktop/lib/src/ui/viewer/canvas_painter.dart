@@ -7,6 +7,7 @@ import '../../model/page_document.dart';
 import '../../state/viewer_state.dart';
 import '../theme.dart';
 import 'canvas_geometry.dart';
+import 'mask_overlay_painter.dart';
 
 /// Кисти и метки сцены.
 final _imagePaint = Paint()..filterQuality = FilterQuality.medium;
@@ -68,21 +69,23 @@ class ScenePainter extends CustomPainter {
 
     if (viewer.showMask) {
       final mask = viewer.imageFor('mask');
-      if (mask != null) {
-        final rect = ui.Rect.fromLTWH(
-          0,
-          0,
-          mask.width.toDouble(),
-          mask.height.toDouble(),
-        );
-        canvas.saveLayer(
-          rect,
-          Paint()
-            ..blendMode = BlendMode.multiply
-            ..color = const Color(0x80FFFFFF),
-        );
-        canvas.drawImageRect(mask, rect, rect, Paint());
-        canvas.restore();
+      final pageSize = imageSize.isEmpty ? session.imageSize : imageSize;
+      final width = mask?.width.toDouble() ?? pageSize.width;
+      final height = mask?.height.toDouble() ?? pageSize.height;
+      if (width > 0 && height > 0) {
+        MaskOverlayPainter(
+          mask: mask,
+          bounds: ui.Rect.fromLTWH(0, 0, width, height),
+          strokes: viewer.document?.strokes ?? const [],
+          bakedStrokeCount: viewer.bakedStrokeCount,
+          activeStroke: session.strokePoints.isEmpty
+              ? null
+              : Stroke(
+                  mode: session.strokeMode,
+                  radius: math.max(1, viewer.brushSize),
+                  points: session.strokePoints,
+                ),
+        ).paint(canvas);
       }
     }
 
@@ -398,45 +401,15 @@ class ScenePainter extends CustomPainter {
     if (draft != null) {
       _dashedRect(canvas, draft, scale, palette.primary);
     }
-    final stroke = session.strokePoints;
-    if (stroke.isNotEmpty) {
-      final color = session.strokeMode == Stroke.erase
-          ? const Color(0x8C2563EB)
-          : const Color(0x8C16A34A);
-      final paint = Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = math.max(1, viewer.brushSize) * 2
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round
-        ..color = color;
-      final dot = Paint()..color = color;
-      if (stroke.length == 1) {
-        canvas.drawCircle(stroke.first, math.max(1, viewer.brushSize), dot);
-      } else {
-        final path = ui.Path()..moveTo(stroke.first.dx, stroke.first.dy);
-        for (final point in stroke.skip(1)) {
-          path.lineTo(point.dx, point.dy);
-        }
-        canvas.drawPath(path, paint);
-      }
-    }
     final lasso = session.lasso;
     if (lasso.isNotEmpty) {
-      final color = session.lassoMode == 'erase_fill'
-          ? const Color(0x8C2563EB)
-          : const Color(0x8C16A34A);
+      final color = MaskOverlayPainter.colorFor(
+        session.lassoMode == 'erase_fill' ? Stroke.eraseFill : Stroke.fill,
+      );
       final points = [
         ...lasso,
         if (session.lassoHover != null) session.lassoHover!,
       ];
-      if (points.length >= 3) {
-        final path = ui.Path()..moveTo(points.first.dx, points.first.dy);
-        for (final point in points.skip(1)) {
-          path.lineTo(point.dx, point.dy);
-        }
-        path.close();
-        canvas.drawPath(path, Paint()..color = color.withValues(alpha: 0.28));
-      }
       if (points.length >= 2) {
         final outline = ui.Path()..moveTo(points.first.dx, points.first.dy);
         for (final point in points.skip(1)) {

@@ -252,6 +252,11 @@ class SecondaryState extends ChangeNotifier {
         await refreshPreparation();
       });
 
+  Future<void> verifyPreparation(Map<String, dynamic> selection) => _guard((api) async {
+        _preparation = await api.postJson('/api/preparation/verify', selection);
+        await refreshPreparation();
+      });
+
   Future<void> pausePreparation() => _guard((api) async {
         _preparation = await api.postJson('/api/preparation/pause');
       });

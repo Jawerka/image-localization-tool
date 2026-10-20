@@ -57,10 +57,10 @@ class TestPaths:
         assert components_root() == app
         assert "ILT_COMPONENT_PREVIOUS_ROOT" not in os.environ
 
-    def test_frozen_components_read_legacy_user_store(self, tmp_path, monkeypatch):
-        app, legacy = self._frozen_app(tmp_path, monkeypatch, with_legacy=True)
+    def test_old_appdata_components_are_not_read(self, tmp_path, monkeypatch):
+        app, _legacy = self._frozen_app(tmp_path, monkeypatch, with_legacy=True)
         assert components_root() == app
-        assert Path(os.environ["ILT_COMPONENT_PREVIOUS_ROOT"]) == legacy
+        assert "ILT_COMPONENT_PREVIOUS_ROOT" not in os.environ
 
     def test_components_root_explicit_override_wins(self, tmp_path, monkeypatch):
         monkeypatch.setenv("ILT_COMPONENT_ROOT", str(tmp_path / "chosen"))

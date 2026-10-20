@@ -1,6 +1,7 @@
 """Общие фикстуры для тестов."""
 
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,24 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
 TEST_IMG_DIR = ROOT / "test-img"
+
+
+@pytest.fixture(autouse=True)
+def isolated_data_dir(tmp_path, monkeypatch):
+    """Тесты не читают и не пишут каталог данных разработчика."""
+    monkeypatch.setenv("ILT_DATA_DIR", str(tmp_path / "ilt-data"))
+
+
+@pytest.fixture(autouse=True)
+def isolated_keyring(monkeypatch):
+    """Тесты не читают и не удаляют настоящий ключ LLM из системного keyring."""
+    bag = {}
+    module = types.ModuleType("keyring")
+    module.get_password = lambda service, username: bag.get((service, username))
+    module.set_password = lambda service, username, value: bag.__setitem__((service, username), value)
+    module.delete_password = lambda service, username: bag.pop((service, username), None)
+    monkeypatch.setitem(sys.modules, "keyring", module)
+    return bag
 
 
 @pytest.fixture

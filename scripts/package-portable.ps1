@@ -4,9 +4,9 @@
   Build the portable zip from dist: app + empty data/, models/, runtime/.
 
 .DESCRIPTION
-  Portable mode triggers when a data/ directory sits next to the program
-  (src/app/paths.py). Empty directories are pre-created (plus .keep markers)
-  so extractors that drop empty folders keep the layout.
+  Windows ships only as this portable ZIP. Empty directories are pre-created
+  (plus .keep markers) so extractors that drop empty folders keep the layout;
+  the app writes all mutable data to data/ next to the program.
 
 .EXAMPLE
   .\scripts\package-portable.ps1

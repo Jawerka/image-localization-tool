@@ -1,4 +1,5 @@
 import multiprocessing
+import os
 import sys
 
 if __name__ == "__main__":
@@ -70,7 +71,10 @@ def install_null_stdio(log_path: Path | None = None) -> None:
         from src.app.paths import logs_dir
 
         folder = logs_dir()
-        folder.mkdir(parents=True, exist_ok=True)
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            return
         path = folder / "app.log"
     if sys.stdout is None and sys.stderr is None:
         stream = _LogStream(path)
@@ -85,9 +89,10 @@ def install_null_stdio(log_path: Path | None = None) -> None:
 
 def prepare_logging() -> Path:
     """Каталог лога и ротация ``app.log``. Вызывать до импорта окна и воркера."""
-    from src.app.paths import logs_dir
+    from src.app.paths import ensure_data_root, logs_dir
     from src.utils.logger import enable_file_logging
 
+    ensure_data_root()
     folder = logs_dir()
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / "app.log"
@@ -101,6 +106,22 @@ def _guard_stdio() -> None:
         install_null_stdio()
 
 
+def _report_startup_error(message: str) -> None:
+    """Показать ошибку окном в сборке без консоли, иначе — в stderr."""
+    try:
+        if os.name == "nt" and getattr(sys, "frozen", False) and sys.stderr is None:
+            import ctypes
+
+            ctypes.windll.user32.MessageBoxW(None, message, "Image Localization Tool", 0x10)
+            return
+    except Exception:
+        pass
+    try:
+        print(message, file=sys.stderr)
+    except Exception:
+        pass
+
+
 _guard_stdio()
 
 
@@ -110,9 +131,18 @@ def main(argv: list[str] | None = None) -> int:
         from src.app.component_check import run
 
         return run(arguments[1])
-    prepare_logging()
+    try:
+        prepare_logging()
+    except (OSError, RuntimeError) as exc:
+        _report_startup_error(str(exc))
+        return 1
+    from src.app.settings import migrate_legacy_api_key
     from src.utils.logger import logger
 
+    if not migrate_legacy_api_key():
+        logger.warning(
+            "Не удалось перенести ключ LLM в data: файл не записан, ключ оставлен в keyring"
+        )
     logger.info("Запуск приложения")
     from src.app import runtime
 

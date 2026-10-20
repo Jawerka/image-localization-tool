@@ -7,7 +7,7 @@ CDN, ассеты релиза) с контролем ``Content-Length`` про�
 Tier 2 (``--deep``) — глубокий прогон: установка ``torch-cpu`` из манифеста во
 временный ``ILT_INSTALL_ROOT`` через ``src.app.runtime`` и ``import torch`` в
 subprocess. Результат кэшируется в ``deep.json`` по sha256 входных артефактов
-(setup/portable/server/manifest), чтобы повторный прогон не переигрывался.
+(portable/server/manifest), чтобы повторный прогон не переигрывался.
 
 Запуск:
     python scripts/check_release.py --manifest dist/ilt-runtime-manifest-1.0.1.json
@@ -39,7 +39,7 @@ from scripts.smoke_dist import read_app_version  # noqa: E402
 
 CACHE_SCHEMA = 1
 _ANONYMOUS = False
-_ASSET_PATTERNS = ("*setup.exe", "*portable.zip", "*server-*.zip", "*server-*.tar.gz")
+_ASSET_PATTERNS = ("*portable.zip", "*server-*.zip", "*server-*.tar.gz")
 
 
 def _file_sha256(path: Path) -> str:
@@ -169,9 +169,15 @@ def cache_key(assets_dir: Path, manifest_path: Path) -> str:
     return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()
 
 
+def _temp_root() -> Path:
+    root = ROOT / "data" / "tmp"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
 def deep_install(manifest_path: Path, pack_id: str, timeout: float) -> tuple[bool, str]:
     """Установить пак из манифеста во временный корень и импортировать torch."""
-    with tempfile.TemporaryDirectory(prefix="ilt-deep-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="ilt-deep-", dir=_temp_root()) as tmp:
         env = dict(os.environ)
         env["ILT_INSTALL_ROOT"] = tmp
         env["ILT_RUNTIME_MANIFEST_URL"] = manifest_path.as_uri()

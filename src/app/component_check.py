@@ -7,23 +7,35 @@ import os
 import subprocess
 import sys
 import tempfile
-from functools import lru_cache
 from pathlib import Path
 
 from src.app import downloads
 
+# Повышать только при несовместимом изменении встроенного runtime.
+# Отметки старого формата без поля requirements считаются версией 1.
+COMPONENT_REQUIREMENTS = 1
 
-@lru_cache(maxsize=1)
-def validation_identity() -> str:
-    """Обновлённая frozen-база повторно проверяет уже скачанные компоненты."""
-    from src.app import __version__
 
-    return downloads.digest(Path(sys.executable)) if getattr(sys, "frozen", False) else f"dev-{__version__}-{sys.version_info.major}{sys.version_info.minor}"
+def requirements_ok(marker: dict) -> bool:
+    """Совместима ли установленная отметка с текущими требованиями."""
+    try:
+        return int(marker.get("requirements", 1)) >= COMPONENT_REQUIREMENTS
+    except (TypeError, ValueError):
+        return False
+
+
+def _temp_root() -> Path:
+    """Временные проверки живут в data/tmp, рядом с остальным состоянием."""
+    from src.app.paths import data_root
+
+    root = data_root() / "tmp"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
 
 
 def probe(spec: dict, timeout: int = 180) -> dict:
     """Frozen-проверка использует тот же executable, а не Python из PATH."""
-    with tempfile.TemporaryDirectory(prefix="ilt-check-") as folder:
+    with tempfile.TemporaryDirectory(prefix="ilt-check-", dir=_temp_root()) as folder:
         path = Path(folder) / "check.json"
         downloads.atomic_json(path, spec)
         command = ([sys.executable, "--component-check", str(path)] if getattr(sys, "frozen", False)

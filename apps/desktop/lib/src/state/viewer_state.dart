@@ -10,11 +10,63 @@ import '../api/ilt_api.dart';
 import '../model/page_document.dart';
 import '../model/view_transform.dart';
 
+/// Снимок документа вместе с оценкой его размера в JSON-байтах.
+class _HistoryEntry {
+  _HistoryEntry(this.snapshot, this.bytes);
+
+  final Map<String, dynamic> snapshot;
+  final int bytes;
+}
+
 /// История правок одной страницы (снимки документа).
 class _PageHistory {
-  final List<Map<String, dynamic>> past = [];
-  final List<Map<String, dynamic>> future = [];
-  static const limit = 50;
+  final List<_HistoryEntry> past = [];
+  final List<_HistoryEntry> future = [];
+  int pastBytes = 0;
+  int futureBytes = 0;
+  static const limit = 1000;
+  static const maxBytes = 256 * 1024 * 1024;
+
+  void addPast(Map<String, dynamic> snapshot, int bytes) {
+    past.add(_HistoryEntry(snapshot, bytes));
+    pastBytes += bytes;
+    _trim(past, pastBytes, (value) => pastBytes = value);
+  }
+
+  void addFuture(Map<String, dynamic> snapshot, int bytes) {
+    future.add(_HistoryEntry(snapshot, bytes));
+    futureBytes += bytes;
+    _trim(future, futureBytes, (value) => futureBytes = value);
+  }
+
+  _HistoryEntry popPast() {
+    final entry = past.removeLast();
+    pastBytes -= entry.bytes;
+    return entry;
+  }
+
+  _HistoryEntry popFuture() {
+    final entry = future.removeLast();
+    futureBytes -= entry.bytes;
+    return entry;
+  }
+
+  void clearFuture() {
+    future.clear();
+    futureBytes = 0;
+  }
+
+  static void _trim(
+    List<_HistoryEntry> entries,
+    int bytes,
+    void Function(int) setBytes,
+  ) {
+    var total = bytes;
+    while (entries.length > limit || (total > maxBytes && entries.length > 1)) {
+      total -= entries.removeAt(0).bytes;
+    }
+    setBytes(total);
+  }
 }
 
 /// Состояние просмотрщика: документ активной страницы, правки, инструменты.
@@ -38,6 +90,9 @@ class ViewerState extends ChangeNotifier {
   bool _showMask = true;
   double _brushSize = 12;
 
+  /// Уведомить о смене слоёв для сохранения в настройках.
+  void Function(bool boxes, bool mask)? onLayersChanged;
+
   ui.Size _imageSize = ui.Size.zero;
   bool _loading = false;
   String? _errorText;
@@ -50,6 +105,9 @@ class ViewerState extends ChangeNotifier {
 
   final Map<String, Map<String, dynamic>> _pendingBody = {};
   final Map<String, int> _acked = {};
+
+  /// Число штрихов, уже запечённых в маску версии (`pageId|version`).
+  final Map<String, int> _strokeCounts = {};
   final Map<String, _PageHistory> _histories = {};
   String _coalesceKey = '';
   String _deferredBaselineKey = '';
@@ -160,6 +218,31 @@ class ViewerState extends ChangeNotifier {
     return _images.containsKey('$pageId|$kind|${document.version}');
   }
 
+  /// Версия картинки, которую реально показывает [imageFor] (с fallback).
+  int? _versionForImage(String kind) {
+    final pageId = _pageId;
+    if (pageId == null) return null;
+    final version = _document?.version ?? 0;
+    if (_images.containsKey('$pageId|$kind|$version')) return version;
+    final prefix = '$pageId|$kind|';
+    for (final key in _imageOrder.reversed) {
+      if (key.startsWith(prefix)) {
+        return int.tryParse(key.substring(prefix.length));
+      }
+    }
+    return null;
+  }
+
+  /// Сколько штрихов уже входит в показанную маску: цветными остаются
+  /// только более новые ручные назначения.
+  int get bakedStrokeCount {
+    final pageId = _pageId;
+    final document = _document;
+    if (pageId == null || document == null) return 0;
+    final version = _versionForImage('mask') ?? document.version;
+    return _strokeCounts['$pageId|$version'] ?? document.strokes.length;
+  }
+
   _PageHistory _historyFor(String? pageId) {
     final id = pageId ?? '';
     return _histories.putIfAbsent(id, _PageHistory.new);
@@ -181,6 +264,7 @@ class ViewerState extends ChangeNotifier {
     _queuedPage = '';
     _pendingBody.clear();
     _acked.clear();
+    _strokeCounts.clear();
     _histories.clear();
     _coalesceKey = '';
     _deferredBaselineKey = '';
@@ -248,6 +332,7 @@ class ViewerState extends ChangeNotifier {
     final next = id == null || id.isEmpty ? null : id;
     if (next == _pageId && next == null) return;
     _loadToken++;
+    _strokeCounts.clear();
     final previous = _pageId;
     if (previous != null && previous != next) {
       _pendingBody.remove(previous);
@@ -323,6 +408,7 @@ class ViewerState extends ChangeNotifier {
     if (documentRaw is! Map) return;
     final document = PageDocument.fromJson(documentRaw.cast<String, dynamic>());
     _acked[pageId] = document.version;
+    _strokeCounts['$pageId|${document.version}'] = document.strokes.length;
     final dirty = isDirty(pageId) && pageId == _pageId && _document != null;
     if ((keepLocal || dirty) && !force) {
       _document?.version = document.version;
@@ -448,6 +534,7 @@ class ViewerState extends ChangeNotifier {
     _showBoxes = value;
     if (!value) _selectedRegionId = null;
     _notify();
+    onLayersChanged?.call(_showBoxes, _showMask);
   }
 
   void toggleBoxes() => setShowBoxes(!_showBoxes);
@@ -457,9 +544,26 @@ class ViewerState extends ChangeNotifier {
     _showMask = value;
     if (value) ensureImages();
     _notify();
+    onLayersChanged?.call(_showBoxes, _showMask);
   }
 
   void toggleMask() => setShowMask(!_showMask);
+
+  /// Применить сохранённые значения без записи (bootstrap).
+  void restoreLayers({required bool boxes, required bool mask}) {
+    var changed = false;
+    if (_showBoxes != boxes) {
+      _showBoxes = boxes;
+      changed = true;
+    }
+    if (_showMask != mask) {
+      _showMask = mask;
+      if (mask) ensureImages();
+      changed = true;
+    }
+    if (!boxes) _selectedRegionId = null;
+    if (changed) _notify();
+  }
 
   void setBrushSize(double value) {
     final next = value.clamp(1, 64).toDouble();
@@ -568,11 +672,8 @@ class ViewerState extends ChangeNotifier {
     if (next.contentKey() == before) return false;
     final history = _historyFor(pageId);
     if (coalesce.isEmpty || coalesce != _coalesceKey) {
-      history.past.add(deepCopyMap(current.data));
-      if (history.past.length > _PageHistory.limit) {
-        history.past.removeAt(0);
-      }
-      history.future.clear();
+      history.addPast(deepCopyMap(current.data), before.length);
+      history.clearFuture();
       _coalesceKey = coalesce;
     }
     if (coalesce.isEmpty) _coalesceKey = '';
@@ -639,9 +740,8 @@ class ViewerState extends ChangeNotifier {
     if (pageId == null || current == null) return;
     final history = _historyFor(pageId);
     if (history.past.isEmpty) return;
-    history.future.add(deepCopyMap(current.data));
-    if (history.future.length > _PageHistory.limit) history.future.removeAt(0);
-    _restoreHistory(pageId, history.past.removeLast());
+    history.addFuture(deepCopyMap(current.data), current.contentKey().length);
+    _restoreHistory(pageId, history.popPast().snapshot);
   }
 
   void redo() {
@@ -650,9 +750,8 @@ class ViewerState extends ChangeNotifier {
     if (pageId == null || current == null) return;
     final history = _historyFor(pageId);
     if (history.future.isEmpty) return;
-    history.past.add(deepCopyMap(current.data));
-    if (history.past.length > _PageHistory.limit) history.past.removeAt(0);
-    _restoreHistory(pageId, history.future.removeLast());
+    history.addPast(deepCopyMap(current.data), current.contentKey().length);
+    _restoreHistory(pageId, history.popFuture().snapshot);
   }
 
   void _restoreHistory(String pageId, Map<String, dynamic> snapshot) {
@@ -724,6 +823,7 @@ class ViewerState extends ChangeNotifier {
     if (_queuedPage == pageId) _queuedPage = '';
     final base = _acked[pageId] ?? (body['version'] as num?)?.toInt() ?? 0;
     body['version'] = base;
+    var sent = body;
     try {
       Map<String, dynamic> response;
       try {
@@ -738,12 +838,13 @@ class ViewerState extends ChangeNotifier {
         _acked[pageId] = serverVersion;
         final latest = _pendingBody.remove(pageId) ?? body;
         latest['version'] = serverVersion;
+        sent = latest;
         response = await api.putJson('/api/pages/$pageId/document', {
           'base_version': serverVersion,
           'document': latest,
         });
       }
-      _acceptSave(pageId, response, base);
+      _acceptSave(pageId, response, base, _strokeCount(sent));
     } on ApiException catch (error) {
       _coalesceKey = '';
       _pendingBody.remove(pageId);
@@ -793,9 +894,20 @@ class ViewerState extends ChangeNotifier {
     return null;
   }
 
-  void _acceptSave(String pageId, Map<String, dynamic> response, int fallback) {
+  int _strokeCount(Map<String, dynamic> document) {
+    final strokes = document['strokes'];
+    return strokes is List ? strokes.length : 0;
+  }
+
+  void _acceptSave(
+    String pageId,
+    Map<String, dynamic> response,
+    int fallback,
+    int strokeCount,
+  ) {
     final version = _readVersion(response, fallback);
     _acked[pageId] = version;
+    _strokeCounts['$pageId|$version'] = strokeCount;
     if (_pageId == pageId &&
         _document != null &&
         !_pendingBody.containsKey(pageId)) {

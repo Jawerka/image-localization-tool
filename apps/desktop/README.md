@@ -35,9 +35,9 @@ flutter run -d windows --dart-define=ILT_ATTACH=1
 | `ILT_DATA_DIR` | каталог данных (где `api.json`, `instance.json`) |
 | `ILT_API_JSON` | полный путь к `api.json` для attach |
 
-Корень данных повторяет `src/app/paths.py`: портативный `data` в корне
-установки, иначе `%LOCALAPPDATA%\ImageLocalizationTool`. Ассеты Flutter
-(`desktop/data`) пользовательским каталогом не считаются.
+Корень данных повторяет `src/app/paths.py`: `ILT_DATA_DIR`, иначе `data`
+в корне установки (в dev — `repoRoot/data`). `%LOCALAPPDATA%` не используется.
+Ассеты Flutter (`desktop/data`) пользовательским каталогом не считаются.
 
 ## Раскладка dist
 
@@ -47,7 +47,7 @@ dist/ImageLocalizationTool/
 ├── sidecar/   — PyInstaller (ImageLocalizationTool.exe, _internal)
 ├── web/  fonts/
 ├── models/    — по опции сборки; иначе скачиваются первым запуском
-└── data/      — по желанию, портативный режим
+└── data/      — настройки, проекты, кэш, лог, ключ LLM (создаётся при запуске)
 ```
 
 ## Структура

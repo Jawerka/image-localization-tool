@@ -47,7 +47,6 @@ class _PagesRailState extends State<PagesRail> {
             const Expanded(child: _Empty())
           else if (_tab == 'pages') ...[
             _Search(workspace: workspace),
-            if (workspace.busy) _BatchBlock(workspace: workspace),
             Expanded(child: _PageList(workspace: workspace)),
             _Footer(workspace: workspace),
           ] else ...[

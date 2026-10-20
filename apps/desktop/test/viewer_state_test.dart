@@ -13,19 +13,19 @@ Map<String, dynamic> _document({
   int version = 3,
   List<dynamic>? regions,
   List<dynamic>? strokes,
-}) =>
-    <String, dynamic>{
-      'version': version,
-      'regions': regions ??
-          [
-            {
-              'id': '1',
-              'bbox': [10, 10, 100, 100],
-              'text': 'hi',
-            },
-          ],
-      'strokes': strokes ?? <dynamic>[],
-    };
+}) => <String, dynamic>{
+  'version': version,
+  'regions':
+      regions ??
+      [
+        {
+          'id': '1',
+          'bbox': [10, 10, 100, 100],
+          'text': 'hi',
+        },
+      ],
+  'strokes': strokes ?? <dynamic>[],
+};
 
 void main() {
   late List<String> requests;
@@ -50,8 +50,12 @@ void main() {
         headers: {'content-type': 'application/json; charset=utf-8'},
       );
     });
-    return ViewerState()
-      ..bind(IltApi(ready: const ApiReady(port: 1, token: 't'), client: client));
+    return ViewerState()..bind(
+      IltApi(
+        ready: const ApiReady(port: 1, token: 't'),
+        client: client,
+      ),
+    );
   }
 
   setUp(() {
@@ -63,9 +67,9 @@ void main() {
 
   test('openPage загружает документ и версию', () async {
     handler = (path) => {
-          'page': {'id': 'p1'},
-          'document': _document(),
-        };
+      'page': {'id': 'p1'},
+      'document': _document(),
+    };
     final viewer = build();
     await viewer.openPage('p1');
     expect(viewer.document?.version, 3);
@@ -78,7 +82,10 @@ void main() {
   test('правка-черновик ждёт «Готово», затем PUT с base_version', () async {
     handler = (path) {
       if (path == '/api/pages/p1') {
-        return {'page': {'id': 'p1'}, 'document': _document(version: 4)};
+        return {
+          'page': {'id': 'p1'},
+          'document': _document(version: 4),
+        };
       }
       if (path == '/api/pages/p1/document') {
         return {'document': _document(version: 5)};
@@ -125,7 +132,10 @@ void main() {
   test('409: повторная попытка с версией из ошибки', () async {
     handler = (path) {
       if (path == '/api/pages/p1') {
-        return {'page': {'id': 'p1'}, 'document': _document(version: 4)};
+        return {
+          'page': {'id': 'p1'},
+          'document': _document(version: 4),
+        };
       }
       return <String, dynamic>{};
     };
@@ -165,9 +175,9 @@ void main() {
 
   test('undo/redo откатывают правки по одной', () async {
     handler = (path) => {
-          'page': {'id': 'p1'},
-          'document': _document(),
-        };
+      'page': {'id': 'p1'},
+      'document': _document(),
+    };
     final viewer = build();
     await viewer.openPage('p1');
     viewer.editDocument(
@@ -194,9 +204,9 @@ void main() {
 
   test('discardDeferredEdits перечитывает серверный документ', () async {
     handler = (path) => {
-          'page': {'id': 'p1'},
-          'document': _document(),
-        };
+      'page': {'id': 'p1'},
+      'document': _document(),
+    };
     final viewer = build();
     await viewer.openPage('p1');
     viewer.editDocument(
@@ -214,9 +224,9 @@ void main() {
 
   test('createRegion, nudge и delete', () async {
     handler = (path) => {
-          'page': {'id': 'p1'},
-          'document': _document(),
-        };
+      'page': {'id': 'p1'},
+      'document': _document(),
+    };
     final viewer = build();
     await viewer.openPage('p1');
     viewer.session.setImageSize(const Size(500, 500));
@@ -236,9 +246,9 @@ void main() {
 
   test('лассо: 3+ точки превращаются в штрих fill', () async {
     handler = (path) => {
-          'page': {'id': 'p1'},
-          'document': _document(),
-        };
+      'page': {'id': 'p1'},
+      'document': _document(),
+    };
     final viewer = build();
     await viewer.openPage('p1');
     viewer.session.lassoMode = Stroke.eraseFill;
@@ -257,9 +267,9 @@ void main() {
 
   test('страж ухода: черновик поднимает диалог', () async {
     handler = (path) => {
-          'page': {'id': 'p1'},
-          'document': _document(),
-        };
+      'page': {'id': 'p1'},
+      'document': _document(),
+    };
     final viewer = build();
     await viewer.openPage('p1');
     viewer.editDocument(
@@ -288,9 +298,9 @@ void main() {
   test('reloadIfClean не трогает документ с черновиком', () async {
     var version = 3;
     handler = (path) => {
-          'page': {'id': 'p1'},
-          'document': _document(version: version),
-        };
+      'page': {'id': 'p1'},
+      'document': _document(version: version),
+    };
     final viewer = build();
     await viewer.openPage('p1');
     viewer.editDocument(
@@ -314,7 +324,10 @@ void main() {
     );
     handler = (path) {
       if (path == '/api/pages/p1') {
-        return {'page': {'id': 'p1'}, 'document': _document()};
+        return {
+          'page': {'id': 'p1'},
+          'document': _document(),
+        };
       }
       if (path.contains('/image/')) return {'__bytes': png};
       return <String, dynamic>{};
@@ -327,10 +340,134 @@ void main() {
     viewer.setView('original');
     await Future<void>.delayed(const Duration(milliseconds: 50));
     expect(viewer.imageFor('original'), isNotNull);
-    expect(
-      requests.where((r) => r.contains('/image/result')).length,
-      1,
+    expect(requests.where((r) => r.contains('/image/result')).length, 1);
+    viewer.dispose();
+  });
+
+  test('bakedStrokeCount снимает цвет с сохранённых штрихов', () async {
+    handler = (path) {
+      if (path == '/api/pages/p1') {
+        return {
+          'page': {'id': 'p1'},
+          'document': _document(
+            version: 3,
+            strokes: [
+              {
+                'mode': 'paint',
+                'radius': 4,
+                'points': [
+                  [1.0, 1.0],
+                ],
+              },
+              {
+                'mode': 'erase',
+                'radius': 4,
+                'points': [
+                  [2.0, 2.0],
+                ],
+              },
+            ],
+          ),
+        };
+      }
+      if (path == '/api/pages/p1/document') return {'version': 4};
+      return <String, dynamic>{};
+    };
+    final viewer = build();
+    await viewer.openPage('p1');
+    expect(viewer.bakedStrokeCount, 2);
+    viewer.editDocument(
+      (document) => document.addStroke(
+        const Stroke(mode: Stroke.paint, radius: 4, points: [Offset(3, 3)]),
+      ),
+      deferApply: true,
     );
+    expect(viewer.bakedStrokeCount, 2);
+    viewer.commitDeferredEdits();
+    await viewer.whenSaved('p1');
+    expect(viewer.document?.version, 4);
+    expect(viewer.bakedStrokeCount, 3);
+    viewer.editDocument(
+      (document) => document.addStroke(
+        const Stroke(mode: Stroke.paint, radius: 4, points: [Offset(4, 4)]),
+      ),
+      deferApply: true,
+    );
+    expect(viewer.bakedStrokeCount, 3);
+    viewer.undo();
+    expect(viewer.document?.strokes, hasLength(3));
+    expect(viewer.bakedStrokeCount, 3);
+    viewer.redo();
+    expect(viewer.document?.strokes, hasLength(4));
+    expect(viewer.bakedStrokeCount, 3);
+    viewer.dispose();
+  });
+
+  test('смена страницы сбрасывает счётчики версий', () async {
+    handler = (path) {
+      final pageId = path.split('/').last;
+      return {
+        'page': {'id': pageId},
+        'document': _document(
+          version: 3,
+          strokes: pageId == 'p1'
+              ? [
+                  {
+                    'mode': 'paint',
+                    'radius': 4,
+                    'points': [
+                      [1.0, 1.0],
+                    ],
+                  },
+                  {
+                    'mode': 'paint',
+                    'radius': 4,
+                    'points': [
+                      [2.0, 2.0],
+                    ],
+                  },
+                ]
+              : [
+                  {
+                    'mode': 'erase',
+                    'radius': 4,
+                    'points': [
+                      [3.0, 3.0],
+                    ],
+                  },
+                ],
+        ),
+      };
+    };
+    final viewer = build();
+    await viewer.openPage('p1');
+    expect(viewer.bakedStrokeCount, 2);
+    await viewer.openPage('p2');
+    expect(viewer.bakedStrokeCount, 1);
+    viewer.dispose();
+  });
+
+  test('история держит 1000 шагов', () async {
+    handler = (path) => {
+      'page': {'id': 'p1'},
+      'document': _document(),
+    };
+    final viewer = build();
+    await viewer.openPage('p1');
+    for (var i = 0; i < 1001; i++) {
+      viewer.editDocument(
+        (document) => document.addStroke(
+          Stroke(mode: Stroke.paint, radius: 4, points: [Offset(i * 1.0, 1)]),
+        ),
+        deferApply: true,
+      );
+    }
+    expect(viewer.document?.strokes, hasLength(1001));
+    for (var i = 0; i < 1000; i++) {
+      viewer.undo();
+    }
+    expect(viewer.document?.strokes, hasLength(1));
+    expect(viewer.canUndo, isFalse);
     viewer.dispose();
   });
 
@@ -350,9 +487,9 @@ void main() {
 
   test('смена страницы: числовой зум стартует сверху (веб-паритет)', () async {
     handler = (path) => {
-          'page': {'id': path.split('/').last},
-          'document': _document(),
-        };
+      'page': {'id': path.split('/').last},
+      'document': _document(),
+    };
     final viewer = build();
     await viewer.openPage('p1');
     viewer.session.setViewport(const Size(300, 300));
@@ -377,9 +514,9 @@ void main() {
 
   test('смена страницы: fit остаётся вписанным', () async {
     handler = (path) => {
-          'page': {'id': path.split('/').last},
-          'document': _document(),
-        };
+      'page': {'id': path.split('/').last},
+      'document': _document(),
+    };
     final viewer = build();
     await viewer.openPage('p1');
     viewer.session.setViewport(const Size(300, 300));

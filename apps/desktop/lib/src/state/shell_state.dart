@@ -159,11 +159,20 @@ class ShellState extends ChangeNotifier {
   bool get exitWaiting => _exitWaiting;
 
   /// Запрос выхода: без незаконченных страниц выходим сразу, иначе — диалог.
+  ///
+  /// Перед выходом ждём запись слоёв, иначе последний выбор может потеряться.
   Future<ui.AppExitResponse> confirmExit() async {
-    if (!workspace.busy) return ui.AppExitResponse.exit;
-    _exit ??= Completer<ui.AppExitResponse>();
+    if (!workspace.busy) {
+      await workspace.whenLayersSaved();
+      return ui.AppExitResponse.exit;
+    }
+    final pending = _exit ??= Completer<ui.AppExitResponse>();
     notifyListeners();
-    return _exit!.future;
+    final response = await pending.future;
+    if (response == ui.AppExitResponse.exit) {
+      await workspace.whenLayersSaved();
+    }
+    return response;
   }
 
   void cancelExit() => _resolveExit(ui.AppExitResponse.cancel);

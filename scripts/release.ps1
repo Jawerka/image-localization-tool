@@ -49,7 +49,7 @@ if ($Prepare) {
         Checked { & $flutter test } 'Flutter tests'
     } finally { Pop-Location }
     if (-not $SkipBuild) {
-        Checked { & 'scripts\build-windows.ps1' -SkipModels -Portable -ServerZip -BuildPython $BuildPython } 'Windows base'
+        Checked { & 'scripts\build-windows.ps1' -SkipModels -ServerZip -BuildPython $BuildPython } 'Windows base'
     }
     Checked { & $Python 'scripts\build-extension.py' } 'browser extensions'
     $dirty = (& git status --porcelain --untracked-files=all | Where-Object { $_ -notlike '?? .agents/*' } | Out-String).Trim()

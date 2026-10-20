@@ -126,6 +126,23 @@ def test_status_reports_installed(monkeypatch, tmp_path):
     assert payload["download"]["state"] == "idle"
 
 
+def test_ready_trusts_marker_without_inventory_walk_or_hash(monkeypatch, tmp_path):
+    record = _pack_dict("torch-cpu")
+    record["check"] = "torch"
+    _use(monkeypatch, tmp_path, [record])
+    directory = tmp_path / "install" / "runtime" / "torch-cpu"
+    (directory / "site-packages").mkdir(parents=True)
+    (directory / "site-packages" / "module.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (directory / "pack.json").write_text(json.dumps({
+        "id": "torch-cpu", "version": "1.0", "sha256": "", "checked": True,
+        "checker": "old-build", "inventory": {"module.py": {"size": 11, "mtime": 0, "sha256": "x"}},
+    }), encoding="utf-8")
+    monkeypatch.setattr(runtime.downloads, "digest", lambda *_: (_ for _ in ()).throw(AssertionError("hash")))
+    pack = runtime.pack_by_id("torch-cpu")
+    assert runtime.ready(pack)
+    assert runtime.is_installed("torch-cpu")
+
+
 def test_download_install_and_remove(monkeypatch, tmp_path):
     archive = tmp_path / "argos.7z"
     digest = _make_pack_archive(archive, marker="argostranslate")

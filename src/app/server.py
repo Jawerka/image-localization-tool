@@ -239,49 +239,6 @@ class AppState:
         self._pump.start()
         self._start_llm_probe()
 
-    def migrate_local_components(self) -> list[str]:
-        """Перенести прежние компоненты внутрь папки портативной программы."""
-        from src.app import downloads
-        from src.app.preparation import migrate_legacy_components
-
-        previous = os.environ.get("ILT_COMPONENT_PREVIOUS_ROOT", "").strip()
-        if not previous:
-            return []
-        target = components_root()
-        if os.path.normcase(os.path.abspath(str(target))) != os.path.normcase(os.path.abspath(str(install_root()))):
-            return []
-        try:
-            with downloads.installer_lock():
-                return migrate_legacy_components(target, Path(previous))
-        except Exception:
-            logger.exception("Не удалось перенести компоненты в папку программы")
-            return []
-
-    def revalidate_components(self) -> bool:
-        """После обновления приложения проверить установленные компоненты без загрузки.
-
-        Запускается только когда всё недостающее уже лежит на диске и требует
-        лишь повторной проверки/активации. Скачивание само не начинается.
-        """
-        from src.app import downloads, preparation
-
-        self.migrate_local_components()
-        manager = self.preparation_manager()
-        if manager.busy() or self.queue.busy():
-            return False
-        try:
-            preview = preparation.plan(self.settings.to_dict())
-            pending = [item for item in preview.get("items") or [] if not item.get("ready")]
-            if not pending or any(int(item.get("install_bytes") or 0) > 0 for item in pending):
-                return False
-            manager.start(self.settings.to_dict())
-            return True
-        except downloads.BusyError:
-            return False
-        except Exception:
-            logger.exception("Не удалось запустить повторную проверку компонентов")
-            return False
-
     def _start_llm_probe(self) -> None:
         """Проверить LLM в фоне. Пустой адрес — сразу «нет», без баннера до ответа."""
         url = str(self.settings.llm_base_url or "").strip()
@@ -690,7 +647,8 @@ def _api(state: AppState, method: str, path: str, body: dict, query: dict | None
             snapshot = manager.current()
             return _Result({"version": __version__, "platform": runtime.platform_tag(),
                 "python": runtime.python_tag(), "preparation": {key: snapshot.get(key) for key in (
-                    "state", "selection", "catalog_sha", "items", "done", "total", "current", "error", "error_kind")}})
+                    "state", "selection", "catalog_sha", "items", "done", "total", "current", "error",
+                    "error_kind", "verified_at")}})
         _need_method(method, "POST")
         selection = state.settings.to_dict()
         selection.update({k: v for k, v in body.items() if k in (
@@ -701,6 +659,11 @@ def _api(state: AppState, method: str, path: str, body: dict, query: dict | None
             if path == "/api/preparation/start":
                 with state._component_gate:
                     result = manager.start(selection)
+                    _update_settings(state, result["selection"])
+                    return _Result(result, status=202)
+            if path == "/api/preparation/verify":
+                with state._component_gate:
+                    result = manager.start(selection, verify=True)
                     _update_settings(state, result["selection"])
                     return _Result(result, status=202)
             if path == "/api/preparation/pause":
@@ -1095,15 +1058,15 @@ def _require_prepared_worker(state: AppState) -> None:
     manager = state.preparation_manager()
     if manager.busy():
         raise _HttpError(409, "Идёт проверка или подготовка компонентов. Дождитесь завершения и повторите перевод.")
-    from src.app.preparation import plan
+    from src.app.preparation import missing
 
-    prepared = plan(state.settings.to_dict())
-    if prepared["state"] != "ready":
-        pending = [item for item in prepared["items"] if not item["ready"]]
-        titles = ", ".join(item["title"] for item in pending)
-        action = ("Требуется проверка или активация" if all(item["install_bytes"] == 0 for item in pending)
-                  else "Требуется подготовка")
-        raise _HttpError(409, f"{action}: {titles}. Откройте «Настройки → Компоненты» и нажмите «Подготовить компоненты».")
+    try:
+        titles = missing(state.settings.to_dict())
+    except ValueError as exc:
+        raise _HttpError(409, str(exc)) from exc
+    if titles:
+        raise _HttpError(409, "Не хватает компонентов: " + ", ".join(titles)
+                         + ". Откройте «Настройки → Компоненты» и установите их.")
 
 
 def _page_has_result(state: AppState, page_id: str, skip_ready: bool) -> bool:

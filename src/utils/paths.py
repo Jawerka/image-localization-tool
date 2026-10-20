@@ -33,35 +33,12 @@ def install_root() -> Path:
     return project_root()
 
 
-def _legacy_components_root() -> Path | None:
-    """Прежний общий каталог компонентов обычной Windows-установки."""
-    if sys.platform != "win32":
-        return None
-    local = os.environ.get("LOCALAPPDATA")
-    base = Path(local) if local else Path.home() / "AppData" / "Local"
-    return base / "ImageLocalizationTool" / "components"
-
-
-def _adopt_legacy_components(current: Path) -> None:
-    """Читать старый каталог без скрытой перекачки, если новый ещё пуст."""
-    legacy = _legacy_components_root()
-    if legacy is None or not legacy.is_dir() or os.environ.get("ILT_COMPONENT_PREVIOUS_ROOT"):
-        return
-    if os.path.normcase(os.path.abspath(str(legacy))) == os.path.normcase(os.path.abspath(str(current))):
-        return
-    os.environ["ILT_COMPONENT_PREVIOUS_ROOT"] = str(legacy)
-
-
 def components_root() -> Path:
-    """Компоненты лежат в папке программы; старые пути читаются отдельно."""
+    """Компоненты лежат в папке программы. Старые пути AppData не читаются."""
     explicit = os.environ.get("ILT_COMPONENT_ROOT", "").strip()
     if explicit:
         return Path(explicit)
-    installed = install_root()
-    if not getattr(sys, "frozen", False):
-        return installed
-    _adopt_legacy_components(installed)
-    return installed
+    return install_root()
 
 
 def models_dir(override: str | Path | None = None) -> Path:

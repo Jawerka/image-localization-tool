@@ -1,6 +1,6 @@
 /* Настройки и мастер первого запуска. Тема на экране живая, в файл — по ОК и Применить. */
 
-import { dialogLog, dialogReveal, downloadModel, llmCheck, models, pausePreparation, preparationCurrent, preparationPlan, putSecret, putSettings, remotePair, remoteRevoke, resumePreparation, startPreparation } from "./api.js";
+import { dialogLog, dialogReveal, downloadModel, llmCheck, models, pausePreparation, preparationCurrent, preparationPlan, putSecret, putSettings, remotePair, remoteRevoke, resumePreparation, startPreparation, verifyPreparation } from "./api.js";
 import { openModelPick } from "./dialogs.js";
 import { clone, getState, patch, setBanner, settingsForSave, subscribe } from "./state.js";
 
@@ -111,7 +111,7 @@ export function init() {
   document.querySelector("[data-role='settings-preparation-start']")?.addEventListener("click", startSettingsPreparation);
   document.querySelector("[data-role='settings-preparation-pause']")?.addEventListener("click", pauseSettingsPreparation);
   document.querySelector("[data-role='settings-preparation-resume']")?.addEventListener("click", resumeSettingsPreparation);
-  document.querySelector("[data-role='settings-preparation-refresh']")?.addEventListener("click", refreshSettingsPreparation);
+  document.querySelector("[data-role='settings-preparation-refresh']")?.addEventListener("click", verifySettingsPreparation);
   document.querySelector("[data-role='wiz-check']").addEventListener("click", () => checkLlm(
     document.getElementById("wiz-url").value,
     document.getElementById("wiz-model").value,
@@ -505,7 +505,7 @@ function paintPreparation() {
   else if (current.state === "error") note.textContent = current.error || "Не удалось подготовить компоненты.";
   else if (paused) note.textContent = `Подготовка приостановлена: ${formatBytes(current.done)} из ${formatBytes(current.total)}.`;
   else if (pausedOther) note.textContent = "Приостановлена подготовка другого профиля. Запуск ниже создаст план для выбранного профиля.";
-  else if (active) note.textContent = `${current.current || "Подготовка компонентов"}: ${formatBytes(current.done)} из ${formatBytes(current.total)}.`;
+  else if (active) note.textContent = preparationStatusText(current);
   else note.textContent = total === 0
     ? "Компоненты уже скачаны. Нужна только проверка и активация."
     : `Потребуется скачать ${formatBytes(total)} и иметь ${formatBytes(required)} свободного места.`;
@@ -521,6 +521,13 @@ function paintPreparation() {
   if (resume) resume.hidden = !paused;
   const next = document.getElementById("wizard-next");
   if (next && wizard && wizardStep === 3) next.disabled = !ready;
+}
+
+function preparationStatusText(current) {
+  const title = current.current || "Проверка компонентов";
+  return Number(current.total) > 0
+    ? `${title}: ${formatBytes(current.done)} из ${formatBytes(current.total)}.`
+    : title;
 }
 
 function formatBytes(value) {
@@ -574,6 +581,24 @@ async function refreshSettingsPreparation() {
     settingsPrepCurrent = current;
   } catch (error) {
     settingsPrepPlan = null;
+    settingsPrepError = error.message || "Не удалось проверить компоненты";
+  } finally {
+    settingsPrepLoading = false;
+    paintSettingsPreparation();
+    syncSettingsPreparationPoll();
+  }
+}
+
+async function verifySettingsPreparation() {
+  if (settingsPrepLoading) return;
+  settingsPrepLoading = true;
+  settingsPrepError = "";
+  paintSettingsPreparation();
+  try {
+    const selection = settingsPreparationSelection();
+    settingsPrepPlan = await preparationPlan(selection);
+    settingsPrepCurrent = await verifyPreparation(selection);
+  } catch (error) {
     settingsPrepError = error.message || "Не удалось проверить компоненты";
   } finally {
     settingsPrepLoading = false;
@@ -681,7 +706,7 @@ function paintSettingsPreparation() {
   else if (current.state === "error") note.textContent = current.error || "Не удалось подготовить компоненты.";
   else if (paused) note.textContent = `Подготовка приостановлена: ${formatBytes(current.done)} из ${formatBytes(current.total)}.`;
   else if (pausedOther) note.textContent = "Приостановлена подготовка другого профиля. Новый запуск создаст план для текущих настроек.";
-  else if (active) note.textContent = `${current.current || "Подготовка компонентов"}: ${formatBytes(current.done)} из ${formatBytes(current.total)}.`;
+  else if (active) note.textContent = preparationStatusText(current);
   else if (plan) note.textContent = total === 0
     ? "Компоненты уже скачаны. Нужна только проверка и активация."
     : `Потребуется скачать ${formatBytes(total)} и иметь ${formatBytes(required)} свободного места.`;
@@ -696,6 +721,8 @@ function paintSettingsPreparation() {
   start.disabled = !plan || Boolean(settingsPrepError);
   if (pause) pause.hidden = !active;
   if (resume) resume.hidden = !paused;
+  const refresh = document.querySelector("[data-role='settings-preparation-refresh']");
+  if (refresh) refresh.disabled = active || settingsPrepLoading;
 }
 
 async function refreshModels() {

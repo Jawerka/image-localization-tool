@@ -88,25 +88,78 @@ def directory(component: Component) -> Path:
     return store_root() / component.id / component.revision[:24]
 
 
-def ready(component: Component, ignore_checker: bool = False) -> bool:
+def _marker(component: Component) -> tuple[Path, dict | None]:
     folder = directory(component)
     try:
         data = json.loads((folder / "component.json").read_text(encoding="utf-8"))
         if data.get("revision") != component.revision or data.get("checked") is not True:
-            return False
-        from src.app.component_check import validation_identity
-
-        if component.check and not ignore_checker and data.get("checker") != validation_identity():
-            return False
-        for name, record in data["inventory"].items():
-            path = safe_path(folder, name)
-            stat = path.stat()
-            if stat.st_size != record["size"] or (stat.st_mtime_ns != record["mtime"]
-                                                 and downloads.digest(path) != record["sha256"]):
-                return False
-        return bool(data["inventory"])
+            return folder, None
+        return folder, data
     except (OSError, ValueError, KeyError, TypeError):
+        return folder, None
+
+
+def _payload_present(component: Component, folder: Path) -> bool:
+    """Наличие основных файлов без обхода inventory и вычисления хешей."""
+    try:
+        if component.kind == "language":
+            return any(path.is_file() for path in folder.glob("*/metadata.json"))
+        return all((folder / item.name).is_file() and (folder / item.name).stat().st_size > 0
+                   for item in component.files)
+    except OSError:
         return False
+
+
+def installed(component: Component) -> bool:
+    """Маркер установки без проверки требований: файлы уже скачаны и проверены."""
+    folder, data = _marker(component)
+    return data is not None and _payload_present(component, folder)
+
+
+def ready(component: Component) -> bool:
+    """Быстрая готовность: отметка установки и основные файлы, без probe и хешей."""
+    # shortcut: готовность доверяет маркеру; повреждение ловит ручной verify().
+    from src.app.component_check import requirements_ok
+
+    folder, data = _marker(component)
+    if data is None or not _payload_present(component, folder):
+        return False
+    return not component.check or requirements_ok(data)
+
+
+def verify(component: Component) -> dict:
+    """Полная проверка установленного компонента: inventory, затем probe."""
+    folder, data = _marker(component)
+    if data is None:
+        return {"ok": False, "kind": "missing", "error": "компонент не установлен"}
+    inventory = data.get("inventory")
+    try:
+        if not isinstance(inventory, dict) or not inventory:
+            return {"ok": False, "kind": "integrity", "error": "пустой inventory"}
+        for name, record in inventory.items():
+            path = safe_path(folder, name)
+            if not path.is_file() or path.stat().st_size != record["size"]:
+                return {"ok": False, "kind": "integrity", "error": f"повреждён файл {name}"}
+            if downloads.digest(path) != record["sha256"]:
+                return {"ok": False, "kind": "integrity", "error": f"не совпал sha256 файла {name}"}
+        validate_component(component, folder)
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        return {"ok": False, "kind": "integrity", "error": str(exc)}
+    except Exception as exc:
+        return {"ok": False, "kind": "compatibility", "error": str(exc)}
+    from src.app.component_check import COMPONENT_REQUIREMENTS
+
+    data["requirements"] = COMPONENT_REQUIREMENTS
+    downloads.atomic_json(folder / "component.json", data)
+    return {"ok": True, "kind": "", "error": ""}
+
+
+def invalidate(component: Component) -> None:
+    """Пометить компонент неустановленным, сохранив файлы для переустановки из кэша."""
+    try:
+        (directory(component) / "component.json").unlink()
+    except FileNotFoundError:
+        pass
 
 
 def safe_path(root: Path, name: str) -> Path:
@@ -121,18 +174,18 @@ def installed_file(filename: str) -> Path | None:
     for component in load():
         if component.kind != "language" and filename in {f.name for f in component.files}:
             path = directory(component) / filename
-            if ready(component) and path.is_file():
+            if installed(component) and path.is_file():
                 return path
     return None
 
 
 def language_dirs() -> list[Path]:
-    return [directory(c) for c in load() if c.kind == "language" and ready(c)]
+    return [directory(c) for c in load() if c.kind == "language" and installed(c)]
 
 
 def ocr_params() -> dict:
     component = by_id("rapidocr")
-    if not ready(component):
+    if not installed(component):
         raise RuntimeError("Нужно подготовить оффлайн-распознавание: Настройки → Компоненты")
     folder = directory(component)
     return {"Det.model_path": str(folder / "PP-OCRv6_det_small.onnx"),
@@ -156,23 +209,25 @@ def _seed(item: downloads.Artifact, cache: Path, override: str = "") -> None:
             return
 
 
-def install(component: Component, progress=None, pause=None, models_override: str = "") -> Path:
+def install(component: Component, progress=None, pause=None, models_override: str = "",
+            repair: bool = False) -> Path:
     """Транзакционная установка группы файлов; старый указатель сохраняется при отказе."""
-    with downloads.installer_lock():
-        if ready(component):
-            return directory(component)
-        if ready(component, ignore_checker=True):
-            folder = directory(component)
-            if progress:
-                progress(component.size_bytes, component.size_bytes, "checking", "")
-            validate_component(component, folder)
-            from src.app.component_check import validation_identity
+    from src.app.component_check import COMPONENT_REQUIREMENTS
 
-            marker = folder / "component.json"
-            data = json.loads(marker.read_text(encoding="utf-8"))
-            data["checker"] = validation_identity()
-            downloads.atomic_json(marker, data)
-            return folder
+    with downloads.installer_lock():
+        if not repair:
+            if ready(component):
+                return directory(component)
+            if installed(component):
+                folder = directory(component)
+                if progress:
+                    progress(component.size_bytes, component.size_bytes, "checking", "")
+                validate_component(component, folder)
+                marker = folder / "component.json"
+                data = json.loads(marker.read_text(encoding="utf-8"))
+                data["requirements"] = COMPONENT_REQUIREMENTS
+                downloads.atomic_json(marker, data)
+                return folder
         cache = downloads.cache_root()
         files = []
         done = 0
@@ -225,10 +280,8 @@ def install(component: Component, progress=None, pause=None, models_override: st
                     stat = path.stat()
                     inventory[path.relative_to(stage).as_posix()] = {
                         "size": stat.st_size, "mtime": stat.st_mtime_ns, "sha256": downloads.digest(path)}
-            from src.app.component_check import validation_identity
-
             downloads.atomic_json(stage / "component.json", {"id": component.id, "revision": component.revision,
-                "checked": True, "inventory": inventory, "checker": validation_identity()})
+                "checked": True, "inventory": inventory, "requirements": COMPONENT_REQUIREMENTS})
             downloads.check_pause(pause)
             if final.exists():
                 old_marker = final / "component.json"

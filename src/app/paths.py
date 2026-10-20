@@ -1,24 +1,21 @@
 """Каталоги данных настольного приложения.
 
-Портативный режим: если рядом с программой есть каталог ``data``, настройки,
-проекты, кэш и лог лежат в нём. Переменная ``ILT_DATA_DIR`` задаёт каталог
-явно (dev-сайдкар и Flutter-хост). Иначе на Windows настройки — в ``%APPDATA%``,
-а проекты, кэш и лог — в ``%LOCALAPPDATA%``. Каталоги создаются при записи,
-не при импорте.
+Все изменяемые данные лежат в ``<папка приложения>/data``: настройки, проекты,
+кэш, лог, очередь и ключ LLM. Переменная ``ILT_DATA_DIR`` задаёт каталог явно
+(dev-сайдкар, Flutter-хост, сервер и диагностика). Каталоги создаются при
+записи, не при импорте.
 """
 
 from __future__ import annotations
 
 import os
-import sys
+import tempfile
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 
 from src.utils.paths import install_root
-
-APP_DIR_NAME = "ImageLocalizationTool"
 
 _current: ContextVar[AppPaths | None] = ContextVar("ilt_app_paths", default=None)
 
@@ -57,21 +54,21 @@ def default_paths() -> AppPaths:
     override = os.environ.get("ILT_DATA_DIR", "").strip()
     if override:
         return AppPaths(root=Path(override), portable=True)
-    data = install_root() / "data"
-    if data.is_dir():
-        return AppPaths(root=data, portable=True)
-    if sys.platform == "win32":
-        roaming = os.environ.get("APPDATA")
-        local = os.environ.get("LOCALAPPDATA")
-        roaming_root = Path(roaming) if roaming else Path.home() / "AppData" / "Roaming"
-        local_root = Path(local) if local else Path.home() / "AppData" / "Local"
-        return AppPaths(
-            root=local_root / APP_DIR_NAME,
-            portable=False,
-            settings_root=roaming_root / APP_DIR_NAME,
-        )
-    home = Path.home() / ".image-localization-tool"
-    return AppPaths(root=home, portable=False, settings_root=home)
+    return AppPaths(root=install_root() / "data", portable=True)
+
+
+def ensure_data_root() -> Path:
+    """Создать каталог данных и проверить запись. Ошибка без ухода в AppData."""
+    root = data_root()
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(dir=root, prefix=".write-", suffix=".tmp"):
+            pass
+    except OSError as exc:
+        raise RuntimeError(
+            "Папка приложения недоступна для записи, распакуйте portable в доступное место"
+        ) from exc
+    return root
 
 
 def _resolve(paths: AppPaths | None = None) -> AppPaths:

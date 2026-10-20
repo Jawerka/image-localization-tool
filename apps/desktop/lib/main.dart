@@ -25,7 +25,13 @@ Future<void> main(List<String> args) async {
   final state = ShellState(sidecar: SidecarController(attach: attach));
   state.secondary.onOpenFolder = platform.openFolder;
   if (!attach) {
-    await single.acquire(onPaths: (paths) => _onSecondLaunch(state, paths));
+    try {
+      await single.acquire(onPaths: (paths) => _onSecondLaunch(state, paths));
+    } on FileSystemException {
+      await single.dispose();
+      runApp(const StartupErrorApp());
+      return;
+    }
   }
   // Слушатель держит ссылку сам WidgetsBinding: он нужен, чтобы убрать
   // instance.json при штатном выходе. При незавершённом прогоне выход

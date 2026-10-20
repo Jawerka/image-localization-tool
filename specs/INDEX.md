@@ -1,6 +1,6 @@
 # Spec Index
 
-Обновлено: 2026-10-19. Это единственный реестр состояния спек. `tasks.md` хранит историю задач; текущий статус и приёмочный гейт определяются здесь. Доказательства текущей сборки и частичного маршрута — в [ACCEPTANCE_1.0.5.md](../docs/ACCEPTANCE_1.0.5.md).
+Обновлено: 2026-10-20. Это единственный реестр состояния спек. `tasks.md` хранит историю задач; текущий статус и приёмочный гейт определяются здесь. Доказательства текущей сборки и частичного маршрута — в [ACCEPTANCE_1.0.5.md](../docs/ACCEPTANCE_1.0.5.md).
 
 ## Статусы
 
@@ -79,6 +79,7 @@
 | 046-windows-staged-update | deploy | implemented | [tasks](046-windows-staged-update/tasks.md) 11/11; [research](046-windows-staged-update/research.md) | Linux/installer GUI остаются в 032/045 |
 | 047-incremental-typeset-composition | backend | implemented | [tasks](047-incremental-typeset-composition/tasks.md) 20/20; [research](047-incremental-typeset-composition/research.md) | — |
 | 048-sidebar-tabs | web → Flutter | in-progress | [tasks](048-sidebar-tabs/tasks.md) 3/5; Flutter-вкладки реализованы | `T004`/`T005` |
+| 049-viewer-layer-prefs | Flutter + backend | in-progress | [tasks](049-viewer-layer-prefs/tasks.md) 10/11; analyze, 142 Flutter-теста, pytest | `T009`: ручная проверка после перезапуска |
 
 ## Правило приёмки
 

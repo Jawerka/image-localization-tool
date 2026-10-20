@@ -58,8 +58,7 @@ def embedded_catalogs(path: Path) -> dict[str, bytes]:
 
 
 def create(root: Path, assets: Path, version: str, tag: str, checks: bool = False) -> dict:
-    required = [f"ImageLocalizationTool-{version}-windows-x64-setup.exe",
-                f"ImageLocalizationTool-{version}-windows-x64-portable.zip",
+    required = [f"ImageLocalizationTool-{version}-windows-x64-portable.zip",
                 f"ImageLocalizationTool-{version}-server-win64.zip",
                 f"ImageLocalizationTool-{version}-server-linux-x64.tar.gz",
                 f"ilt-runtime-manifest-{version}.json", f"ilt-component-manifest-{version}.json",
@@ -89,7 +88,7 @@ def create(root: Path, assets: Path, version: str, tag: str, checks: bool = Fals
 def verify_build(root: Path, assets: Path) -> None:
     """Пропуск пересборки допустим только для подтверждённых исходников и архивов."""
     proof = json.loads((root / "build/build-source.json").read_text())
-    if proof.get("source_sha") != source_digest(root) or len(proof.get("assets", [])) != 3:
+    if proof.get("source_sha") != source_digest(root) or len(proof.get("assets", [])) != 2:
         raise ValueError("Нет подтверждения сборки из текущих исходников. Пересоберите Windows.")
     for item in proof["assets"]:
         if Path(item["name"]).name != item["name"] or digest(assets / item["name"]) != item["sha256"]:
@@ -136,7 +135,7 @@ def main():
             if args.complete_windows:
                 version = read_app_version(ROOT)
                 names = [f"ImageLocalizationTool-{version}-{suffix}" for suffix in
-                         ("windows-x64-setup.exe", "windows-x64-portable.zip", "server-win64.zip")]
+                         ("windows-x64-portable.zip", "server-win64.zip")]
                 proof["assets"] = [{"name": n, "sha256": digest(assets / n)} for n in names]
             atomic_json(ROOT / "build/build-source.json", proof)
             return 0

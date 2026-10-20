@@ -50,6 +50,15 @@ def test_prepare_persists_ready_and_reuses_install(fixture_catalog, tmp_path):
     assert preparation.plan(fixture_catalog)["total"] == 0
 
 
+def test_plan_and_gate_do_not_hash_installed_files(fixture_catalog, tmp_path, monkeypatch):
+    manager = preparation.Manager(path=tmp_path / "queue.json")
+    manager.start(fixture_catalog)
+    wait(manager)
+    monkeypatch.setattr(downloads, "digest", lambda *_: (_ for _ in ()).throw(AssertionError("hash")))
+    assert preparation.plan(fixture_catalog)["total"] == 0
+    assert preparation.missing(fixture_catalog) == []
+
+
 def test_revalidation_does_not_prefetch_installed_files(fixture_catalog, tmp_path):
     """Смена проверяющей сборки не требует архивов уже установленных файлов."""
     manager = preparation.Manager(path=tmp_path / "queue.json")
@@ -89,6 +98,20 @@ def test_all_files_prefetch_before_serial_install(fixture_catalog, tmp_path, mon
     assert all(event[0] == "download" for event in events[:first_install])
     assert all(event[0] == "install" for event in events[first_install:])
     assert len([event for event in events if event[0] == "install"]) == 6
+
+
+def test_verify_repairs_corrupted_installed_component(fixture_catalog, tmp_path):
+    manager = preparation.Manager(path=tmp_path / "queue.json")
+    manager.start(fixture_catalog)
+    wait(manager)
+    component = component_catalog.by_id("lama")
+    folder = component_catalog.directory(component)
+    (folder / component.files[0].name).write_bytes(b"broken")
+    manager.start(fixture_catalog, verify=True)
+    wait(manager)
+    assert manager.current()["state"] == "ready", manager.current()
+    assert (folder / component.files[0].name).read_bytes() == b"lama"
+    assert manager.current().get("verified_at")
 
 
 def test_interrupted_state_becomes_paused(fixture_catalog, tmp_path):

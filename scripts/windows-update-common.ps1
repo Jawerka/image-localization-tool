@@ -183,7 +183,9 @@ function Stop-WindowsProcessTree([Diagnostics.Process] $Process) {
 function Test-WindowsReleaseHealth([string] $ReleaseRoot, [int] $TimeoutSeconds) {
     Assert-WindowsReleaseTree $ReleaseRoot -AllowLegacy
     $port = Get-FreeLoopbackPort
-    $probeRoot = Join-Path ([IO.Path]::GetTempPath()) ('ilt-probe-' + [guid]::NewGuid().ToString('N'))
+    $tmpRoot = Join-Path $ReleaseRoot 'data\tmp'
+    New-Item -ItemType Directory -Path $tmpRoot -Force | Out-Null
+    $probeRoot = Join-Path $tmpRoot ('ilt-probe-' + [guid]::NewGuid().ToString('N'))
     $dataRoot = Join-Path $probeRoot 'data'
     $componentRoot = Join-Path $probeRoot 'components'
     New-Item -ItemType Directory -Path $dataRoot, $componentRoot -Force | Out-Null
@@ -206,6 +208,7 @@ function Test-WindowsReleaseHealth([string] $ReleaseRoot, [int] $TimeoutSeconds)
         $start.EnvironmentVariables['ILT_INSTALL_ROOT'] = $ReleaseRoot
         $start.EnvironmentVariables['ILT_DATA_DIR'] = $dataRoot
         $start.EnvironmentVariables['ILT_COMPONENT_ROOT'] = $componentRoot
+        $start.EnvironmentVariables['ILT_SKIP_KEYRING_MIGRATION'] = '1'
         $process = New-Object Diagnostics.Process
         $process.StartInfo = $start
         $probeStep = 'запуск sidecar'

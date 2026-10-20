@@ -85,7 +85,7 @@ llama-server -m path\to\vision-model.gguf --port 8080
 |-------|-----------|
 | CLI | `config.json` → `llm_base_url`, или флаг `--llm-url` |
 | Окно | Настройки → адрес LLM. По умолчанию пусто |
-| Ключ API (окно) | В окне через «секрет»; хранится в keyring (`ImageLocalizationTool` / `llm`), в JSON не пишется |
+| Ключ API (окно) | В окне через «секрет»; хранится в `data/llm-api-key.txt`, в JSON не пишется |
 | Ключ API (CLI) | Флаг `--llm-api-key`, переменная `ILT_LLM_API_KEY`, или `llm_api_key` в `config.json` вручную (команда его туда не пишет) |
 
 Ключ уходит в заголовке `Authorization: Bearer` на заданный `llm_base_url` — и в `/v1/models`, и в `/v1/chat/completions`. Перед вводом ключа проверьте адрес. «Проверить» с заданным ключом шлёт ещё и минимальный запрос `chat/completions` (`max_tokens: 1`), чтобы отличить неверный ключ от публичного списка моделей.
@@ -142,9 +142,13 @@ python -m src.app page.png папка
 
 | Режим | Где |
 |-------|-----|
-| Портативный | рядом с программой есть каталог `data/` |
-| Windows (обычный) | `%APPDATA%\ImageLocalizationTool\`, `%LOCALAPPDATA%\ImageLocalizationTool\` |
-| Другие ОС | `~/.image-localization-tool/` |
+| Данные и состояние | `<папка приложения>\data` (из исходников — `data/` в корне репозитория) |
+| Кэш загрузок | `<папка приложения>\.downloads` |
+| Явный override данных | `ILT_DATA_DIR` |
+
+`%APPDATA%\ImageLocalizationTool` и `%LOCALAPPDATA%\ImageLocalizationTool` больше
+не используются. Старые данные там не переносятся автоматически — скопируйте
+их в `data/` вручную. Папка приложения должна быть доступна на запись.
 
 Подробности API, SSE, горячих клавиш и хранения проектов: [docs/APP.md](docs/APP.md).
 
@@ -174,16 +178,18 @@ python scripts\build-extension.py
 Версия задаётся в `src/app/__init__.py` (`__version__`).
 
 ```powershell
-# Нужны: venv с зависимостями, PyInstaller, Flutter >= 3.47.7, Inno Setup 6 (для установщика)
+# Нужны: venv с зависимостями, PyInstaller, Flutter >= 3.47.7
 .\scripts\build-windows.ps1
-.\scripts\build-windows.ps1 -SkipInno
 .\scripts\build-windows.ps1 -SkipPyInstaller
 ```
 
 Результат:
 
 - `dist\ImageLocalizationTool\` — `desktop\` (Flutter-хост), `sidecar\` (Python), `web\`, `fonts\`, рядом копируются `models\` если они есть.
-- Установщик: `dist\ImageLocalizationTool-<version>-windows-x64-setup.exe`.
+- Портативный ZIP: `dist\ImageLocalizationTool-<version>-windows-x64-portable.zip`.
+
+Windows поставляется только портативным ZIP. `setup.exe` и Inno Setup больше не
+собираются; `installer\ImageLocalizationTool.iss` оставлен как исторический файл.
 
 Проверка каталога сборки: `python scripts\smoke_dist.py`.
 
@@ -221,11 +227,10 @@ CUDA-сборку torch для локальной разработки став�
 
 ```powershell
 .\scripts\deploy-windows.ps1              # mirror dist -> apps (без models)
-.\scripts\deploy-windows.ps1 -Build -SkipInno
+.\scripts\deploy-windows.ps1 -Build
 .\scripts\deploy-lan.ps1                  # src/web -> CT113, restart ilt.service
 .\scripts\deploy-lan.ps1 -DryRun
 .\scripts\deploy-extension.ps1            # dist/chromium -> apps/extension/...
-.\scripts\check-inno.ps1                  # ISCC present? optional -Install via winget
 ```
 
 **Headless на домашнем ПК / в LAN:** соберите или запустите из исходников `python -m src.app --headless --remote`, откройте порт 8765 в брандмауэре для частной сети, сопрягите расширение или клиент по `/v1`. Не выставляйте слушатель в интернет без дополнительной защиты — протокол без шифрования, рассчитан на локальную сеть.

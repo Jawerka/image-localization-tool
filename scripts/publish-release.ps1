@@ -5,7 +5,7 @@
 
 .DESCRIPTION
   Phase Windows (local):
-    1. check local assets (setup, portable zip, server zip, argos wheel, extensions);
+    1. check local assets (portable zip, server zip, argos wheel, extensions);
     2. rebuild release runtime manifest from dist/locks/packs.json;
     3. write dist/SHA256SUMS-windows.txt;
     4. with -ResetTag delete the old release, its tag and assets;
@@ -187,10 +187,9 @@ $notes = Get-NotesFile -Version $version
 $python = Resolve-BuildPython
 
 if ($Phase -eq 'Windows') {
-    $setup = Join-Path $RepoRoot "dist\ImageLocalizationTool-$version-windows-x64-setup.exe"
     $portable = Join-Path $RepoRoot "dist\ImageLocalizationTool-$version-windows-x64-portable.zip"
     $serverZip = Join-Path $RepoRoot "dist\ImageLocalizationTool-$version-server-win64.zip"
-    foreach ($path in @($setup, $portable, $serverZip)) {
+    foreach ($path in @($portable, $serverZip)) {
         if (-not (Test-Path -LiteralPath $path)) {
             throw "Missing asset: $path. Build it first (build-windows.ps1, package-portable.ps1, package-server.ps1)."
         }
@@ -212,7 +211,7 @@ if ($Phase -eq 'Windows') {
     $manifest = Join-Path $RepoRoot "dist\ilt-runtime-manifest-$version.json"
     $components = Join-Path $RepoRoot "dist\ilt-component-manifest-$version.json"
     Copy-Item -LiteralPath (Join-Path $RepoRoot 'src\app\component_manifest.json') -Destination $components -Force
-    $assets = @($setup, $portable, $serverZip, $manifest, $components) + $extensions.FullName
+    $assets = @($portable, $serverZip, $manifest, $components) + $extensions.FullName
     $sumLines = @($assets | ForEach-Object { Get-Sha256Line -Path $_ })
     $sumPath = Join-Path $RepoRoot 'dist\SHA256SUMS-windows.txt'
     $sumLines | Set-Content -LiteralPath $sumPath -Encoding ASCII

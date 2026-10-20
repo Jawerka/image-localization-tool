@@ -187,6 +187,7 @@ class BatchCounts {
 class WorkspaceState extends ChangeNotifier {
   WorkspaceState() {
     viewer.addListener(notifyListeners);
+    viewer.onLayersChanged = _persistLayers;
   }
 
   IltApi? _api;
@@ -199,6 +200,8 @@ class WorkspaceState extends ChangeNotifier {
   List<RecentEntry> _recent = const [];
   Map<String, dynamic> _settings = const {};
   Map<String, dynamic>? _preview;
+  Map<String, dynamic>? _pendingLayerSettings;
+  bool _savingLayers = false;
   Map<String, dynamic> _llm = const {};
   String _device = '';
   String _version = '';
@@ -368,6 +371,7 @@ class WorkspaceState extends ChangeNotifier {
     _modelsReady = data['models_ready'] == true;
     _errorText = null;
     _pruneSelection();
+    _syncViewerLayers();
     _syncViewerPage();
     _syncViewerInspector();
     notifyListeners();
@@ -385,6 +389,67 @@ class WorkspaceState extends ChangeNotifier {
     _syncViewerPage();
     _syncViewerInspector();
     notifyListeners();
+  }
+
+  /// Применить сохранённую видимость слоёв; старые настройки — оба включены.
+  void _syncViewerLayers() {
+    final boxes = _settings['viewer_show_boxes'];
+    final mask = _settings['viewer_show_mask'];
+    viewer.restoreLayers(
+      boxes: boxes is bool ? boxes : true,
+      mask: mask is bool ? mask : true,
+    );
+  }
+
+  /// Сохранить слои: последний патч побеждает, запросы идут по одному.
+  void _persistLayers(bool boxes, bool mask) {
+    _settings = {
+      ..._settings,
+      'viewer_show_boxes': boxes,
+      'viewer_show_mask': mask,
+    };
+    _pendingLayerSettings = {
+      'viewer_show_boxes': boxes,
+      'viewer_show_mask': mask,
+    };
+    unawaited(_flushLayerSettings());
+  }
+
+  Future<void> _flushLayerSettings() async {
+    if (_savingLayers) return;
+    final api = _api;
+    if (api == null) {
+      _pendingLayerSettings = null;
+      return;
+    }
+    _savingLayers = true;
+    try {
+      while (_pendingLayerSettings != null) {
+        final patch = _pendingLayerSettings!;
+        _pendingLayerSettings = null;
+        try {
+          await api.putJson('/api/settings', patch);
+        } on ApiException catch (error) {
+          _errorText = apiErrorMessage(error);
+          notifyListeners();
+          // Более новое переключение не теряем: пробуем отправить его.
+          if (_pendingLayerSettings == null) return;
+        } catch (error) {
+          _errorText = 'Не удалось сохранить слои: $error';
+          notifyListeners();
+          if (_pendingLayerSettings == null) return;
+        }
+      }
+    } finally {
+      _savingLayers = false;
+    }
+  }
+
+  /// Дождаться записи слоёв перед штатным выходом.
+  Future<void> whenLayersSaved() async {
+    while (_savingLayers || _pendingLayerSettings != null) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
   }
 
   /// Границы кегля и стили проекта для инспектора (024).

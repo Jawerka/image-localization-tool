@@ -165,6 +165,7 @@ def _wait_until_up(port: int) -> None:
 
 def _api(tmp_path, monkeypatch):
     _install_keyring(monkeypatch)
+    monkeypatch.setenv("ILT_DATA_DIR", str(tmp_path / "data"))
     web = tmp_path / "web"
     (web / "css").mkdir(parents=True)
     (web / "index.html").write_text("ILT_INDEX_OK", encoding="utf-8")
@@ -602,62 +603,18 @@ def test_translate_readiness_gate_does_not_queue_page(api: Api, tmp_path, monkey
         pass
 
     monkeypatch.setattr(worker, "ProcessWorker", _ManagedWorker)
-    monkeypatch.setattr(preparation, "plan", lambda _settings: {
-        "state": "idle", "items": [{"title": "PyTorch CUDA", "ready": False, "install_bytes": 0}],
-    })
+    monkeypatch.setattr(preparation, "missing", lambda _settings: ["PyTorch CUDA"])
+    monkeypatch.setattr(preparation, "plan", lambda _settings: (_ for _ in ()).throw(
+        AssertionError("гейт не должен строить полный план")))
     api.state.queue.worker = _ManagedWorker()
 
     status, _, body = api.json(
         "POST", "/api/jobs/translate", {"scope": "page", "page_id": page_id},
     )
     assert status == 409
-    assert "проверка или активация: PyTorch CUDA" in body["error"]
+    assert "Не хватает компонентов: PyTorch CUDA" in body["error"]
     assert api.store.page_status(payload["project"]["id"], page_id)["status"] == "idle"
     assert api.worker.calls == []
-
-
-def test_revalidate_components_checks_installed_without_download(api: Api, monkeypatch):
-    from src.app import preparation
-
-    class _Manager:
-        def __init__(self):
-            self.started = []
-
-        def busy(self):
-            return False
-
-        def start(self, selection):
-            self.started.append(selection)
-
-    manager = _Manager()
-    api.state._preparation_manager = manager
-    monkeypatch.setattr(preparation, "plan", lambda _settings: {
-        "items": [{"ready": False, "install_bytes": 0}, {"ready": True, "install_bytes": 0}],
-    })
-    assert api.state.revalidate_components() is True
-    assert manager.started
-
-
-def test_revalidate_components_never_starts_downloads(api: Api, monkeypatch):
-    from src.app import preparation
-
-    class _Manager:
-        def __init__(self):
-            self.started = []
-
-        def busy(self):
-            return False
-
-        def start(self, selection):
-            self.started.append(selection)
-
-    manager = _Manager()
-    api.state._preparation_manager = manager
-    monkeypatch.setattr(preparation, "plan", lambda _settings: {
-        "items": [{"ready": False, "install_bytes": 1024}],
-    })
-    assert api.state.revalidate_components() is False
-    assert manager.started == []
 
 
 def test_thumb_and_unknown_image_kind(api: Api, tmp_path):
@@ -1532,6 +1489,29 @@ def test_unsupported_offline_preparation_does_not_change_settings(api: Api, monk
     assert status == 400
     assert "не поддерживается" in payload["error"]
     assert api.state.settings.to_dict() == before
+
+
+def test_preparation_verify_starts_manager_verify(api: Api):
+    class _Manager:
+        def __init__(self):
+            self.started = None
+
+        def busy(self):
+            return False
+
+        def current(self):
+            return {"state": "idle"}
+
+        def start(self, selection, verify=False):
+            self.started = (selection, verify)
+            return {"selection": selection, "state": "planning"}
+
+    manager = _Manager()
+    api.state._preparation_manager = manager
+    status, _, payload = api.json("POST", "/api/preparation/verify", {})
+    assert status == 202
+    assert payload["state"] == "planning"
+    assert manager.started[1] is True
 
 
 def test_package_save_load_reorder_close(api: Api, tmp_path):

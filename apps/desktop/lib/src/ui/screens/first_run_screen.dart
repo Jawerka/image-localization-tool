@@ -95,7 +95,7 @@ class _FirstRunScreenState extends State<FirstRunScreen> {
     state.dismissFirstRun();
   }
 
-  /// Сохранить ключ из мастера в keyring (в настройках JSON он не хранится).
+  /// Сохранить ключ из мастера в файл данных (в настройках JSON он не хранится).
   Future<void> _saveApiKey() async {
     final api = state.api;
     final key = '${_draft['api_key'] ?? ''}'.trim();

@@ -37,11 +37,11 @@ String? installRootDir({
   return parent;
 }
 
-/// Корни данных в порядке приоритета: env → портативный `data` → `%LOCALAPPDATA%`.
+/// Корни данных в порядке приоритета: env → `repoRoot/data` (dev) → `installRoot/data`.
 ///
-/// Порядок повторяет `src/app/paths.py`: портативный режим — каталог `data`
-/// в корне установки; `desktop/data` (ассеты Flutter) пользовательским
-/// каталогом не считается. Иначе на Windows `%LOCALAPPDATA%\ImageLocalizationTool`.
+/// Порядок повторяет `src/app/paths.py`: изменяемые данные всегда лежат в
+/// каталоге `data` рядом с приложением или с корнем репозитория. `desktop/data`
+/// (ассеты Flutter) пользовательским каталогом не считается.
 List<String> dataRootCandidates({
   Map<String, String>? environment,
   String? executableDir,
@@ -52,25 +52,22 @@ List<String> dataRootCandidates({
   final explicit = (env['ILT_DATA_DIR'] ?? '').trim();
   if (explicit.isNotEmpty) roots.add(explicit);
   if (repoRoot != null && repoRoot.isNotEmpty) {
-    final portable = '$repoRoot/data';
-    if (Directory(portable).existsSync()) roots.add(portable);
+    roots.add('$repoRoot/data');
   }
   final installRoot = installRootDir(
     environment: environment,
     executableDir: executableDir,
   );
   if (installRoot != null && installRoot.isNotEmpty) {
-    final portable = '$installRoot/data';
-    if (Directory(portable).existsSync()) roots.add(portable);
-  }
-  final localAppData = (env['LOCALAPPDATA'] ?? '').trim();
-  if (localAppData.isNotEmpty) {
-    roots.add('$localAppData/ImageLocalizationTool');
+    roots.add('$installRoot/data');
   }
   return roots;
 }
 
-/// Каталог для записи `instance.json` (первый кандидат или текущий каталог).
+/// Каталог для записи `instance.json`.
+///
+/// Явный `ILT_DATA_DIR` выигрывает, иначе в dev — `repoRoot/data`, в сборке —
+/// `installRoot/data`. Каталог создаёт вызывающий.
 String resolveDataRoot({
   Map<String, String>? environment,
   String? executableDir,

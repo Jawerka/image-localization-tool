@@ -1,20 +1,31 @@
-"""Настройки приложения: кламп, миграция, keyring и пустой адрес LLM."""
+"""Настройки приложения: кламп, миграция, ключ в data и пустой адрес LLM."""
 
 import json
+import os
+import stat
 import sys
 import types
 from pathlib import Path
 
+import pytest
+
 from src.app.paths import (
     AppPaths,
     data_root,
+    ensure_data_root,
     is_portable,
     logs_dir,
     projects_dir,
     settings_path,
     using_paths,
 )
-from src.app.settings import AppSettings, get_api_key, set_api_key
+from src.app.settings import (
+    AppSettings,
+    get_api_key,
+    migrate_legacy_api_key,
+    migration_warning,
+    set_api_key,
+)
 from src.config import Config
 
 
@@ -74,6 +85,38 @@ def test_dock_position_normalizes():
     assert AppSettings(dock_position="top").to_dict()["dock_position"] == "top"
     assert AppSettings.from_dict({"dock_position": "top"}).dock_position == "top"
     assert AppSettings.from_dict({"dock_position": 3}).dock_position == "bottom"
+
+
+def test_viewer_layers_default_true_and_persist(tmp_path):
+    assert AppSettings().viewer_show_boxes is True
+    assert AppSettings().viewer_show_mask is True
+    assert Config().viewer_show_boxes is True
+    assert Config().viewer_show_mask is True
+
+    for boxes in (False, True):
+        for mask in (False, True):
+            path = tmp_path / f"layers-{boxes}-{mask}.json"
+            AppSettings(viewer_show_boxes=boxes, viewer_show_mask=mask).save(path)
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            assert payload["viewer_show_boxes"] is boxes
+            assert payload["viewer_show_mask"] is mask
+            loaded, warnings = AppSettings.load(path)
+            assert warnings == []
+            assert loaded.viewer_show_boxes is boxes
+            assert loaded.viewer_show_mask is mask
+
+    path = tmp_path / "old-settings.json"
+    path.write_text(json.dumps({"schema": 1, "theme": "dark"}), encoding="utf-8")
+    old, warnings = AppSettings.load(path)
+    assert warnings == []
+    assert old.viewer_show_boxes is True
+    assert old.viewer_show_mask is True
+
+    fallback = AppSettings.from_dict(
+        {"viewer_show_boxes": "maybe", "viewer_show_mask": 0}
+    )
+    assert fallback.viewer_show_boxes is True
+    assert fallback.viewer_show_mask is False
 
 
 def test_missing_file_and_empty_llm_url(tmp_path):
@@ -158,6 +201,7 @@ def test_broken_json_is_renamed_not_overwritten(tmp_path):
 
 
 def test_save_roundtrip_has_schema_without_secret(tmp_path, monkeypatch):
+    monkeypatch.setenv("ILT_DATA_DIR", str(tmp_path / "data"))
     bag = {}
     module = types.ModuleType("keyring")
 
@@ -180,6 +224,9 @@ def test_save_roundtrip_has_schema_without_secret(tmp_path, monkeypatch):
     settings = AppSettings(theme="dark", llm_base_url="")
     assert settings.set_api_key("secret") is True
     assert settings.get_api_key() == "secret"
+    key_file = tmp_path / "data" / "llm-api-key.txt"
+    assert key_file.read_text(encoding="utf-8").strip() == "secret"
+    assert bag == {}
     config = settings.to_config()
     assert config.llm_api_key == "secret"
     path = tmp_path / "settings.json"
@@ -196,10 +243,47 @@ def test_save_roundtrip_has_schema_without_secret(tmp_path, monkeypatch):
     assert loaded.theme == "dark"
     assert loaded.llm_base_url == ""
     assert settings.set_api_key("") is True
+    assert not key_file.exists()
     assert get_api_key() == ""
 
 
-def test_keyring_errors_are_soft(monkeypatch):
+def test_key_is_imported_from_keyring_once(tmp_path, monkeypatch):
+    monkeypatch.setenv("ILT_DATA_DIR", str(tmp_path / "data"))
+    bag = {("ImageLocalizationTool", "llm"): "legacy-secret"}
+    module = types.ModuleType("keyring")
+    module.get_password = lambda service, username: bag.get((service, username))
+    module.set_password = lambda service, username, value: bag.__setitem__((service, username), value)
+    module.delete_password = lambda service, username: bag.pop((service, username), None)
+    monkeypatch.setitem(sys.modules, "keyring", module)
+
+    assert get_api_key() == ""
+    assert bag
+    assert migrate_legacy_api_key() is True
+    key_file = tmp_path / "data" / "llm-api-key.txt"
+    assert key_file.read_text(encoding="utf-8").strip() == "legacy-secret"
+    assert bag == {}
+    assert migrate_legacy_api_key() is True
+
+
+def test_failed_migration_keeps_keyring(tmp_path, monkeypatch):
+    blocker = tmp_path / "blocked"
+    blocker.write_text("not a folder", encoding="utf-8")
+    monkeypatch.setenv("ILT_DATA_DIR", str(blocker))
+    bag = {("ImageLocalizationTool", "llm"): "legacy-secret"}
+    module = types.ModuleType("keyring")
+    module.get_password = lambda service, username: bag.get((service, username))
+    module.set_password = lambda service, username, value: bag.__setitem__((service, username), value)
+    module.delete_password = lambda service, username: bag.pop((service, username), None)
+    monkeypatch.setitem(sys.modules, "keyring", module)
+
+    assert migrate_legacy_api_key() is False
+    assert bag == {("ImageLocalizationTool", "llm"): "legacy-secret"}
+    assert "keyring" in migration_warning()
+    assert "legacy-secret" not in migration_warning()
+
+
+def test_keyring_errors_are_soft(tmp_path, monkeypatch):
+    monkeypatch.setenv("ILT_DATA_DIR", str(tmp_path / "data"))
     module = types.ModuleType("keyring")
 
     def boom(*_args, **_kwargs):
@@ -210,9 +294,41 @@ def test_keyring_errors_are_soft(monkeypatch):
     module.delete_password = boom
     monkeypatch.setitem(sys.modules, "keyring", module)
     assert get_api_key() == ""
-    assert set_api_key("x") is False
+    assert migrate_legacy_api_key() is True
+    assert set_api_key("x") is True
+    assert get_api_key() == "x"
+    assert set_api_key("") is True
     assert AppSettings().get_api_key() == ""
-    assert AppSettings().set_api_key("x") is False
+    assert AppSettings().set_api_key("x") is True
+    assert AppSettings().get_api_key() == "x"
+    assert AppSettings().set_api_key("") is True
+
+
+def test_key_file_is_private_on_posix(tmp_path, monkeypatch):
+    if os.name == "nt":
+        pytest.skip("Windows не поддерживает POSIX-права")
+    monkeypatch.setenv("ILT_DATA_DIR", str(tmp_path / "data"))
+    assert set_api_key("secret") is True
+    mode = stat.S_IMODE((tmp_path / "data" / "llm-api-key.txt").stat().st_mode)
+    assert mode == 0o600
+
+
+def test_appdata_paths_are_cleared_from_settings(tmp_path, monkeypatch):
+    local = tmp_path / "local"
+    roaming = tmp_path / "roam"
+    monkeypatch.setenv("LOCALAPPDATA", str(local))
+    monkeypatch.setenv("APPDATA", str(roaming))
+    keep = tmp_path / "custom"
+
+    settings = AppSettings(
+        components_dir=str(local / "ImageLocalizationTool" / "components"),
+        models_dir=str(roaming / "ImageLocalizationTool" / "models"),
+        components_previous_dir=str(keep),
+    )
+
+    assert settings.components_dir == ""
+    assert settings.models_dir == ""
+    assert settings.components_previous_dir == str(keep)
 
 
 def test_paths_override_does_not_create_directories(tmp_path):
@@ -246,29 +362,33 @@ def test_data_dir_env_override(tmp_path, monkeypatch):
     assert not (tmp_path / "custom").exists()
 
 
-def test_portable_and_platform_fallbacks(tmp_path, monkeypatch):
-    monkeypatch.setattr("src.app.paths.install_root", lambda: tmp_path)
-    data = tmp_path / "data"
-    data.mkdir()
+def test_data_root_always_lives_in_app_folder(tmp_path, monkeypatch):
+    monkeypatch.delenv("ILT_DATA_DIR", raising=False)
+    monkeypatch.setattr("src.app.paths.install_root", lambda: tmp_path / "app")
+    monkeypatch.setenv("APPDATA", str(tmp_path / "roam"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    data = tmp_path / "app" / "data"
+
     assert is_portable() is True
     assert data_root() == data
     assert settings_path() == data / "settings.json"
     assert projects_dir() == data / "projects"
     assert logs_dir() == data / "logs"
-    assert not (data / "projects").exists()
+    assert not data.exists()
 
-    data.rmdir()
-    monkeypatch.setenv("APPDATA", str(tmp_path / "roam"))
-    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
-    monkeypatch.setattr("src.app.paths.sys.platform", "win32")
-    assert is_portable() is False
-    assert settings_path() == tmp_path / "roam" / "ImageLocalizationTool" / "settings.json"
-    assert projects_dir() == tmp_path / "local" / "ImageLocalizationTool" / "projects"
-    assert logs_dir() == tmp_path / "local" / "ImageLocalizationTool" / "logs"
+    data.mkdir(parents=True)
+    assert data_root() == data
 
-    home = tmp_path / "home"
-    monkeypatch.setattr("src.app.paths.sys.platform", "linux")
-    monkeypatch.setattr("src.app.paths.Path.home", lambda: home)
-    assert data_root() == home / ".image-localization-tool"
-    assert settings_path() == home / ".image-localization-tool" / "settings.json"
-    assert is_portable() is False
+
+def test_ensure_data_root_creates_folder(tmp_path, monkeypatch):
+    monkeypatch.setenv("ILT_DATA_DIR", str(tmp_path / "data"))
+    assert ensure_data_root() == tmp_path / "data"
+    assert (tmp_path / "data").is_dir()
+
+
+def test_ensure_data_root_reports_unwritable_location(tmp_path):
+    blocker = tmp_path / "blocked"
+    blocker.write_text("not a folder", encoding="utf-8")
+    with using_paths(AppPaths(root=blocker, portable=True)):
+        with pytest.raises(RuntimeError, match="недоступна для записи"):
+            ensure_data_root()

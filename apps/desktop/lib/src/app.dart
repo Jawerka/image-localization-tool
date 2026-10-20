@@ -17,6 +17,36 @@ import 'ui/shell.dart';
 import 'ui/theme.dart';
 import 'ui/viewer/viewer_shortcuts.dart';
 
+/// Причина отказа записи в каталог данных: portable нужно перенести.
+const dataRootErrorText =
+    'Папка приложения недоступна для записи. '
+    'Распакуйте portable ZIP в папку, доступную для записи.';
+
+/// Окно ошибки старта: показывается до запуска сайдкара.
+class StartupErrorApp extends StatelessWidget {
+  const StartupErrorApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Image Localization Tool',
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Text(
+              dataRootErrorText,
+              key: const Key('startup-data-root-error'),
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Корневое приложение хоста: слушает [ShellState] и рисует каркас.
 class IltApp extends StatelessWidget {
   const IltApp({super.key, required this.state});

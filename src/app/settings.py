@@ -1,15 +1,17 @@
 """Настройки настольного приложения.
 
-Ключ API в JSON не пишется: он лежит в keyring (служба ``ImageLocalizationTool``,
-имя ``llm``). Адрес LLM по умолчанию пустой — LAN-адрес из ``Config`` сюда не
-подставляется.
+Ключ API в JSON не пишется: он лежит в ``<data>/llm-api-key.txt``. При первом
+запуске новой версии ключ один раз переносится из keyring. Адрес LLM по
+умолчанию пустой — LAN-адрес из ``Config`` сюда не подставляется.
 """
 
 from __future__ import annotations
 
 import ipaddress
 import json
+import os
 import re
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -18,6 +20,8 @@ from src.config import Config
 SCHEMA_VERSION = 1
 _KEYRING_SERVICE = "ImageLocalizationTool"
 _KEYRING_USERNAME = "llm"
+_KEY_FILE_NAME = "llm-api-key.txt"
+_migration_warning = ""
 
 _THEMES = ("system", "dark", "light")
 _OCR = ("vlm", "rapid")
@@ -31,34 +35,135 @@ _EXPORT_CONFLICTS = ("rename", "overwrite", "skip")
 _BIND_HOST = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,253}[A-Za-z0-9])?$")
 
 
-def get_api_key() -> str:
-    """Ключ LLM из keyring. При любой ошибке хранилища — пустая строка."""
+def _key_path() -> Path:
+    from src.app.paths import data_root
+
+    return data_root() / _KEY_FILE_NAME
+
+
+def _keyring_get() -> str:
     try:
         import keyring
 
         value = keyring.get_password(_KEYRING_SERVICE, _KEYRING_USERNAME)
     except Exception:
         return ""
-    if value is None:
-        return ""
-    return str(value)
+    return "" if value is None else str(value)
 
 
-def set_api_key(value: str) -> bool:
-    """Записать ключ LLM. Пустая строка удаляет запись. False — keyring отказал."""
+def _keyring_delete() -> None:
     try:
         import keyring
 
-        if not value:
-            try:
-                keyring.delete_password(_KEYRING_SERVICE, _KEYRING_USERNAME)
-            except Exception:
-                keyring.set_password(_KEYRING_SERVICE, _KEYRING_USERNAME, "")
-        else:
-            keyring.set_password(_KEYRING_SERVICE, _KEYRING_USERNAME, value)
-        return True
+        keyring.delete_password(_KEYRING_SERVICE, _KEYRING_USERNAME)
     except Exception:
+        pass
+
+
+def _write_key_file(value: str) -> bool:
+    path = _key_path()
+    temporary = ""
+    descriptor = -1
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=".llm-api-key-")
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            descriptor = -1
+            handle.write(value + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        return True
+    except OSError:
+        if descriptor >= 0:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        if temporary:
+            try:
+                os.unlink(temporary)
+            except OSError:
+                pass
         return False
+
+
+def get_api_key() -> str:
+    """Ключ LLM из файла данных. Keyring при обычном чтении не трогается."""
+    path = _key_path()
+    try:
+        return path.read_text(encoding="utf-8-sig").strip()
+    except (OSError, UnicodeError):
+        return ""
+
+
+def migration_warning() -> str:
+    """Понятное предупреждение, если ключ не удалось перенести из keyring."""
+    return _migration_warning
+
+
+def migrate_legacy_api_key() -> bool:
+    """Один раз перенести ключ из keyring в файл данных.
+
+    Вызывается при старте приложения. Если файл уже есть, keyring не читается.
+    ``ILT_SKIP_KEYRING_MIGRATION=1`` отключает миграцию для диагностики.
+    Старая запись удаляется только после успешной записи файла. ``False`` —
+    ключ остался в keyring, потому что файл записать не удалось.
+    """
+    global _migration_warning
+    _migration_warning = ""
+    path = _key_path()
+    if os.environ.get("ILT_SKIP_KEYRING_MIGRATION") == "1":
+        return True
+    if path.exists():
+        return True
+    legacy = _keyring_get().strip()
+    if not legacy:
+        return True
+    if _write_key_file(legacy):
+        _keyring_delete()
+        return True
+    _migration_warning = (
+        "Не удалось перенести ключ LLM в data. Ключ оставлен в keyring; "
+        "проверьте права на папку и перезапустите приложение."
+    )
+    return False
+
+
+def set_api_key(value: str) -> bool:
+    """Записать ключ LLM в файл. Пустая строка удаляет файл и запись keyring."""
+    text = str(value or "").strip()
+    path = _key_path()
+    if not text:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            return False
+        _keyring_delete()
+        return True
+    if not _write_key_file(text):
+        return False
+    _keyring_delete()
+    return True
+
+
+def _outside_appdata(value: str) -> str:
+    """Очистить путь внутри ``%APPDATA%``/``%LOCALAPPDATA%`` из старых настроек."""
+    text = _raw_text(value, "")
+    if not text:
+        return ""
+    target = os.path.normcase(os.path.abspath(text))
+    for name in ("APPDATA", "LOCALAPPDATA"):
+        raw = (os.environ.get(name) or "").strip()
+        if not raw:
+            continue
+        root = os.path.normcase(os.path.abspath(raw))
+        try:
+            if os.path.commonpath([target, root]) == root:
+                return ""
+        except ValueError:
+            continue
+    return text
 
 
 def _as_int(value, default: int, low: int, high: int) -> int:
@@ -241,6 +346,8 @@ class AppSettings:
     components_previous_dir: str = ""
     single_key_shortcuts: bool = True
     dock_position: str = "bottom"  # top|bottom
+    viewer_show_boxes: bool = True
+    viewer_show_mask: bool = True
     first_run_complete: bool = False
     window_x: int | None = None
     window_y: int | None = None
@@ -305,11 +412,13 @@ class AppSettings:
         self.export_format = export_format if export_format in _EXPORT_FORMATS else "png"
         self.export_jpeg_quality = _as_int(self.export_jpeg_quality, 90, 1, 100)
         self.export_conflict = _choice(self.export_conflict, _EXPORT_CONFLICTS, "rename")
-        self.models_dir = _raw_text(self.models_dir, "")
-        self.components_dir = _raw_text(self.components_dir, "")
-        self.components_previous_dir = _raw_text(self.components_previous_dir, "")
+        self.models_dir = _outside_appdata(self.models_dir)
+        self.components_dir = _outside_appdata(self.components_dir)
+        self.components_previous_dir = _outside_appdata(self.components_previous_dir)
         self.single_key_shortcuts = _as_bool(self.single_key_shortcuts, True)
         self.dock_position = _choice(self.dock_position, _DOCK_POSITIONS, "bottom")
+        self.viewer_show_boxes = _as_bool(self.viewer_show_boxes, True)
+        self.viewer_show_mask = _as_bool(self.viewer_show_mask, True)
         self.first_run_complete = _as_bool(self.first_run_complete, False)
         self.window_x = _optional_int(self.window_x)
         self.window_y = _optional_int(self.window_y)
@@ -366,6 +475,8 @@ class AppSettings:
             "components_previous_dir": self.components_previous_dir,
             "single_key_shortcuts": self.single_key_shortcuts,
             "dock_position": self.dock_position,
+            "viewer_show_boxes": self.viewer_show_boxes,
+            "viewer_show_mask": self.viewer_show_mask,
             "first_run_complete": self.first_run_complete,
             "window_x": self.window_x,
             "window_y": self.window_y,
@@ -434,8 +545,8 @@ class AppSettings:
     def to_config(self) -> Config:
         """Поля пайплайна. Пустой ``llm_base_url`` остаётся пустым, без дефолта из Config.
 
-        Ключ API берётся из keyring: он нужен клиентам LLM, но в снапшоты
-        заданий не попадает.
+        Ключ API берётся из файла данных: он нужен клиентам LLM, но в
+        снапшоты заданий не попадает.
         """
         self._normalize()
         config = Config()

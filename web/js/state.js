@@ -8,7 +8,8 @@ import {
   shouldPushHistory,
 } from "./deferred_edits.js";
 
-const HISTORY_LIMIT = 50;
+const HISTORY_LIMIT = 1000;
+const HISTORY_MAX_BYTES = 256 * 1024 * 1024;
 
 export const DEFAULT_SETTINGS = {
   theme: "system",
@@ -63,6 +64,8 @@ const STAGE_LABELS = {
 const listeners = new Set();
 const histories = new Map();
 const acked = new Map();
+/** Число штрихов, запечённых в маску версии (`pageId|version`). */
+const strokeCounts = new Map();
 
 let state = emptyState();
 let coalesceKey = "";
@@ -320,8 +323,71 @@ function normalizeRecent(data, settings) {
 }
 
 function historyOf(pageId) {
-  if (!histories.has(pageId)) histories.set(pageId, { past: [], future: [] });
+  if (!histories.has(pageId)) {
+    histories.set(pageId, { past: [], future: [], pastBytes: 0, futureBytes: 0 });
+  }
   return histories.get(pageId);
+}
+
+function strokeKey(pageId, version) {
+  return `${pageId}|${version}`;
+}
+
+/** Число штрихов, уже входящих в маску версии (null — неизвестно). */
+export function strokeCountForVersion(pageId, version) {
+  const count = strokeCounts.get(strokeKey(String(pageId), Number(version)));
+  return count == null ? null : count;
+}
+
+function pushHistory(history, side, document, bytes) {
+  const list = side === "past" ? history.past : history.future;
+  const bytesKey = side === "past" ? "pastBytes" : "futureBytes";
+  list.push({ document, bytes });
+  history[bytesKey] += bytes;
+  while (list.length > HISTORY_LIMIT) {
+    history[bytesKey] -= list.shift().bytes;
+  }
+  trimHistoryBudget();
+}
+
+function popHistory(history, side) {
+  const list = side === "past" ? history.past : history.future;
+  const bytesKey = side === "past" ? "pastBytes" : "futureBytes";
+  const entry = list.pop();
+  history[bytesKey] -= entry.bytes;
+  return entry.document;
+}
+
+function totalHistoryBytes() {
+  let total = 0;
+  for (const history of histories.values()) {
+    total += history.pastBytes + history.futureBytes;
+  }
+  return total;
+}
+
+/** Бюджет общий: сначала режем активную страницу, затем старые истории. */
+function trimHistoryBudget() {
+  while (totalHistoryBytes() > HISTORY_MAX_BYTES) {
+    const active = histories.get(state.activePageId);
+    if (active && (active.past.length || active.future.length)) {
+      if (active.past.length) {
+        active.pastBytes -= active.past.shift().bytes;
+      } else {
+        active.futureBytes -= active.future.shift().bytes;
+      }
+      continue;
+    }
+    let oldestId = null;
+    for (const [pageId, history] of histories) {
+      if (history.past.length || history.future.length) {
+        oldestId = pageId;
+        break;
+      }
+    }
+    if (oldestId == null) break;
+    histories.delete(oldestId);
+  }
 }
 
 function syncHistoryFlags() {
@@ -367,6 +433,7 @@ export function applyBootstrap(data) {
     hasApiKey: Boolean(incoming.has_api_key || incoming.settings?.has_api_key || incoming.llm?.has_api_key),
   };
   syncHistoryFlags();
+  strokeCounts.clear();
   emit();
   if (state.activePageId) reloadDetail(state.activePageId);
 }
@@ -399,6 +466,7 @@ export function setProject(project, pages, packageInfo, options = {}) {
   if (packageInfo !== undefined) next.package = normalizePackage(packageInfo);
   state = next;
   syncHistoryFlags();
+  strokeCounts.clear();
   emit();
   if (active) reloadDetail(active);
 }
@@ -486,6 +554,7 @@ export function applyDetail(pageId, data, keepLocal, force = false) {
   }
   const document = normalizeDocument(unwrapped.document);
   acked.set(id, document.version);
+  strokeCounts.set(strokeKey(id, document.version), (document.strokes || []).length);
   const overflow = document.regions.some((region) => region.overflow);
   state = {
     ...state,
@@ -542,9 +611,9 @@ export function editDocument(mutator, options = {}) {
   const key = options.coalesce || "";
   const history = historyOf(pageId);
   if (shouldPushHistory(key, coalesceKey)) {
-    history.past.push(clone(state.document));
-    if (history.past.length > HISTORY_LIMIT) history.past.shift();
+    pushHistory(history, "past", clone(state.document), before.length);
     history.future = [];
+    history.futureBytes = 0;
     coalesceKey = key;
   }
   if (!key) coalesceKey = "";
@@ -634,22 +703,20 @@ export function undo() {
   if (!state.activePageId || !state.document) return;
   const history = historyOf(state.activePageId);
   if (!history.past.length) return;
-  history.future.push(clone(state.document));
-  if (history.future.length > HISTORY_LIMIT) history.future.shift();
-  restoreHistoryDocument(history.past.pop());
+  pushHistory(history, "future", clone(state.document), contentKey(state.document).length);
+  restoreHistoryDocument(popHistory(history, "past"));
 }
 
 export function redo() {
   if (!state.activePageId || !state.document) return;
   const history = historyOf(state.activePageId);
   if (!history.future.length) return;
-  history.past.push(clone(state.document));
-  if (history.past.length > HISTORY_LIMIT) history.past.shift();
-  restoreHistoryDocument(history.future.pop());
+  pushHistory(history, "past", clone(state.document), contentKey(state.document).length);
+  restoreHistoryDocument(popHistory(history, "future"));
 }
 
 export function clearHistory(pageId) {
-  histories.set(String(pageId), { past: [], future: [] });
+  histories.set(String(pageId), { past: [], future: [], pastBytes: 0, futureBytes: 0 });
   coalesceKey = "";
   if (state.activePageId === String(pageId)) syncHistoryFlags();
   emit();
@@ -695,6 +762,7 @@ async function flush(pageId) {
   if (queuedPage === pageId) queuedPage = "";
   const base = acked.has(pageId) ? acked.get(pageId) : Number(body.version) || 0;
   body.version = base;
+  let sent = body;
   try {
     let response;
     try {
@@ -707,9 +775,10 @@ async function flush(pageId) {
       const latest = pendingBody.get(pageId) || body;
       pendingBody.delete(pageId);
       latest.version = serverVersion;
+      sent = latest;
       response = await putDocument(pageId, serverVersion, latest);
     }
-    acceptSave(pageId, response, base);
+    acceptSave(pageId, response, base, (sent.strokes || []).length);
   } catch (error) {
     coalesceKey = "";
     pendingBody.delete(pageId);
@@ -743,9 +812,10 @@ async function flush(pageId) {
   }
 }
 
-function acceptSave(pageId, response, fallback) {
+function acceptSave(pageId, response, fallback, strokeCount) {
   const version = readVersion(response, fallback);
   acked.set(pageId, version);
+  strokeCounts.set(strokeKey(pageId, version), strokeCount);
   if (state.activePageId === pageId && state.document && !pendingBody.has(pageId)) {
     if (response && response.document) {
       const normalized = normalizeDocument(response.document);

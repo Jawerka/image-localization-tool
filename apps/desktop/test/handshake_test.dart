@@ -24,7 +24,7 @@ void main() {
     expect(ApiReady.tryParse('{"port": "80", "token": "t"}'), isNull);
   });
 
-  test('кандидаты: явный env первый, затем data-корни', () {
+  test('кандидаты: env, repo/data, install/data — без LocalAppData', () {
     final dir = Directory.systemTemp.createTempSync('ilt-handshake');
     addTearDown(() => dir.deleteSync(recursive: true));
     final candidates = apiReadyCandidates(
@@ -34,13 +34,26 @@ void main() {
         'LOCALAPPDATA': '${dir.path}/local',
       },
       executableDir: '${dir.path}/exe',
+      repoRoot: '${dir.path}/repo',
     );
     expect(candidates.first, '${dir.path}/explicit.json');
     expect(candidates, contains('${dir.path}/data/api.json'));
+    expect(candidates, contains('${dir.path}/repo/data/api.json'));
     expect(
       candidates,
-      contains('${dir.path}/local/ImageLocalizationTool/api.json'),
+      isNot(contains('${dir.path}/local/ImageLocalizationTool/api.json')),
     );
+  });
+
+  test('resolveDataRoot: installRoot/data без существующего каталога', () {
+    final dir = Directory.systemTemp.createTempSync('ilt-root');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    Directory('${dir.path}/desktop/data').createSync(recursive: true);
+    final root = resolveDataRoot(
+      environment: const {'LOCALAPPDATA': r'C:\local'},
+      executableDir: '${dir.path}/desktop',
+    );
+    expect(root, '${dir.path}/data');
   });
 
   test('портативный data — в корне установки, ассеты desktop/data игнорируются', () {
@@ -54,6 +67,10 @@ void main() {
     );
     expect(candidates, contains('${dir.path}/data'));
     expect(candidates, isNot(contains('${dir.path}/desktop/data')));
+    expect(
+      candidates,
+      isNot(contains(r'C:\local\ImageLocalizationTool')),
+    );
   });
 
   test('readApiReadyFromFiles читает первый валидный', () async {

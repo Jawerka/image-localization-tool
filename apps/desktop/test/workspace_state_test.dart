@@ -18,14 +18,24 @@ class _Sent {
 
 WorkspaceState _workspace(
   Map<String, dynamic> Function(String path)? reply,
-  List<_Sent> sent,
-) {
+  List<_Sent> sent, {
+  int status = 200,
+  bool failFirstSettings = false,
+}) {
+  var settingsCalls = 0;
   final client = MockClient((request) async {
     sent.add(_Sent(request.method, request.url.path, request.body));
     final data = reply?.call(request.url.path) ?? <String, dynamic>{};
+    var code = status;
+    if (failFirstSettings &&
+        request.method == 'PUT' &&
+        request.url.path == '/api/settings') {
+      if (settingsCalls == 0) code = 500;
+      settingsCalls += 1;
+    }
     return http.Response(
       jsonEncode(data),
-      200,
+      code,
       headers: {'content-type': 'application/json; charset=utf-8'},
     );
   });
@@ -208,6 +218,72 @@ void main() {
     // Без page_id событие никого не трогает.
     ws.applyEvent('job.progress', {'status': 'Вёрстка', 'progress': 90});
     expect(ws.pages.single.progress, 65);
+  });
+
+  test('слои: все комбинации из bootstrap и старые настройки', () {
+    for (final boxes in [false, true]) {
+      for (final mask in [false, true]) {
+        final ws = _workspace(null, []);
+        ws.applyBootstrap({
+          'settings': {
+            'viewer_show_boxes': boxes,
+            'viewer_show_mask': mask,
+          },
+        });
+        expect(ws.viewer.showBoxes, boxes);
+        expect(ws.viewer.showMask, mask);
+        ws.dispose();
+      }
+    }
+    final ws = _workspace(null, []);
+    ws.applyBootstrap({'settings': <String, dynamic>{}});
+    expect(ws.viewer.showBoxes, isTrue);
+    expect(ws.viewer.showMask, isTrue);
+    ws.dispose();
+  });
+
+  test('слои: последнее быстрое переключение сохраняется', () async {
+    final sent = <_Sent>[];
+    final ws = _workspace(null, sent);
+    ws.applyBootstrap({'settings': <String, dynamic>{}});
+    ws.viewer
+      ..setShowBoxes(false)
+      ..setShowBoxes(true)
+      ..setShowMask(false);
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+    final body = jsonDecode(sent.last.body) as Map<String, dynamic>;
+    expect(body['viewer_show_boxes'], isTrue);
+    expect(body['viewer_show_mask'], isFalse);
+    expect(sent.last.path, '/api/settings');
+    ws.dispose();
+  });
+
+  test('слои: после ошибки первого запроса уходит более новый патч', () async {
+    final sent = <_Sent>[];
+    final ws = _workspace(null, sent, failFirstSettings: true);
+    ws.applyBootstrap({'settings': <String, dynamic>{}});
+    ws.viewer.setShowBoxes(false);
+    ws.viewer.setShowBoxes(true);
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+    final puts = sent
+        .where((item) => item.path == '/api/settings')
+        .toList();
+    expect(puts.length, 2);
+    final body = jsonDecode(puts.last.body) as Map<String, dynamic>;
+    expect(body['viewer_show_boxes'], isTrue);
+    expect(ws.viewer.showBoxes, isTrue);
+    ws.dispose();
+  });
+
+  test('слои: ошибка записи видна, видимость не откатывается', () async {
+    final sent = <_Sent>[];
+    final ws = _workspace(null, sent, status: 500);
+    ws.applyBootstrap({'settings': <String, dynamic>{}});
+    ws.viewer.setShowBoxes(false);
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+    expect(ws.viewer.showBoxes, isFalse);
+    expect(ws.errorText, isNotNull);
+    ws.dispose();
   });
 
   test('setDockPosition: локально сразу и PUT настроек', () async {

@@ -1,23 +1,20 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Flutter host + PyInstaller sidecar, staged dist layout, smoke check,
-  optional Inno Setup installer.
+  Flutter host + PyInstaller sidecar, staged dist layout, smoke check and
+  portable ZIP.
 
 .EXAMPLE
   .\scripts\build-windows.ps1
 
 .EXAMPLE
-  .\scripts\build-windows.ps1 -SkipPyInstaller -SkipInno
+  .\scripts\build-windows.ps1 -SkipPyInstaller
 #>
 param(
-    [string] $OutputDir = "",
     [string] $BuildPython = "",
     [switch] $SkipPyInstaller,
     [switch] $SkipFlutter,
-    [switch] $SkipInno,
     [switch] $SkipModels,
-    [switch] $Portable,
     [switch] $ServerZip
 )
 
@@ -83,25 +80,6 @@ function Resolve-Flutter {
         return $local
     }
     throw "flutter not found. Add Flutter to PATH or install the SDK to %LOCALAPPDATA%\flutter."
-}
-
-function Find-Iscc {
-    $candidates = @()
-    $onPath = Get-Command ISCC.exe -ErrorAction SilentlyContinue
-    if ($onPath) {
-        $candidates += $onPath.Source
-    }
-    $candidates += @(
-        "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
-        "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
-        "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
-    )
-    foreach ($candidate in $candidates) {
-        if ($candidate -and (Test-Path -LiteralPath $candidate)) {
-            return $candidate
-        }
-    }
-    return $null
 }
 
 function Copy-ModelsBesideExe {
@@ -246,44 +224,9 @@ if ($LASTEXITCODE -ne 0) {
     exit $smokeCode
 }
 
-$iscc = Find-Iscc
-if ($SkipInno) {
-    if (-not $iscc) {
-        Write-Host "Inno Setup (ISCC.exe) not found. -SkipInno is set, so the installer step is skipped."
-    } else {
-        Write-Host "Skipping Inno Setup (-SkipInno)."
-    }
-} elseif (-not $iscc) {
-    Write-Host "Inno Setup (ISCC.exe) not found."
-    Write-Host "Install Inno Setup 6.1 or newer, or re-run with -SkipInno."
-    throw "ISCC.exe not found. Installer was not built."
-} else {
-    if ([string]::IsNullOrWhiteSpace($OutputDir)) {
-        $OutputDir = Join-Path $RepoRoot 'dist'
-    }
-    if (-not (Test-Path -LiteralPath $OutputDir)) {
-        New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
-    }
-    $outputResolved = (Resolve-Path -LiteralPath $OutputDir).Path
-    $distResolved = (Resolve-Path -LiteralPath $DistDir).Path
-    $iss = Join-Path $RepoRoot 'installer\ImageLocalizationTool.iss'
-    Write-Host "==> Inno Setup $version"
-    & $iscc $iss "/DAppVersion=$version" "/DDistDir=$distResolved" "/DOutputDir=$outputResolved"
-    if ($LASTEXITCODE -ne 0) {
-        throw "ISCC failed with exit code $LASTEXITCODE"
-    }
-    $setup = Join-Path $outputResolved "ImageLocalizationTool-$version-windows-x64-setup.exe"
-    if (-not (Test-Path -LiteralPath $setup)) {
-        throw "Installer was not created: $setup"
-    }
-    Write-Host "Created $setup"
-}
-
-if ($Portable) {
-    Invoke-Checked {
-        & (Join-Path $RepoRoot 'scripts\package-portable.ps1')
-    } 'package-portable.ps1'
-}
+Invoke-Checked {
+    & (Join-Path $RepoRoot 'scripts\package-portable.ps1')
+} 'package-portable.ps1'
 if ($ServerZip) {
     Invoke-Checked {
         & (Join-Path $RepoRoot 'scripts\package-server.ps1')
@@ -295,5 +238,5 @@ Write-Host "Windows build:" -ForegroundColor Green
 Write-Host "  $(Join-Path $DistDir 'desktop\ImageLocalizationTool.exe')"
 Write-Host "  $DistDir"
 $proofArgs = @()
-if ($Portable -and $ServerZip -and -not $SkipInno) { $proofArgs += '--complete-windows' }
+if ($ServerZip) { $proofArgs += '--complete-windows' }
 Invoke-Checked { & $Python (Join-Path $RepoRoot 'scripts\release_candidate.py') 'verify-build' @proofArgs } 'verify unchanged build source'

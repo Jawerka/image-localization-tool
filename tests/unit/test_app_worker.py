@@ -657,27 +657,10 @@ class _StubPipe:
         )
 
 
-def _install_keyring(monkeypatch, bag):
-    module = types.ModuleType("keyring")
-
-    def get_password(service, username):
-        return bag.get((service, username))
-
-    def set_password(service, username, value):
-        bag[(service, username)] = value
-
-    def delete_password(service, username):
-        bag.pop((service, username), None)
-
-    module.get_password = get_password
-    module.set_password = set_password
-    module.delete_password = delete_password
-    monkeypatch.setitem(sys.modules, "keyring", module)
-    return bag
-
-
 def test_pipeline_recreates_clients_when_key_changes(monkeypatch):
-    bag = _install_keyring(monkeypatch, {("ImageLocalizationTool", "llm"): "first-key"})
+    from src.app.settings import set_api_key
+
+    assert set_api_key("first-key")
     module = types.ModuleType("src.page_pipeline")
     module.PagePipeline = _StubPipe
     monkeypatch.setitem(sys.modules, "src.page_pipeline", module)
@@ -696,7 +679,7 @@ def test_pipeline_recreates_clients_when_key_changes(monkeypatch):
     assert same.translator is not None
     assert same._shared_client is not None
 
-    bag[("ImageLocalizationTool", "llm")] = "second-key"
+    assert set_api_key("second-key")
     changed, _ = worker._pipeline(ctx, settings, reset_clients=True)
     assert changed is pipe
     assert changed.ocr is None

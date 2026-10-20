@@ -14,15 +14,41 @@ def component(tmp_path, payload=b"model", check=""):
         downloads.digest(path), len(payload)),), check)
 
 
-def test_corrupted_resource_is_not_ready_and_can_be_repaired(tmp_path, monkeypatch):
+def test_component_probe_temp_dir_is_in_data(tmp_path, monkeypatch):
+    monkeypatch.setenv("ILT_DATA_DIR", str(tmp_path / "data"))
+    from src.app.component_check import _temp_root
+
+    assert _temp_root() == tmp_path / "data" / "tmp"
+    assert (tmp_path / "data" / "tmp").is_dir()
+
+
+def test_corrupted_resource_is_detected_by_verify_and_repaired(tmp_path, monkeypatch):
     monkeypatch.setenv("ILT_COMPONENT_ROOT", str(tmp_path / "install"))
     item = component(tmp_path)
     folder = catalog.install(item)
     assert catalog.ready(item)
     (folder / "weights.bin").write_bytes(b"wrong")
+    assert catalog.ready(item)
+    assert catalog.verify(item)["ok"] is False
+    catalog.invalidate(item)
     assert not catalog.ready(item)
     assert catalog.install(item).joinpath("weights.bin").read_bytes() == b"model"
     assert catalog.ready(item)
+
+
+def test_ready_trusts_marker_without_inventory_walk_or_hash(tmp_path, monkeypatch):
+    monkeypatch.setenv("ILT_COMPONENT_ROOT", str(tmp_path / "install"))
+    monkeypatch.setattr(catalog, "validate_component", lambda *args: None)
+    item = component(tmp_path, check="onnx")
+    folder = catalog.install(item)
+    marker = json.loads((folder / "component.json").read_text(encoding="utf-8"))
+    marker.pop("requirements", None)
+    marker["checker"] = "old-build"
+    (folder / "component.json").write_text(json.dumps(marker), encoding="utf-8")
+
+    monkeypatch.setattr(downloads, "digest", lambda *_: (_ for _ in ()).throw(AssertionError("hash")))
+    assert catalog.ready(item)
+    assert catalog.installed(item)
 
 
 def test_failed_candidate_preserves_old_pointer(tmp_path, monkeypatch):

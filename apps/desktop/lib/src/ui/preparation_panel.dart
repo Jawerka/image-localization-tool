@@ -104,7 +104,7 @@ class _PreparationPanelState extends State<PreparationPanel> {
               if (busy || stage == 'paused') ...[
                 const SizedBox(height: 6),
                 LinearProgressIndicator(value: total > 0 ? (done / total).clamp(0.0, 1.0) : null),
-                Text('${bytes(done)} / ${bytes(total)}'),
+                if (total > 0) Text('${bytes(done)} / ${bytes(total)}'),
               ],
               if ('${snapshot['error'] ?? ''}'.isNotEmpty)
                 Text('${snapshot['error']}', style: TextStyle(color: Theme.of(context).colorScheme.error)),
@@ -128,6 +128,12 @@ class _PreparationPanelState extends State<PreparationPanel> {
                       }
                     },
                     child: const Text('Сохранить диагностику'),
+                  ),
+                if (!busy)
+                  TextButton(
+                    key: const Key('preparation-verify'),
+                    onPressed: () => state.verifyPreparation(selection),
+                    child: const Text('Проверить и восстановить'),
                   ),
                 if (busy)
                   OutlinedButton(
