@@ -5,7 +5,7 @@ export const MASK_REMOVE_COLOR = "#FF9999";
 
 /** Цвет последнего ручного действия в пикселе. */
 export function modeColor(mode) {
-  return mode === "erase" || mode === "erase_fill"
+  return mode === "erase" || mode === "erase_fill" || mode === "erase_flood"
     ? MASK_REMOVE_COLOR
     : MASK_ADD_COLOR;
 }

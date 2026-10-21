@@ -221,6 +221,33 @@ void main() {
     );
     expectPixel(data, 10, 10, 255, 204, 204);
   });
+
+  test('превью заливки рисуется по смещению', () async {
+    const stroke = Stroke(
+      mode: Stroke.flood,
+      radius: 1,
+      points: [Offset(4, 3)],
+      tolerance: 20,
+    );
+    final preview = await _image(6, 4, [
+      for (var i = 0; i < 6 * 4; i++) ...[0, 255, 0, 255],
+    ]);
+    final data = await render(
+      MaskOverlayPainter(
+        mask: null,
+        bounds: const Rect.fromLTWH(0, 0, 40, 20),
+        strokes: const [stroke],
+        fillPreviews: {
+          fillStrokeKey(stroke): FillPreview(
+            image: preview,
+            offset: const Offset(10, 5),
+          ),
+        },
+      ),
+    );
+    expectPixel(data, 12, 7, 127, 255, 127);
+    expectPixel(data, 2, 2, 255, 255, 255);
+  });
 }
 
 Future<ui.Image> _image(int width, int height, List<int> rgba) {

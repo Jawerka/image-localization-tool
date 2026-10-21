@@ -273,6 +273,7 @@ class FakeWorker:
                 self._translate(job)
             elif job.kind == "apply_document":
                 plan = str(job.payload.get("plan") or "")
+                self._write_fake_apply(job, plan)
                 self._emit(WorkerEvent(PAGE_UPDATED, {**_job_ids(job), "plan": plan}))
             elif job.kind == "export":
                 # Смоук и юнит-тесты: файл в папку, без процесса пайплайна.
@@ -319,6 +320,47 @@ class FakeWorker:
         if not root:
             return None
         return ProjectStore(Path(root))
+
+    def _write_fake_apply(self, job: Job, plan: str) -> None:
+        """Смоук: визуальная правка сразу даёт result и provenance."""
+        store = self._store_of(job)
+        page_id = str(job.page_id or "")
+        if store is None or not job.project_id or not page_id:
+            return
+        if plan not in ("typeset", "clean"):
+            return
+        try:
+            document = store.read_document(job.project_id, page_id)
+            version = int(document.version)
+            size = (8, 8)
+            project = store.open_project(job.project_id)
+            record = next(
+                (item for item in project.get("pages") or [] if str(item.get("id")) == page_id),
+                None,
+            )
+            source = Path(str((record or {}).get("source_path") or ""))
+            if source.is_file():
+                with Image.open(source) as opened:
+                    size = opened.size
+            image = Image.new("RGB", size, "white")
+            store.save_image(job.project_id, page_id, "clean", image)
+            store.save_image(job.project_id, page_id, "result", image)
+            store.record_result_provenance(
+                job.project_id,
+                page_id,
+                document_version=version,
+                region_bounds={},
+            )
+            store.update_status(
+                job.project_id,
+                page_id,
+                status="done",
+                progress=100,
+                stage="typeset",
+                error="",
+            )
+        except Exception:
+            logger.exception("Смоук: не удалось записать result для apply_document")
 
     def _write_fake_page(self, store: ProjectStore, job: Job, page_id: str) -> None:
         """result.png и статус «готово». Размер кадра маленький: модели не нужны."""

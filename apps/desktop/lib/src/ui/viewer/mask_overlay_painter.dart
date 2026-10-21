@@ -15,6 +15,7 @@ class MaskOverlayPainter {
     required this.strokes,
     this.bakedStrokeCount = 0,
     this.activeStroke,
+    this.fillPreviews = const {},
   });
 
   /// Светло-зелёный: добавлено кистью или заливкой.
@@ -53,9 +54,14 @@ class MaskOverlayPainter {
   /// Сколько первых штрихов уже входит в [mask]; их не рисуем и не красим.
   final int bakedStrokeCount;
   final Stroke? activeStroke;
+  final Map<String, FillPreview> fillPreviews;
 
   static Color colorFor(String mode) =>
-      mode == Stroke.erase || mode == Stroke.eraseFill ? removeColor : addColor;
+      mode == Stroke.erase ||
+          mode == Stroke.eraseFill ||
+          mode == Stroke.eraseFlood
+      ? removeColor
+      : addColor;
 
   void paint(Canvas canvas) {
     if (bounds.isEmpty) return;
@@ -92,6 +98,13 @@ class MaskOverlayPainter {
   void _paintStroke(Canvas canvas, Stroke stroke) {
     final points = stroke.points;
     if (points.isEmpty) return;
+    if (stroke.mode == Stroke.flood || stroke.mode == Stroke.eraseFlood) {
+      final preview = fillPreviews[fillStrokeKey(stroke)];
+      if (preview != null) {
+        canvas.drawImage(preview.image, preview.offset, Paint());
+      }
+      return;
+    }
     final paint = Paint()..color = colorFor(stroke.mode);
     if (stroke.mode == Stroke.fill || stroke.mode == Stroke.eraseFill) {
       if (points.length < 3) return;

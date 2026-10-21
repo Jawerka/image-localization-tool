@@ -114,15 +114,11 @@ def test_role_font_id_matches_docs_plan():
 
 def test_assign_stylized_fonts_trial_and_kill_switch(tmp_path):
     for name, family in (
-        (FONT_ROLE_SFX, "Delta Block"),
-        (FONT_ROLE_SFX_COMEDY, "Unsightly"),
-        (FONT_ROLE_SFX_TECH, "Liber Struct"),
+        (FONT_ROLE_SFX, "Liber Struct"),
         (FONT_ROLE_HANDWRITTEN, "First Time Writing"),
         (FONT_ROLE_TITLE, "Jupiteroid Light"),
-        (FONT_ROLE_SHOUT, "Blaec"),
-        (FONT_ROLE_STENCIL, "Operation Napalm"),
+        (FONT_ROLE_SHOUT, "Operation Napalm"),
         (FONT_ROLE_DIALOGUE, "Heroika"),
-        (FONT_ROLE_PIXEL, "Pixelzone"),
     ):
         _make_font(tmp_path / f"{name}.ttf", range(0x0410, 0x0450), family)
     faces = scan_fonts(models_fonts=tmp_path, include_system=False)

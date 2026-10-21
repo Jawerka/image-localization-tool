@@ -6,19 +6,16 @@
 Выключен — поведение как раньше: Heroika только в баллоне, free без CC0-пробы.
 
 Все перечисленные CC0 — GGBotNet, CC0 1.0, с кириллицей. Heroika — OFL.
-Jupiteroid Light: <https://ggbot.itch.io/jupiteroid-font>; Novem:
-<https://ggbot.itch.io/novem-font> (оба CC0, файлы в `src/resources/fonts`).
+Jupiteroid Light: <https://ggbot.itch.io/jupiteroid-font> (CC0, файл в `src/resources/fonts`).
 
 ## Автовыбор (что ставит пайплайн)
 
 | Ситуация | Шрифт | Почему |
 |----------|--------|--------|
 | Диалог / нарратив **в баллоне** | **Heroika-Regular** | Привычный comic lettering, читается в пузыре |
-| `sfx` (обычный удар/звук) | **DeltaBlock-Regular** | Жирный блочный display, «БУМ/BOOM» |
-| `sfx` со смехом (`ха`, `ha`, `хи`, `lol`…) | **Unsightly** | Ломаный comedy-стиль |
-| `sfx` «технический» (много цифр / короткий код) | **Liber-Struct** | Геометрия FontStruct, не «взрыв» |
-| `title` | **Jupiteroid-Light** | Спокойный геометрический display вместо тяжёлого Blaec |
-| free **ALL CAPS** | **Blaec-Regular** | Тяжёлый shout/заголовок |
+| `sfx` (удар, смех, технический звук) | **Liber-Struct** | Единственный SFX-шрифт проекта: геометрия FontStruct |
+| `title` | **Jupiteroid-Light** | Спокойный геометрический display |
+| free **ALL CAPS** | **OperationNapalm-Regular** | Тяжёлый shout/трафарет |
 | `sign` + ALL CAPS | **OperationNapalm-Regular** | Трафарет/предупреждение |
 | Free / `sign` / `noise` без капса | **FirstTimeWriting** | Рукопись, заметки, мягкий free-текст |
 | Регион уже с `font_id` или `edited` | не трогаем | Ручной выбор важнее |
@@ -29,17 +26,9 @@ Jupiteroid Light: <https://ggbot.itch.io/jupiteroid-font>; Novem:
 |--------|------|---------|------------|
 | **Heroika-Regular** | dialogue | Речь и мысли в баллоне | Крупные SFX на фоне |
 | **FirstTimeWriting** | handwritten | Заметки, дневник, мягкий free | Удары, крики, титры |
-| **DeltaBlock-Regular** | sfx | Взрывы, удары, короткий звук | Длинные фразы в баллоне |
-| **Liber-Struct** | sfx tech | Механика, UI-шум, «робот» | Рукопись, тёплый диалог |
-| **Unsightly** | sfx comedy | Смех, глупый эффект | Серьёзный экшен, диалог |
-| **PublicPixel** | sfx pixel | Крупный 8-bit / UI-пиксель | Длинный текст, мелкий кегль |
-| **Pixelzone** | sfx pixel | Читабельный pixel, цифровой знак | «Живой» рукописный free |
-| **Blaec-Regular** | shout | Крик, CAPS free | Мелкий диалог |
-| **Blaec-Italic** | shout | Скорость, наклон, «СКОРЕЕ!» | Спокойная речь |
+| **Liber-Struct** | sfx | Звуки, механика, UI-шум | Рукопись, тёплый диалог |
 | **Jupiteroid-Light** | title | Заголовки, титры, обложки | Крик, мелкий диалог |
-| **Novem** | title (запас) | Стилизованные/SF-заголовки | Универсальный текст |
 | **OperationNapalm-Regular** | shout stencil | Таблички, DANGER, военный тон | Рукопись, нежный текст |
-| **VyazPixel** | decor | Декор/титры «под старину» (по желанию) | Автопо умолчанию не ставим |
 
 ## Запас (OFL, не CC0)
 

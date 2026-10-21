@@ -224,3 +224,17 @@ def test_flag_differs_from_wave():
     assert np.array_equal(warp_image(image, "flag", bend=0.0), image) or int(
         np.abs(warp_image(image, "flag", bend=0.0).astype(np.int16) - image.astype(np.int16)).max()
     ) <= 2
+
+def test_shared_local_warp_fixture_parameters_are_finite():
+    import json
+    from pathlib import Path
+
+    fixture = json.loads(
+        Path("tests/fixtures/local_warp_samples.json").read_text(encoding="utf-8")
+    )
+    for kind in fixture["kinds"]:
+        map_x, map_y = build_remap(
+            kind, fixture["height"], fixture["width"], bend=fixture["bend"]
+        )
+        assert map_x.shape == (fixture["height"], fixture["width"])
+        assert np.isfinite(map_x).all() and np.isfinite(map_y).all()

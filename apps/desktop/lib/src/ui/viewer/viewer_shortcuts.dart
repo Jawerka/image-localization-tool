@@ -114,6 +114,9 @@ KeyEventResult handleViewerShortcut(
     case LogicalKeyboardKey.keyB:
       viewer.setTool('brush');
       return KeyEventResult.handled;
+    case LogicalKeyboardKey.keyG:
+      viewer.setTool('fill');
+      return KeyEventResult.handled;
     case LogicalKeyboardKey.keyP:
       viewer.setTool('polyline');
       return KeyEventResult.handled;
@@ -135,6 +138,9 @@ KeyEventResult handleViewerShortcut(
       viewer.nudgeBrush(1);
       return KeyEventResult.handled;
     case LogicalKeyboardKey.escape:
+      if (viewer.session.cancelGesture()) {
+        return KeyEventResult.handled;
+      }
       if (viewer.session.lasso.isNotEmpty) {
         viewer.cancelLassoDraft();
         return KeyEventResult.handled;
@@ -178,6 +184,10 @@ KeyEventResult handleViewerShortcut(
     case LogicalKeyboardKey.digit3:
       if (shift) return KeyEventResult.ignored;
       viewer.setView('compare');
+      return KeyEventResult.handled;
+    case LogicalKeyboardKey.digit4:
+      if (shift) return KeyEventResult.ignored;
+      viewer.setView('clean');
       return KeyEventResult.handled;
   }
   return KeyEventResult.ignored;

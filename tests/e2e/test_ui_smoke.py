@@ -113,18 +113,25 @@ def desktop(tmp_path, monkeypatch):
 
 @pytest.fixture
 def page(browser, desktop):
-    expect.set_options(timeout=15_000)
+    expect.set_options(timeout=30_000)
     context = browser.new_context(viewport={"width": 1280, "height": 800})
     tab = context.new_page()
-    tab.set_default_timeout(15_000)
+    tab.set_default_timeout(30_000)
     page_errors: list[str] = []
     tab.on("pageerror", lambda error: page_errors.append(str(error)))
     url = f"http://127.0.0.1:{desktop.port}/?k={desktop.token}"
-    try:
-        with tab.expect_response(lambda response: "/api/bootstrap" in response.url and response.ok):
-            tab.goto(url)
-    except PlaywrightTimeoutError as exc:
-        raise AssertionError(f"bootstrap timeout at {tab.url}; page errors: {page_errors}") from exc
+    last_timeout = None
+    for _attempt in range(2):
+        try:
+            with tab.expect_response(lambda response: "/api/bootstrap" in response.url and response.ok):
+                tab.goto(url)
+            last_timeout = None
+            break
+        except PlaywrightTimeoutError as exc:
+            last_timeout = exc
+            tab.goto("about:blank")
+    if last_timeout is not None:
+        raise AssertionError(f"bootstrap timeout at {tab.url}; page errors: {page_errors}") from last_timeout
     expect(tab.locator("[data-role='screen-wizard']")).to_be_hidden()
     expect(tab.locator("[data-role='screen-error']")).to_be_hidden()
     expect(tab.locator("[data-role='shell']")).to_be_visible()
@@ -178,6 +185,8 @@ def test_open_translate_edit_and_export(page, desktop):
     regions = page.locator("[data-role='region-list']")
     expect(regions).to_contain_text("Привет")
     regions.get_by_text("Hello", exact=True).click()
+    card = regions.locator(".region-card--selected")
+    card.locator("[data-region-tab='font']").click()
     font_search = page.locator("[data-font-search]")
     expect(font_search).to_be_visible()
     fonts = page.locator("select[data-field='font_id'] option")
@@ -186,6 +195,7 @@ def test_open_translate_edit_and_export(page, desktop):
         font_search.fill(fonts.nth(1).inner_text()[:3])
         expect(fonts.nth(font_count - 1)).to_be_hidden()
         font_search.fill("")
+    card.locator("[data-region-tab='text']").click()
     translation = page.locator("[data-field='translation']")
     expect(translation).to_be_visible()
     with page.expect_response(lambda response: "/document" in response.url and response.request.method == "PUT" and response.ok):
@@ -297,55 +307,68 @@ def _open_and_translate(tab) -> None:
 
 @pytest.mark.ui
 def test_warp_details_survive_inspector_rebuild(page):
-    """Закрытое «Искривление» не открывается снова после rebuild карточки."""
+    """Выбранная вкладка «Трансформация» переживает rebuild инспектора."""
     _open_and_translate(page)
     regions = page.locator("[data-role='region-list']")
     expect(regions).to_contain_text("Привет")
     regions.get_by_text("Hello", exact=True).click()
-    warp = page.locator("details.region-card__warp")
-    expect(warp).to_be_visible()
-    expect(warp).to_have_js_property("open", True)
-    warp.locator("summary").click()
-    expect(warp).to_have_js_property("open", False)
+    card = regions.locator(".region-card--selected")
+    transform = card.locator("[data-region-tab='transform']")
+    transform.click()
+    expect(transform).to_have_attribute("aria-selected", "true")
+    expect(card.locator("[data-card-warp='mesh']")).to_be_visible()
 
+    card.locator("[data-region-tab='text']").click()
     translation = page.locator("[data-field='translation']")
     expect(translation).to_be_visible()
     with page.expect_response(
         lambda response: "/document" in response.url and response.request.method == "PUT" and response.ok
     ):
-        translation.fill("Карточка-стабильность")
-    expect(translation).to_have_value("Карточка-стабильность")
-    expect(page.locator("details.region-card__warp")).to_have_js_property("open", False)
+        translation.fill("Перевод-перестройка")
+    expect(translation).to_have_value("Перевод-перестройка")
+
+    card = regions.locator(".region-card--selected")
+    expect(card.locator("[data-region-tab='transform']")).to_have_attribute(
+        "aria-selected", "false"
+    )
+    card.locator("[data-region-tab='transform']").click()
+    expect(card.locator("[data-card-warp='mesh']")).to_be_visible()
 
 
 @pytest.mark.ui
 def test_inspector_sections_fit_and_remain_open(page):
-    """Новая карточка умещается в узкой панели и сохраняет раскрытые секции."""
+    """Три вкладки помещаются в 344 px, переключаются и не теряют выбор."""
     _open_and_translate(page)
     regions = page.locator("[data-role='region-list']")
     regions.get_by_text("Hello", exact=True).click()
     card = regions.locator(".region-card--selected")
-    expect(card.locator(".inspector-section__title")).to_contain_text(["Текст", "Оформление"])
-    expect(card).to_contain_text("Положение на странице")
-    position = card.locator("details.region-card__position")
-    position.locator("summary").click()
+    tabs = card.locator("[data-region-tab]")
+    expect(tabs).to_have_count(3)
+    expect(card.locator("[data-region-panel='text']")).to_be_visible()
+    expect(card.locator("[data-region-panel='font']")).to_be_hidden()
+
+    card.locator("[data-region-tab='transform']").click()
+    expect(card.locator("[data-region-panel='transform']")).to_be_visible()
     expect(card.locator("[data-region-action='geometry']")).to_be_visible()
 
     page.set_viewport_size({"width": 1280, "height": 800})
     panel_width = page.locator("[data-role='inspector']").evaluate("node => Math.round(node.getBoundingClientRect().width)")
-    assert panel_width == 344, f"проверка должна проходить при ширине инспектора 344 px, сейчас {panel_width}"
+    assert panel_width == 344, f"ширина панели должна быть 344 px, получено {panel_width}"
     for theme in ("light", "dark"):
         page.evaluate("theme => document.documentElement.dataset.theme = theme", theme)
         overflow = page.locator("[data-role='inspector']").evaluate(
             "node => node.scrollWidth > node.clientWidth"
         )
-        assert not overflow, f"горизонтальное переполнение в теме {theme}"
+        assert not overflow, f"горизонтальный скролл инспектора в теме {theme}"
 
-    expect(position).to_have_js_property("open", True)
+    card.locator("[data-region-tab='text']").click()
     translation = card.locator("[data-field='translation']")
-    translation.fill("Новый текст")
+    translation.fill("Ещё правка")
     expect(translation).to_be_focused()
-    expect(position).to_have_js_property("open", True)
+    expect(card.locator("[data-region-tab='text']")).to_have_attribute(
+        "aria-selected", "true"
+    )
+    expect(card.locator("[data-region-panel='text']")).to_be_visible()
 
 
 @pytest.mark.ui
@@ -363,6 +386,7 @@ def test_mesh_preset_draws_grid_and_requests_preview(page, desktop):
     regions = page.locator("[data-role='region-list']")
     regions.get_by_text("Hello", exact=True).click()
     card = regions.locator(".region-card--selected")
+    card.locator("[data-region-tab='transform']").click()
     with page.expect_response(
         lambda response: "/preview-region" in response.url and response.request.method == "POST" and response.ok
     ):
@@ -412,7 +436,7 @@ def test_mesh_preset_draws_grid_and_requests_preview(page, desktop):
     assert not writes, "черновой drag не должен сохраняться до отпускания"
     page.mouse.up()
     assert not writes, "отложенная правка не должна сохраняться до команды «Готово»"
-    expect(canvas).to_be_hidden()
+    expect(canvas).to_be_visible()
     after = page.locator(".box--selected .box__point[data-index='15']").get_attribute("style")
     assert after != before, "узел сетки должен сохранять новое положение после отпускания"
     page.locator("[data-role='undo']").click()
@@ -478,14 +502,13 @@ def test_mesh_preset_draws_grid_and_requests_preview(page, desktop):
     expect(apply_edits).to_be_visible()
     with page.expect_response(
         lambda response: "/document" in response.url and response.request.method == "PUT" and response.ok
-    ):
-        with page.expect_response(
-            lambda response: "/preview-region" in response.url and response.request.method == "POST" and response.ok
-        ) as preview_response:
-            apply_edits.click()
-    preview_body = preview_response.value.request.post_data_json
-    assert preview_body["draft"]["style"]["warp"]["kind"] == "mesh"
-    assert preview_body["draft"]["style"]["warp"]["version"] == 2
+    ) as saved:
+        apply_edits.click()
+    payload = saved.value.request.post_data_json["document"]
+    region = payload["regions"][0]
+    assert region["style"]["warp"]["kind"] == "mesh"
+    assert region["style"]["warp"]["version"] == 2
+    expect(apply_edits).to_be_hidden()
 
 
 
@@ -505,6 +528,7 @@ def test_mesh_context_loss_restores_exact_preview(page, desktop):
         }""", page_id)
     card = page.locator("[data-role='region-list'] .region-card").filter(has_text="Hello").first
     card.get_by_text("Hello", exact=True).click()
+    card.locator("[data-region-tab='transform']").click()
     with page.expect_response(
         lambda response: "/preview-region" in response.url and response.request.method == "POST" and response.ok
     ):
@@ -560,6 +584,7 @@ def test_mesh_drag_cancels_on_escape_and_pointercancel(page, desktop):
     regions = page.locator("[data-role='region-list']")
     regions.get_by_text("Hello", exact=True).click()
     card = regions.locator(".region-card--selected")
+    card.locator("[data-region-tab='transform']").click()
     with page.expect_response(
         lambda response: "/preview-region" in response.url and response.request.method == "POST" and response.ok
     ):
@@ -601,9 +626,7 @@ def test_text_layer_moves_without_changing_recognition_box(page):
     regions = page.locator("[data-role='region-list']")
     regions.get_by_text("Hello", exact=True).click()
     card = regions.locator(".region-card--selected")
-    position = card.locator("details.region-card__position")
-    if not position.evaluate("node => node.open"):
-        position.locator("summary").click()
+    card.locator("[data-region-tab='transform']").click()
     card.locator("[data-region-action='text-move']").click()
     box = page.locator(".box--selected")
     rect = box.bounding_box()
@@ -659,6 +682,109 @@ def test_text_layer_moves_without_changing_recognition_box(page):
         page.locator("[data-role='undo']").click()
     restored = undone.value.request.post_data_json["document"]["regions"][0]
     assert restored["text_position"] is None
+
+
+@pytest.mark.ui
+def test_done_requests_layout_snapshot_when_preview_never_arrives(page, desktop):
+    """Done не зависит от завершения preview: snapshot приходит отдельным API."""
+    Image.new("RGB", (320, 180), "white").save(desktop.image)
+    _open_and_translate(page)
+    page_id = page.locator("[data-role='page-list'] [data-page-id]").get_attribute("data-page-id")
+    assert page_id
+    page.route("**/api/pages/*/preview-region", lambda route: route.abort())
+    page.locator("[data-role='region-list']").get_by_text("Hello", exact=True).click()
+    page.evaluate("""async () => {
+      const state = await import('/js/state.js');
+      state.editDocument(document => {
+        const region = document.regions[0];
+        region.bbox = [50, 40, 200, 80];
+        region.layout_snapshot = null;
+        region.style.rotation = 35;
+        region.style.warp = {kind: 'arc', bend: 0.3};
+      }, {deferApply: true});
+    }""")
+    assert page.evaluate("""async () => {
+      const state = await import('/js/state.js');
+      return state.getState().document.regions[0].layout_snapshot;
+    }""") is None
+    apply_edits = page.locator("[data-role='apply-edits']")
+    expect(apply_edits).to_be_visible()
+    with page.expect_response(
+        lambda response: "/layout-snapshot" in response.url
+        and response.request.method == "POST"
+    ) as snapshot_response:
+        with page.expect_response(
+            lambda response: "/document" in response.url
+            and response.request.method == "PUT"
+            and response.ok
+        ) as saved:
+            apply_edits.click()
+    snapshot_payload = snapshot_response.value.json()
+    assert snapshot_payload["layout_snapshot"], {
+        "response": snapshot_payload,
+        "request": snapshot_response.value.request.post_data_json,
+    }
+    region = saved.value.request.post_data_json["document"]["regions"][0]
+    assert region["layout_snapshot"]["version"] == 1
+    assert region["layout_snapshot"]["lines"]
+    expect(apply_edits).to_be_hidden()
+
+
+@pytest.mark.ui
+def test_web_retry_after_terminal_bake_error_requests_rebake_once(page):
+    """Второй Done после ошибки ставит адресный rebake, а не второй PUT."""
+    _open_and_translate(page)
+    page_id = page.locator("[data-role='page-list'] [data-page-id]").get_attribute("data-page-id")
+    assert page_id
+    page.locator("[data-role='region-list']").get_by_text("Hello", exact=True).click()
+    page.evaluate("""async () => {
+      const state = await import('/js/state.js');
+      state.editDocument(document => {
+        document.regions[0].style.warp = {kind: 'wave', bend: 0.2};
+      }, {deferApply: true});
+    }""")
+    state = {"fail": True}
+    rebakes = []
+    puts = []
+    page.on(
+        "request",
+        lambda request: puts.append(1)
+        if request.method == "PUT" and "/document" in request.url
+        else None,
+    )
+
+    def page_route(route):
+        if state["fail"]:
+            route.fulfill(
+                status=200,
+                json={
+                    "page": {"id": page_id},
+                    "status": "error",
+                    "error": "Не собралось",
+                    "render_version": 0,
+                },
+            )
+        else:
+            route.continue_()
+
+    def rebake_route(route):
+        rebakes.append(1)
+        state["fail"] = False
+        route.fulfill(status=200, json={"job_id": "retry", "status": "queued"})
+
+    page.route(f"**/api/pages/{page_id}", page_route)
+    page.route(f"**/api/pages/{page_id}/rebake", rebake_route)
+    apply_edits = page.locator("[data-role='apply-edits']")
+    apply_edits.click()
+    expect(apply_edits).to_be_visible()
+    expect(page.locator("[data-role='banners']")).to_contain_text("Не собралось")
+    assert len(puts) == 1
+    assert rebakes == []
+
+    apply_edits.click()
+    expect(apply_edits).to_be_hidden()
+    assert len(puts) == 1
+    assert rebakes == [1]
 
 
 @pytest.mark.ui

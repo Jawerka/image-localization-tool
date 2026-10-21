@@ -60,14 +60,25 @@ class _CanvasViewState extends State<CanvasView> {
   void initState() {
     super.initState();
     session.addListener(_syncTransform);
+    session.onCancelGesture = _cancelDrag;
     _syncTransform();
   }
 
   @override
   void dispose() {
+    session.onCancelGesture = null;
     session.removeListener(_syncTransform);
     _controller.dispose();
     super.dispose();
+  }
+
+  bool _cancelDrag() {
+    final drag = _drag;
+    if (drag == null) return false;
+    _drag = null;
+    if (drag.kind == 'stroke') session.clearStroke();
+    session.clearPreviews();
+    return true;
   }
 
   static Matrix4 _toMatrix(ViewTransform transform) => Matrix4.identity()
@@ -152,6 +163,13 @@ class _CanvasViewState extends State<CanvasView> {
         session.beginStroke(mode, scene);
         session.setCursor(local);
         return;
+      case 'fill':
+        if (!primary && !secondary) return;
+        viewer.floodFill(
+          scene,
+          secondary ? Stroke.eraseFlood : Stroke.flood,
+        );
+        return;
       case 'polyline':
         if (!primary && !secondary) return;
         if (_isDoubleTap(event)) {
@@ -198,6 +216,7 @@ class _CanvasViewState extends State<CanvasView> {
         }
       }
       if (hitRotateHandle(selected.bbox, scene, scale)) {
+        viewer.prepareLocalPreview(selected.id);
         _drag = _Drag('rotate')
           ..regionId = selected.id
           ..bbox = selected.bbox

@@ -136,3 +136,16 @@ describe("normalizeMaskStroke / paintStrokeOnMask", () => {
     assert.ok(!calls.includes("arc"));
   });
 });
+
+describe("normalizeMaskStroke flood", () => {
+  it("keeps flood modes and tolerance", () => {
+    const flood = normalizeMaskStroke({ mode: "flood", points: [[3, 4]], tolerance: 60 });
+    assert.equal(flood.mode, "flood");
+    assert.equal(flood.tolerance, 60);
+    assert.equal(flood.color, "#ffffff");
+    const erase = normalizeMaskStroke({ mode: "erase_flood", points: [[1, 2]], tolerance: 150 });
+    assert.equal(erase.mode, "erase_flood");
+    assert.equal(erase.tolerance, 100);
+    assert.equal(erase.color, "#000000");
+  });
+});

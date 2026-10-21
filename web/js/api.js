@@ -128,6 +128,16 @@ export function putDocument(id, baseVersion, document) {
   });
 }
 
+export function layoutSnapshot(id, regionId, draft, drafts = null) {
+  const body = { region_id: regionId, draft };
+  if (Array.isArray(drafts)) body.drafts = drafts;
+  return request("POST", `/api/pages/${encodeURIComponent(id)}/layout-snapshot`, body);
+}
+
+export function rebakePage(id) {
+  return request("POST", `/api/pages/${encodeURIComponent(id)}/rebake`, {});
+}
+
 export function resetPage(id) {
   return request("POST", `/api/pages/${encodeURIComponent(id)}/reset`, {});
 }
@@ -266,14 +276,47 @@ export function sfxRestyle(pageId, regionId) {
   );
 }
 
-export async function previewRegion(pageId, regionId, draft = null, revision = 0, mode = "exact") {
+export async function fillPreview(pageId, x, y, tolerance, mode) {
+  let response;
+  try {
+    response = await fetch(`/api/pages/${encodeURIComponent(pageId)}/fill-preview`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", Accept: "image/png" },
+      body: JSON.stringify({ x, y, tolerance, mode }),
+    });
+  } catch (error) {
+    throw new ApiError("Нет связи с программой", 0, null);
+  }
+  if (!response.ok) {
+    let data = null;
+    const text = await response.text();
+    if (text) {
+      try {
+        data = JSON.parse(text);
+      } catch (error) {
+        data = null;
+      }
+    }
+    const message = (data && (data.error || data.message)) || "Не удалось посчитать заливку";
+    throw new ApiError(String(message), response.status, data);
+  }
+  const blob = await response.blob();
+  return {
+    url: URL.createObjectURL(blob),
+    x: Number(response.headers.get("X-Fill-X")) || 0,
+    y: Number(response.headers.get("X-Fill-Y")) || 0,
+  };
+}
+
+export async function previewRegion(pageId, regionId, draft = null, revision = 0, mode = "exact", extra = null) {
   let response;
   try {
     response = await fetch(`/api/pages/${encodeURIComponent(pageId)}/preview-region`, {
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json", Accept: "image/png" },
-      body: JSON.stringify({ region_id: regionId, revision, mode, ...(draft ? { draft } : {}) }),
+      body: JSON.stringify({ region_id: regionId, revision, mode, ...(draft ? { draft } : {}), ...(extra || {}) }),
     });
   } catch (error) {
     throw new ApiError("Нет связи с программой", 0, null);
@@ -300,6 +343,9 @@ export async function previewRegion(pageId, regionId, draft = null, revision = 0
     height: 0,
     revision: Number(response.headers.get("X-Preview-Revision")) || 0,
     mode,
+    layoutSnapshot: response.headers.get("X-Layout-Snapshot") || "",
+    anchorX: Number(response.headers.get("X-Layer-Anchor-X")),
+    anchorY: Number(response.headers.get("X-Layer-Anchor-Y")),
   };
 }
 

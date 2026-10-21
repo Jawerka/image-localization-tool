@@ -84,6 +84,7 @@
 
 .frame__mask {
   display: none;
+  z-index: 2;
   mix-blend-mode: multiply;
   pointer-events: none;
 }
@@ -578,6 +579,16 @@
   color: var(--text-warning);
 }
 
+.frame__base-page {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  object-fit: fill;
+}
+
 .frame__preview {
   position: absolute;
   z-index: 2;
@@ -589,6 +600,13 @@
   position: absolute;
   z-index: 2;
   pointer-events: none;
+}
+
+.frame__mesh-overlay {
+  position: absolute;
+  z-index: 3;
+  pointer-events: none;
+  object-fit: fill;
 }
 
 .frame__boxes {

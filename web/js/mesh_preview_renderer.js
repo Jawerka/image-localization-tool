@@ -1,4 +1,5 @@
-import { isValidMesh, mapMeshForward } from "./text_mesh.js";
+import { isValidMesh } from "./text_mesh.js";
+import { BEND_WARPS, buildWarpPositions } from "./warp_surface.js";
 
 const GRID_X = 16;
 const GRID_Y = 12;
@@ -113,19 +114,44 @@ export class MeshPreviewRenderer {
     return values;
   }
 
-  render({ mesh, bbox, origin, rotation = 0, textPosition = null, anchor = null, pageSize }) {
-    if (!this.ready || !this.image || !isValidMesh(mesh)) return false;
+  render({
+    kind = "mesh",
+    mesh = null,
+    bend = 0,
+    bbox,
+    origin = null,
+    textPosition = null,
+    anchor = null,
+    pageSize,
+  }) {
+    if (!this.ready || !this.image) return false;
     const [bx, by, bw, bh] = bbox.map(Number);
     if (!(bw > 1 && bh > 1)) return false;
+    const isBendWarp = BEND_WARPS.includes(kind);
+    if (!isBendWarp && !isValidMesh(mesh)) return false;
     const pivot = anchor || [bx + bw / 2, by + bh / 2];
     const target = textPosition || pivot;
     const delta = [Number(target[0]) - pivot[0], Number(target[1]) - pivot[1]];
-    const radians = (Number(rotation) * Math.PI) / 180;
-    const cos = Math.cos(radians);
-    const sin = Math.sin(radians);
+    const controls = isBendWarp
+      ? null
+      : (Array.isArray(mesh[0]) && Array.isArray(mesh[0][0]))
+        ? mesh.flat()
+        : mesh;
     const columns = GRID_X * SUBDIVISIONS;
     const rows = GRID_Y * SUBDIVISIONS;
     const points = new Float32Array((columns + 1) * (rows + 1) * 2);
+    const bendPoints = isBendWarp
+      ? buildWarpPositions(
+        kind,
+        this.image.naturalWidth || this.image.width,
+        this.image.naturalHeight || this.image.height,
+        Number(bend) || 0,
+        columns,
+        rows,
+      )
+      : null;
+    const originX = Number(origin && origin[0]) || 0;
+    const originY = Number(origin && origin[1]) || 0;
     let index = 0;
     let left = Infinity;
     let top = Infinity;
@@ -133,15 +159,34 @@ export class MeshPreviewRenderer {
     let bottom = -Infinity;
     for (let y = 0; y <= rows; y += 1) {
       for (let x = 0; x <= columns; x += 1) {
-        const sourceX = Number(origin[0]) + (x / columns) * this.image.naturalWidth;
-        const sourceY = Number(origin[1]) + (y / rows) * this.image.naturalHeight;
-        const dx = sourceX - pivot[0];
-        const dy = sourceY - pivot[1];
-        const rotatedX = pivot[0] + cos * dx - sin * dy;
-        const rotatedY = pivot[1] + sin * dx + cos * dy;
-        const warped = mapMeshForward([rotatedX - bx, rotatedY - by], mesh, bw, bh);
-        const outputX = warped ? bx + warped[0] + delta[0] : NaN;
-        const outputY = warped ? by + warped[1] + delta[1] : NaN;
+        let outputX;
+        let outputY;
+        if (bendPoints) {
+          const point = bendPoints[y * (columns + 1) + x] || [0, 0];
+          outputX = originX + point[0] + delta[0];
+          outputY = originY + point[1] + delta[1];
+        } else {
+          const gx = (x / columns) * 3;
+          const gy = (y / rows) * 3;
+          const col = Math.min(2, Math.floor(gx));
+          const row = Math.min(2, Math.floor(gy));
+          const u = Math.min(1, gx - col);
+          const v = Math.min(1, gy - row);
+          const p00 = controls[row * 4 + col];
+          const p10 = controls[row * 4 + col + 1];
+          const p01 = controls[(row + 1) * 4 + col];
+          const p11 = controls[(row + 1) * 4 + col + 1];
+          outputX = bx + delta[0]
+            + p00[0] * (1 - u) * (1 - v)
+            + p10[0] * u * (1 - v)
+            + p01[0] * (1 - u) * v
+            + p11[0] * u * v;
+          outputY = by + delta[1]
+            + p00[1] * (1 - u) * (1 - v)
+            + p10[1] * u * (1 - v)
+            + p01[1] * (1 - u) * v
+            + p11[1] * u * v;
+        }
         points[index++] = outputX;
         points[index++] = outputY;
         if (Number.isFinite(outputX) && Number.isFinite(outputY)) {

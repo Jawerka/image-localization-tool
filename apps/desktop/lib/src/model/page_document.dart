@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:ui' show Offset, Rect;
+import 'dart:ui' as ui show Image;
 
 /// Модель документа страницы.
 ///
@@ -210,16 +211,20 @@ class Stroke {
     required this.mode,
     required this.radius,
     required this.points,
+    this.tolerance = 0,
   });
 
   final String mode;
   final double radius;
   final List<Offset> points;
+  final int tolerance;
 
   static const paint = 'paint';
   static const erase = 'erase';
   static const fill = 'fill';
   static const eraseFill = 'erase_fill';
+  static const flood = 'flood';
+  static const eraseFlood = 'erase_flood';
 
   factory Stroke.fromJson(Map<String, dynamic> json) {
     final rawPoints = json['points'];
@@ -232,6 +237,7 @@ class Stroke {
             if (point is List && point.length >= 2)
               Offset(_double(point[0]), _double(point[1])),
       ],
+      tolerance: _int(json['tolerance']).clamp(0, 100).toInt(),
     );
   }
 
@@ -241,7 +247,23 @@ class Stroke {
     'points': [
       for (final point in points) [point.dx, point.dy],
     ],
+    'tolerance': tolerance,
   };
+}
+
+/// Ключ превью заливки: совпадает у штриха и запроса к серверу.
+String fillStrokeKey(Stroke stroke) {
+  if (stroke.points.isEmpty) return '';
+  final point = stroke.points.first;
+  return '${point.dx.round()}|${point.dy.round()}|${stroke.tolerance}|${stroke.mode}';
+}
+
+/// Готовая картинка превью заливки и её смещение на странице.
+class FillPreview {
+  const FillPreview({required this.image, required this.offset});
+
+  final ui.Image image;
+  final Offset offset;
 }
 
 /// Нормализация документа (зеркало `normalizeDocument` в web/js/state.js).
@@ -376,7 +398,11 @@ dynamic deepCopy(dynamic value) {
 
 String _normalizeStrokeMode(Object? raw) {
   final value = '${raw ?? ''}';
-  if (value == 'erase' || value == 'erase_fill' || value == 'fill') {
+  if (value == 'erase' ||
+      value == 'erase_fill' ||
+      value == 'fill' ||
+      value == 'flood' ||
+      value == 'erase_flood') {
     return value;
   }
   return Stroke.paint;

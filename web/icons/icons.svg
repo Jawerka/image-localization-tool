@@ -47,6 +47,14 @@
       <path d="M4.8 20.6c1.3-.9 2.1-.7 2.8 0 .8.8 1.7.2 2.8-.6"/>
     </g>
   </symbol>
+  <symbol id="fill" viewBox="0 0 24 24">
+    <g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M11 7 6 2"/>
+      <path d="M18.992 12H2.041"/>
+      <path d="M21.145 18.38A3.34 3.34 0 0 1 20 16.5a3.3 3.3 0 0 1-1.145 1.88c-.575.46-.855 1.02-.855 1.595A2 2 0 0 0 20 22a2 2 0 0 0 2-2.025c0-.58-.285-1.13-.855-1.595"/>
+      <path d="m8.5 4.5 2.148-2.148a1.205 1.205 0 0 1 1.704 0l7.296 7.296a1.205 1.205 0 0 1 0 1.704l-7.592 7.592a3.615 3.615 0 0 1-5.112 0l-3.888-3.888a3.615 3.615 0 0 1 0-5.112L5.67 7.33"/>
+    </g>
+  </symbol>
   <symbol id="polyline" viewBox="0 0 24 24">
     <g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
       <path d="M4 18 9 8 14 14 20 5"/>
@@ -88,6 +96,13 @@
       <rect x="3.5" y="4.5" width="17" height="15" rx="1"/>
       <circle cx="8.5" cy="9" r="1.4"/>
       <path d="M3.5 16.2 8.4 12.2 12 15.2 15.2 12.4 20.5 16.8"/>
+    </g>
+  </symbol>
+  <symbol id="clean" viewBox="0 0 24 24">
+    <g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3.5" y="4.5" width="17" height="15" rx="1"/>
+      <path d="m8.5 15.5 6.5-6.5"/>
+      <path d="M14.8 5.4v2M13.8 6.4h2M18 9.8v2M17 10.8h2"/>
     </g>
   </symbol>
   <symbol id="mask" viewBox="0 0 24 24">

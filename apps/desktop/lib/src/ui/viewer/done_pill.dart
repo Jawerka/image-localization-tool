@@ -62,10 +62,20 @@ class DonePill extends StatelessWidget {
                 ),
               ),
               Text(
-                '${editsLabel(viewer.editCount)} · не применены',
+                viewer.isApplying
+                    ? 'Применяется…'
+                    : '${editsLabel(viewer.editCount)} · не применены',
                 style: theme.textTheme.labelSmall
                     ?.copyWith(color: palette.textPrimary),
               ),
+              if (viewer.isApplying) ...[
+                const SizedBox(width: 6),
+                const SizedBox(
+                  width: 12,
+                  height: 12,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ],
               const SizedBox(width: 6),
               TextButton(
                 key: const Key('viewer-done-apply'),
@@ -74,8 +84,12 @@ class DonePill extends StatelessWidget {
                   minimumSize: const Size(0, 26),
                   visualDensity: VisualDensity.compact,
                 ),
-                onPressed: viewer.commitDeferredEdits,
-                child: const Text('Готово'),
+                onPressed: viewer.isApplying
+                    ? null
+                    : () {
+                        viewer.applyDeferredEdits();
+                      },
+                child: Text(viewer.isApplying ? 'Ждём' : 'Готово'),
               ),
             ],
           ),

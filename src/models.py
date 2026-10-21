@@ -219,9 +219,10 @@ class TextRegion:
     translation_locked: bool = False
     document: bool = False
     text_position: tuple[float, float] | None = None
+    layout_snapshot: dict | None = None
 
     def to_dict(self) -> dict:
-        return {
+        data = {
             "id": self.id,
             "bbox": [int(v) for v in self.bbox],
             "class_name": self.class_name,
@@ -242,10 +243,14 @@ class TextRegion:
             "text_position": list(self.text_position) if self.text_position is not None else None,
             "style": self.style.to_dict(),
         }
+        if self.layout_snapshot:
+            data["layout_snapshot"] = self.layout_snapshot
+        return data
 
     @classmethod
     def from_dict(cls, data: dict) -> "TextRegion":
         bubble = data.get("bubble_bbox")
+        snapshot = data.get("layout_snapshot")
         return cls(
             id=int(data["id"]),
             bbox=tuple(int(v) for v in data["bbox"]),
@@ -266,31 +271,39 @@ class TextRegion:
             translation_locked=bool(data.get("translation_locked", False)),
             document=bool(data.get("document", False)),
             text_position=_text_position(data.get("text_position")),
+            layout_snapshot=snapshot if isinstance(snapshot, dict) else None,
         )
 
 
 @dataclass
 class MaskStroke:
-    """Штрих кисти, ластика или заливка лассо поверх маски букв."""
+    """Штрих кисти, ластика, заливка лассо или заливка по цвету."""
 
     mode: str
     radius: int
     points: list[tuple[int, int]]
+    tolerance: int = 0
 
     def to_dict(self) -> dict:
         return {
             "mode": self.mode,
             "radius": int(self.radius),
             "points": [[int(x), int(y)] for x, y in self.points],
+            "tolerance": int(self.tolerance),
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "MaskStroke":
         mode = str(data.get("mode") or "")
-        if mode not in ("paint", "erase", "fill", "erase_fill"):
+        if mode not in ("paint", "erase", "fill", "erase_fill", "flood", "erase_flood"):
             raise ValueError(f"Некорректный режим штриха: {mode}")
         points = [(int(point[0]), int(point[1])) for point in data.get("points") or []]
-        return cls(mode=mode, radius=int(data.get("radius") or 0), points=points)
+        return cls(
+            mode=mode,
+            radius=int(data.get("radius") or 0),
+            points=points,
+            tolerance=max(0, min(100, int(data.get("tolerance") or 0))),
+        )
 
 
 def should_translate(region: TextRegion, translate_sfx: bool = False) -> bool:

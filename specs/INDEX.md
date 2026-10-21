@@ -81,6 +81,8 @@
 | 048-sidebar-tabs | web → Flutter | in-progress | [tasks](048-sidebar-tabs/tasks.md) 3/5; Flutter-вкладки реализованы | `T004`/`T005` |
 | 049-viewer-layer-prefs | Flutter + backend | in-progress | [tasks](049-viewer-layer-prefs/tasks.md) 10/11; analyze, 142 Flutter-теста, pytest | `T009`: ручная проверка после перезапуска |
 
+| 051-region-tabs-live-transform | Flutter + web + backend | in-progress | [tasks](051-region-tabs-live-transform/tasks.md) 26/28; 698 unit, 185 Flutter, 68 JS, Chromium 16/16; [recheck](../docs/REGION_TABS_LIVE_TRANSFORM_RECHECK.md), [review](../docs/REGION_TABS_REVIEW_T020_T023.md) | `T019`–`T028` закрыты: snapshot/scaling, web snapshot в Done, адресный rebake, stable extent, сравнение рендера с экспортом, сохранение draft snapshot, новые регионы, режим partial compose, план `clean` и атомарность rebake; `T017`–`T018`: ручная приёмка EXE/DPI/p95/GPU memory |
+
 ## Правило приёмки
 
 `accepted` ставится только после реального прогона на целевой поверхности: Flutter EXE, расширение в Firefox/Chromium или чистый Linux-хост. Зелёные unit/UI-тесты с FakeWorker или синтетическим Chromium сами по себе не переводят спеку в `accepted`.

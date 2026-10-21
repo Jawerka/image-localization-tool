@@ -206,6 +206,82 @@ def test_paint_reports_done(tmp_path, monkeypatch):
     assert store.page_status(project["id"], page_id)["status"] == "done"
 
 
+def test_apply_document_keeps_snapshot_without_layout_scale(tmp_path, monkeypatch):
+    from src.components.typesetter import Typesetter
+    from src.config import Config
+    from src.page_pipeline import PagePipeline
+
+    store = ProjectStore(tmp_path)
+    project = store.create_project("Глава", "en", "ru")
+    source = tmp_path / "page.png"
+    page_image = Image.new("RGB", (400, 300), "white")
+    page_image.save(source)
+    page_id = store.add_sources(project["id"], [source])[0]["id"]
+    region = TextRegion(
+        id=1,
+        bbox=(80, 80, 160, 75),
+        translation="This is a longer sentence for a rotation layout comparison",
+        block_type="dialogue",
+    )
+    seed = Typesetter(min_font_size=10, max_font_size=28, lang="en")
+    seed.render_layer(
+        page_image.copy(), [TextRegion.from_dict(region.to_dict())],
+        force=True, apply_geometry=False, trim=False,
+    )
+    snapshot = dict(seed._last_layouts[1])
+
+    document = store.read_document(project["id"], page_id)
+    document.regions = [TextRegion.from_dict(region.to_dict())]
+    document.regions[0].layout_snapshot = snapshot
+    document.regions[0].style.rotation = 35
+    document = store.write_document(
+        project["id"], page_id, document, base_version=document.version,
+    )
+    store.save_image(project["id"], page_id, "clean", page_image)
+    store.save_image(project["id"], page_id, "result", page_image)
+    store.record_result_provenance(
+        project["id"], page_id, document_version=document.version, region_bounds={},
+    )
+
+    config = Config(auto_stylized_fonts=False)
+    pipe = PagePipeline(
+        config=config,
+        typesetter=Typesetter(min_font_size=10, max_font_size=28, lang="en"),
+    )
+
+    class _Ctx:
+        typeset_lock = threading.Lock()
+        events = []
+
+        def cancel_check(self, _job_id):
+            return lambda: False
+
+        def emit(self, event):
+            self.events.append(event)
+
+    monkeypatch.setattr(worker, "_pipeline", lambda *_args, **_kwargs: (pipe, config))
+    worker._run_apply(
+        {
+            "id": "rebake",
+            "project_id": project["id"],
+            "page_id": page_id,
+            "settings": {},
+            "payload": {
+                "plan": "typeset",
+                "base_version": document.version,
+                "store_root": str(store.root),
+            },
+        },
+        _Ctx(),
+    )
+
+    layout = pipe.typesetter._last_layouts[1]
+    assert layout["font_size"] == snapshot["font_size"]
+    assert layout["lines"] == snapshot["lines"]
+    with Image.open(store.image_path(project["id"], page_id, "result")) as saved:
+        assert saved.size == page_image.size
+
+
 def test_paint_uses_current_provenance_and_refreshes_it(tmp_path, monkeypatch):
     store = ProjectStore(tmp_path)
     project = store.create_project("Глава", "en", "ru")

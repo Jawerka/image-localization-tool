@@ -143,11 +143,13 @@ ZIP, CBZ, CBR/RAR, CB7/7Z и CBT/TAR распаковываются в ката�
 |-------|------|------------|
 | GET | `/api/bootstrap` | Версия, настройки, предупреждение схемы, проект, страницы, статус LLM, готовность моделей, `busy`, недавние проекты, `has_api_key`, пути `settings` и `data` |
 | GET | `/api/pages` | Всегда 404. Список страниц приходит в bootstrap и в ответах, которые меняют проект |
-| GET | `/api/pages/{id}` | Строка страницы и документ |
+| GET | `/api/pages/{id}` | Строка страницы и документ; `render_version` — версия, для которой уже собран `result` |
 | PUT | `/api/pages/{id}/document` | Запись документа. Нужны `base_version` и `document`. При плане `typeset` или `clean` страница становится `edited` и уходит в очередь |
 | POST | `/api/pages/{id}/reset` | Вернуть документ из `auto.json` и заново очистить |
 | POST | `/api/pages/{id}/action` | Действие региона: `recognize`, `retranslate`, `shorten`. Нужен `region_id` |
-| POST | `/api/pages/{id}/preview-region` | Точный предпросмотр вёрстки региона (`region_id`) или исходного прозрачного RGBA-слоя (`mode: "base-layer"`). Ответ `image/png`; заголовки `X-Offset-X`, `X-Offset-Y`, `X-Preview-Revision`. Режим `base-layer` не меняет документ и используется локальным mesh preview до финального точного рендера. |
+| POST | `/api/pages/{id}/preview-region` | Предпросмотр региона. `mode: "exact"` — точный crop, `"base-layer"` — прозрачный RGBA-слой с замороженной раскладкой, `"base-page"` — страница без выбранного региона (с учётом `drafts`). Ответ `image/png`; заголовки `X-Offset-X`, `X-Offset-Y`, `X-Preview-Revision`, `X-Preview-Mode`, а для слоя — `X-Layer-Anchor-X`, `X-Layer-Anchor-Y`, `X-Renderer-Version`. Локальный preview не меняет документ. |
+| POST | `/api/pages/{id}/layout-snapshot` | Свежая раскладка черновика (`region_id`, необязательные `draft`/`drafts`) без PNG. Ответ `{region_id, layout_snapshot}`; `null`, если раскладки ещё нет |
+| POST | `/api/pages/{id}/rebake` | Повторить вёрстку текущей версии без нового документа. Возвращает активный `apply_document`, `done` при актуальном результате или ставит новую сборку |
 | POST | `/api/pages/{id}/regions/{region_id}/sfx-style` | Подобрать стиль звука и записать его в регион. Страница становится `edited` |
 | GET | `/api/pages/{id}/image/{kind}` | Картинка: `original`, `result`, `clean`, `mask`, `thumb` |
 | POST | `/api/jobs/translate` | `scope`: `page` (нужен `page_id`) или `all` |
@@ -258,7 +260,7 @@ F5, Ctrl+R, Ctrl+P и Ctrl+F перехватываются. Ctrl+R и F5 про
 | Клавиши | Действие |
 |---------|----------|
 | F1 | Список горячих клавиш |
-| Esc | Закрыть меню или диалог, отменить настройки, остановить обработку или снять выделение региона |
+| Esc | Закрыть меню или диалог, отменить настройки, остановить обработку, отменить текущий жест или снять выделение региона |
 | Ctrl+O | Открыть файлы |
 | Ctrl+Shift+O | Открыть папку |
 | Ctrl+E | Экспорт |
@@ -278,7 +280,7 @@ F5, Ctrl+R, Ctrl+P и Ctrl+F перехватываются. Ctrl+R и F5 про
 | `[` / `]` | Размер кисти на 1 |
 | Пробел | Зажать, чтобы тащить холст. Не срабатывает в поле, в настройках, в списке страниц и на кнопке |
 | V R B E H | Инструменты: выбор, регион, кисть, ластик, рука |
-| 1 2 3 | Виды: оригинал, результат, сравнение |
+| 1 2 3 4 | Виды: оригинал, результат, сравнение, чистый |
 | M | Слой маски |
 | L | Слой рамок |
 

@@ -28,7 +28,9 @@ import {
   inspectorContentKey,
   shouldSkipInspectorRebuild,
 } from "./inspector_render.js";
-import { clearMeshPreviewBase, setMeshPreviewBase, setStylePreview, viewCenter } from "./viewer.js";
+import { clearMeshPreviewBase, meshPreviewActiveFor, redrawMeshPreview, setMeshPreviewBase, setMeshPreviewOverlay, setStylePreview, viewCenter } from "./viewer.js";
+import { REGION_TABS, regionTabFor, setRegionTab } from "./region_tabs.js";
+import { BEND_WARPS } from "./warp_surface.js";
 
 const TYPES = [
   ["dialogue", "диалог"],
@@ -54,6 +56,9 @@ let previewRevision = 0;
 let stylesProject = "";
 let sfxNote = null;
 let lastRegionsKey = "";
+let lastPreviewRegionId = "";
+const regionTabs = new Map();
+const meshFallbackIds = new Set();
 
 export function init() {
   list = document.querySelector("[data-role='region-list']");
@@ -65,6 +70,15 @@ export function init() {
   });
   tabsRoot.querySelector("[role='tablist']").addEventListener("keydown", onTabKey);
   document.querySelector("[data-role='add-region']").addEventListener("click", addRegion);
+  list.addEventListener("keydown", onRegionTabKey);
+  document.addEventListener("ilt-mesh-unavailable", (event) => {
+    const regionId = String(event.detail?.regionId || "");
+    if (!regionId) return;
+    meshFallbackIds.add(regionId);
+    previewKey = "";
+    clearMeshPreviewBase();
+    watchPreview(getState());
+  });
   fontList().then((data) => {
     const fonts = (data && data.fonts) || [];
     injectFontFaces(fonts);
@@ -183,6 +197,15 @@ function renderRegions(state, page) {
     list.querySelectorAll("[data-region-action]").forEach((button) => {
       button.addEventListener("click", () => onAction(button));
     });
+    list.querySelectorAll("[data-region-tab]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const cardNode = button.closest("[data-region-id]");
+        if (!cardNode) return;
+        const tab = button.dataset.regionTab;
+        setRegionTab(regionTabs, getState(), cardNode.dataset.regionId, tab);
+        applyRegionTab(cardNode, tab);
+      });
+    });
     list.querySelectorAll("[data-ink]").forEach((button) => {
       button.addEventListener("click", () => onInk(button));
     });
@@ -251,44 +274,105 @@ function card(region, index, state, detailsOpen = null) {
   const pending = state.pendingAction && sameId(state.pendingAction.regionId, region.id)
     ? `<p class="warn-line">${icon("warning")}<span>Ждёт сервер LLM</span></p>`
     : "";
-  const positionOpen = detailsOpenFromMap(detailsOpen, region.id, "position", false);
-  return `<article class="${classes.join(" ")}" data-region-id="${escapeAttr(region.id)}" aria-current="true">${head}${pending}
-    <section class="inspector-section" aria-label="Текст">
-      <h3 class="inspector-section__title">Текст</h3>
-      <div class="text-editor">
-        <div class="text-editor__head"><label for="orig-${escapeAttr(region.id)}">Оригинал</label><button type="button" class="btn btn-ghost" data-region-action="recognize">Распознать</button></div>
-        <textarea id="orig-${escapeAttr(region.id)}" class="textarea" lang="${escapeAttr(state.settings.source_lang)}" rows="2" data-field="text">${escapeText(region.text)}</textarea>
-      </div>
-      <div class="text-editor text-editor--translation">
-        <div class="text-editor__head"><label for="tr-${escapeAttr(region.id)}">Перевод</label><span class="text-editor__language">${escapeText(state.settings.target_lang || "")}</span></div>
-        <textarea id="tr-${escapeAttr(region.id)}" class="textarea" lang="${escapeAttr(state.settings.target_lang)}" rows="3" data-field="translation">${escapeText(region.translation)}</textarea>
-        <div class="text-editor__actions"><button type="button" class="btn btn-ghost" data-region-action="retranslate">Перевести заново</button><button type="button" class="btn btn-ghost" data-region-action="shorten">Сократить</button></div>
-      </div>
-      <div class="region-card__row">
-        <label class="field" for="type-${escapeAttr(region.id)}">Тип<select id="type-${escapeAttr(region.id)}" class="select" data-field="type">${typeOptions(region.type)}</select></label>
-        <label class="field" for="speaker-${escapeAttr(region.id)}">Говорящий<input id="speaker-${escapeAttr(region.id)}" class="input" type="text" placeholder="Не указан" data-field="speaker" value="${escapeAttr(region.speaker)}"></label>
-      </div>
-      ${sfxNoteHtml(region)}
-      ${(region.type || region.block_type) === "sfx" ? sfxButton(region) : ""}
-    </section>
-    <section class="inspector-section" aria-label="Оформление">
-      <h3 class="inspector-section__title">Оформление <span>Аа</span></h3>
-      ${cardStyleMarkup(region, state, detailsOpen)}
-    </section>
-    <details class="region-card__position inspector-section"${positionOpen}>
-      <summary>Положение на странице</summary>
-      <button type="button" class="btn btn-accent" data-region-action="geometry">Редактировать на холсте</button>
-      <button type="button" class="btn btn-ghost" data-region-action="text-move" aria-pressed="${sameId(state.textMoveRegionId, region.id) ? "true" : "false"}">Перемещать только текст</button>
-      <p class="field-hint">В режиме перемещения текста тяните рамку, чтобы изменить положение надписи, не меняя область распознавания и очистки.</p>
-      <p class="field-hint">В обычном режиме тяните рамку для перемещения области, края — для размера. Shift — движение по одной оси.</p>
-      ${nudgePadMarkup()}
-      <button type="button" class="btn btn-ghost" data-region-action="reset-style">Сбросить геометрию</button>
-    </details>
+  const short = String(region.translation || "").trim();
+  const activeTab = regionTabFor(regionTabs, state, region.id);
+  const tabButtons = REGION_TABS.map(([id, label]) => {
+    const on = id === activeTab;
+    return `<button type="button" role="tab" class="region-tab" id="rtab-${id}-${escapeAttr(region.id)}" data-region-tab="${id}" aria-controls="rpanel-${id}-${escapeAttr(region.id)}" aria-selected="${on ? "true" : "false"}" tabindex="${on ? 0 : -1}">${label}</button>`;
+  }).join("");
+  const panel = (id, body) => `<section class="inspector-section region-panel" role="tabpanel" id="rpanel-${id}-${escapeAttr(region.id)}" aria-labelledby="rtab-${id}-${escapeAttr(region.id)}" data-region-panel="${id}"${id === activeTab ? "" : " hidden"}>${body}</section>`;
+  return `<article class="${classes.join(" ")}" data-region-id="${escapeAttr(region.id)}" aria-current="true">${head}${short ? `<p class="muted">${escapeText(short)}</p>` : ""}${pending}
+    <div class="region-card__tabs" role="tablist" aria-label="Вкладки региона">${tabButtons}</div>
+    ${panel("text", cardTextMarkup(region, state))}
+    ${panel("font", cardFontMarkup(region, state, detailsOpen))}
+    ${panel("transform", cardTransformMarkup(region))}
     <footer class="region-card__footer">
       <button type="button" class="btn btn-ghost" data-region-action="skip" aria-pressed="${region.skip ? "true" : "false"}">Не переводить</button>
       <button type="button" class="btn btn-ghost" data-region-action="delete">${icon("delete")}Удалить</button>
     </footer>
   </article>`;
+}
+
+/** Вкладка региона запоминается в UI-состоянии, а не в документе. */
+function applyRegionTab(cardNode, tab) {
+  cardNode.querySelectorAll("[data-region-tab]").forEach((button) => {
+    const on = button.dataset.regionTab === tab;
+    button.setAttribute("aria-selected", on ? "true" : "false");
+    button.tabIndex = on ? 0 : -1;
+  });
+  cardNode.querySelectorAll("[data-region-panel]").forEach((panel) => {
+    panel.hidden = panel.dataset.regionPanel !== tab;
+  });
+}
+
+function onRegionTabKey(event) {
+  const button = event.target.closest?.("[data-region-tab]");
+  if (!button) return;
+  const cardNode = button.closest("[data-region-id]");
+  if (!cardNode) return;
+  const tabs = [...cardNode.querySelectorAll("[data-region-tab]")];
+  const index = tabs.indexOf(button);
+  if (index < 0) return;
+  let next = -1;
+  if (event.key === "ArrowRight" || event.key === "ArrowDown") next = (index + 1) % tabs.length;
+  if (event.key === "ArrowLeft" || event.key === "ArrowUp") next = (index - 1 + tabs.length) % tabs.length;
+  if (event.key === "Home") next = 0;
+  if (event.key === "End") next = tabs.length - 1;
+  if (next < 0) return;
+  event.preventDefault();
+  const tab = tabs[next].dataset.regionTab;
+  setRegionTab(regionTabs, getState(), cardNode.dataset.regionId, tab);
+  applyRegionTab(cardNode, tab);
+  tabs[next].focus();
+}
+
+function cardTextMarkup(region, state) {
+  return `<h3 class="inspector-section__title">Текст</h3>
+    <div class="text-editor">
+      <div class="text-editor__head"><label for="orig-${escapeAttr(region.id)}">Оригинал</label><button type="button" class="btn btn-ghost" data-region-action="recognize">Распознать</button></div>
+      <textarea id="orig-${escapeAttr(region.id)}" class="textarea" lang="${escapeAttr(state.settings.source_lang)}" rows="2" data-field="text">${escapeText(region.text)}</textarea>
+    </div>
+    <div class="text-editor text-editor--translation">
+      <div class="text-editor__head"><label for="tr-${escapeAttr(region.id)}">Перевод</label><span class="text-editor__language">${escapeText(state.settings.target_lang || "")}</span></div>
+      <textarea id="tr-${escapeAttr(region.id)}" class="textarea" lang="${escapeAttr(state.settings.target_lang)}" rows="3" data-field="translation">${escapeText(region.translation)}</textarea>
+      <div class="text-editor__actions"><button type="button" class="btn btn-ghost" data-region-action="retranslate">Перевести заново</button><button type="button" class="btn btn-ghost" data-region-action="shorten">Сократить</button></div>
+    </div>
+    <div class="region-card__row">
+      <label class="field" for="type-${escapeAttr(region.id)}">Тип<select id="type-${escapeAttr(region.id)}" class="select" data-field="type">${typeOptions(region.type)}</select></label>
+      <label class="field" for="speaker-${escapeAttr(region.id)}">Говорящий<input id="speaker-${escapeAttr(region.id)}" class="input" type="text" placeholder="Не указан" data-field="speaker" value="${escapeAttr(region.speaker)}"></label>
+    </div>
+    ${(region.type || region.block_type) === "sfx" ? `<p class="field-hint">Крупный текст без баллона, 1–2 слова — типичный SFX. Если это реплика, переключите тип на «диалог».</p>` : ""}`;
+}
+
+function cardTransformMarkup(region) {
+  const warp = region.style?.warp || {};
+  const bend = Number(warp.bend);
+  const bendValue = Number.isFinite(bend) ? bend : 0;
+  const choice = warpChoice(warp);
+  const skew = Number(region.style?.skew_x) || 0;
+  const skewHint = skew
+    ? '<p class="field-hint">Наклон (skew) не поддержан локально: показан серверный предпросмотр.</p>'
+    : "";
+  const presets = CARD_WARPS.map(([id, label]) => {
+    const pressed = choice === id ? "true" : "false";
+    return `<button type="button" class="btn btn-ghost" data-card-warp="${id}" aria-pressed="${pressed}">${escapeText(label)}</button>`;
+  }).join("");
+  return `<h3 class="inspector-section__title">Трансформация</h3>
+    ${skewHint}
+    <button type="button" class="btn btn-accent" data-region-action="geometry">Редактировать на холсте</button>
+    <button type="button" class="btn btn-ghost" data-region-action="text-move" aria-pressed="${sameId(getState().textMoveRegionId, region.id) ? "true" : "false"}">Перемещать только текст</button>
+    <p class="field-hint">В режиме перемещения текста тяните рамку, чтобы изменить положение надписи, не меняя область распознавания и очистки.</p>
+    <p class="field-hint">В обычном режиме тяните рамку для перемещения области, края — для размера. Shift — движение по одной оси.</p>
+    ${nudgePadMarkup()}
+    <div class="warp-presets" role="group" aria-label="Вид искривления">${presets}</div>
+    <p class="field-hint">Сетка: Ctrl-клик выбирает несколько узлов для совместного перетаскивания. Shift зеркалит одиночный узел; двойной щелчок сбрасывает узел.</p>
+    <label class="field" for="bend-${escapeAttr(region.id)}">Изгиб
+      <span class="style-range">
+        <input id="bend-${escapeAttr(region.id)}" type="range" min="-1" max="1" step="0.05" data-field="warp_bend" value="${escapeAttr(String(bendValue))}">
+        <output for="bend-${escapeAttr(region.id)}">${bendValue.toFixed(2)}</output>
+      </span>
+    </label>
+    <button type="button" class="btn btn-ghost" data-region-action="reset-style">Сбросить геометрию</button>`;
 }
 
 function renderPage(state, page) {
@@ -649,7 +733,7 @@ function nudgePadMarkup() {
   </div>`;
 }
 
-function cardStyleMarkup(region, state, detailsOpen = null) {
+function cardFontMarkup(region, state, detailsOpen = null) {
   const fonts = Array.isArray(state.fonts) ? state.fonts : [];
   const fontId = region.style?.font_id || "";
   const fontOptions = [`<option value="">По умолчанию</option>`]
@@ -666,16 +750,7 @@ function cardStyleMarkup(region, state, detailsOpen = null) {
   const stroke = region.style?.stroke_rgb ? rgbToHex(region.style.stroke_rgb) : "#000000";
   const strokeWidth = Number(region.style?.stroke_width);
   const strokeWidthValue = Number.isFinite(strokeWidth) && strokeWidth > 0 ? String(Math.round(strokeWidth)) : "0";
-  const warp = region.style?.warp || {};
-  const bend = Number(warp.bend);
-  const bendValue = Number.isFinite(bend) ? bend : 0;
-  const choice = warpChoice(warp);
-  const presets = CARD_WARPS.map(([id, label]) => {
-    const pressed = choice === id ? "true" : "false";
-    return `<button type="button" class="btn btn-ghost" data-card-warp="${id}" aria-pressed="${pressed}">${escapeText(label)}</button>`;
-  }).join("");
   const library = Array.isArray(state.styleLibrary) ? state.styleLibrary : [];
-  const warpOpen = detailsOpenFromMap(detailsOpen, region.id, "warp", true);
   const stylesOpen = detailsOpenFromMap(detailsOpen, region.id, "styles", true);
   const styleChips = library.length
     ? `<details class="region-card__styles"${stylesOpen}>
@@ -686,7 +761,9 @@ function cardStyleMarkup(region, state, detailsOpen = null) {
         }).join("")}</div>
       </details>`
     : "";
-  return `<div class="region-card__style">
+  const isSfx = (region.type || region.block_type) === "sfx";
+  return `<h3 class="inspector-section__title">Шрифт</h3>
+    <div class="region-card__style">
     <div class="field">
       <span>Шрифт</span>
       <input class="input font-search" type="search" data-font-search placeholder="Найти шрифт" aria-label="Поиск шрифта">
@@ -712,19 +789,9 @@ function cardStyleMarkup(region, state, detailsOpen = null) {
         <input id="stroke-w-${escapeAttr(region.id)}" type="number" min="0" max="32" step="1" data-field="stroke_width" value="${escapeAttr(strokeWidthValue)}">
       </label>
     </div>
-    <details class="region-card__warp"${warpOpen}>
-      <summary>Изгиб и сетка</summary>
-      <div class="warp-presets" role="group" aria-label="Вид искривления">${presets}</div>
-      <p class="field-hint">Сетка: Ctrl-клик выбирает несколько узлов для совместного перетаскивания. Shift зеркалит одиночный узел; двойной щелчок сбрасывает узел.</p>
-      <label class="field" for="bend-${escapeAttr(region.id)}">Изгиб
-        <span class="style-range">
-          <input id="bend-${escapeAttr(region.id)}" type="range" min="-1" max="1" step="0.05" data-field="warp_bend" value="${escapeAttr(String(bendValue))}">
-          <output for="bend-${escapeAttr(region.id)}">${bendValue.toFixed(2)}</output>
-        </span>
-      </label>
-    </details>
+    ${isSfx ? sfxNoteHtml(region) + sfxButton(region) : ""}
     ${styleChips}
-  </div>`;
+    </div>`;
 }
 
 function filterFonts(input) {
@@ -1046,8 +1113,64 @@ function watchStyles(state) {
   }).catch(() => {});
 }
 
+function regionLayoutKey(state, region) {
+  const style = { ...(region.style || {}) };
+  const kind = style.warp?.kind || "none";
+  delete style.rotation;
+  delete style.warp;
+  const others = (state.document?.regions || [])
+    .filter((item) => !sameId(item.id, region.id))
+    .map((item) => item);
+  return `${state.activePageId}|${region.id}|${JSON.stringify([
+    region.bbox,
+    region.bubble_bbox,
+    region.class_name,
+    region.block_type,
+    region.text,
+    region.translation,
+    style,
+    BEND_WARPS.includes(kind) ? Number(region.style?.rotation) || 0 : 0,
+    others,
+  ])}`;
+}
+
+function rememberLayoutSnapshot(region, encoded) {
+  if (!region || !encoded) return;
+  try {
+    const bytes = Uint8Array.from(atob(encoded), (char) => char.charCodeAt(0));
+    const snapshot = JSON.parse(new TextDecoder().decode(bytes));
+    if (!snapshot || snapshot.version !== 1) return;
+    if (JSON.stringify(region.layout_snapshot) === JSON.stringify(snapshot)) return;
+    // Снимок — производные данные preview; уйдёт в документ со следующим
+    // сохранением, сам по себе не создаёт правку.
+    region.layout_snapshot = snapshot;
+  } catch (error) {
+    // Битый заголовок не должен ломать preview.
+  }
+}
+
+function meshLocalAvailable(region) {
+  const warp = region && region.style && region.style.warp;
+  if (!warp || Number(region.style.skew_x) || 0) return false;
+  if (meshFallbackIds.has(String(region.id))) return false;
+  const kind = warp.kind;
+  if (BEND_WARPS.includes(kind)) return true;
+  return Boolean(
+    kind === "mesh"
+      && Number(warp.version) >= 2
+      && !(Number(region.style.rotation) || 0)
+  );
+}
+
 function watchPreview(state) {
   const region = findRegion(state.document, state.selectedRegionId);
+  const regionId = region ? `${state.activePageId}|${region.id}` : "";
+  if (regionId !== lastPreviewRegionId) {
+    lastPreviewRegionId = regionId;
+    meshFallbackIds.clear();
+    clearMeshPreviewBase();
+    setStylePreview(null);
+  }
   const key = region ? `${state.activePageId}|${region.id}|${JSON.stringify([region.style || {}, region.bbox, region.text, region.translation, region.text_position || null])}` : "";
   if (key === previewKey) return;
   previewKey = key;
@@ -1060,46 +1183,70 @@ function watchPreview(state) {
     }
     return;
   }
+  if (meshLocalAvailable(region) && meshPreviewActiveFor(regionLayoutKey(state, region), region.id)) {
+    redrawMeshPreview(region);
+    return;
+  }
   const pageId = state.activePageId;
-  const regionId = region.id;
+  const id = region.id;
   patch({ stylePreview: { status: "loading", message: "Обновляем предпросмотр" } });
   const revision = ++previewRevision;
-  previewTimer = window.setTimeout(() => runPreview(pageId, regionId, key, revision), 400);
+  previewTimer = window.setTimeout(() => runPreview(pageId, id, key, revision), 400);
 }
 
 async function runPreview(pageId, regionId, key, revision) {
   const token = ++previewToken;
   try {
-    const draft = findRegion(getState().document, regionId);
+    const state = getState();
+    const draft = findRegion(state.document, regionId);
     if (key !== previewKey || !draft) return;
-    const warp = draft.style && draft.style.warp;
-    const needsMeshLayer = warp && warp.kind === "mesh" && Number(warp.version) >= 2;
-    const baseRequest = needsMeshLayer
-      ? previewRegion(pageId, regionId, draft, revision, "base-layer")
-      : null;
-    if (!needsMeshLayer) clearMeshPreviewBase();
+    if (meshLocalAvailable(draft)) {
+      const layoutKey = regionLayoutKey(state, draft);
+      const kind = draft.style?.warp?.kind;
+      const applyRotation = BEND_WARPS.includes(kind)
+        && Boolean(Number(draft.style?.rotation) || 0);
+      const [pagePreview, layerPreview, overlayPreview] = await Promise.all([
+        previewRegion(pageId, regionId, draft, revision, "base-page", {
+          drafts: state.document?.regions || [],
+          drafts_complete: true,
+        }),
+        previewRegion(pageId, regionId, draft, revision, "base-layer", {
+          apply_rotation: applyRotation,
+        }),
+        previewRegion(pageId, regionId, draft, revision, "base-overlay", {
+          drafts: state.document?.regions || [],
+          drafts_complete: true,
+        }),
+      ]);
+      if (
+        token !== previewToken
+        || key !== previewKey
+        || pagePreview.revision !== revision
+        || layerPreview.revision !== revision
+        || overlayPreview.revision !== revision
+      ) {
+        URL.revokeObjectURL(pagePreview.url);
+        URL.revokeObjectURL(layerPreview.url);
+        URL.revokeObjectURL(overlayPreview.url);
+        return;
+      }
+      setMeshPreviewBase(layerPreview, pagePreview, { ...draft }, layoutKey);
+      setMeshPreviewOverlay(overlayPreview);
+      rememberLayoutSnapshot(draft, layerPreview.layoutSnapshot);
+      patch({ stylePreview: { status: "ready", message: "" } });
+      return;
+    }
     const result = await previewRegion(pageId, regionId, draft, revision);
     if (token !== previewToken || key !== previewKey || result.revision !== revision) {
       URL.revokeObjectURL(result.url);
       return;
     }
+    clearMeshPreviewBase();
     setStylePreview(result);
+    rememberLayoutSnapshot(draft, result.layoutSnapshot);
     patch({ stylePreview: { status: "ready", message: "" } });
-    if (baseRequest) {
-      try {
-        const base = await baseRequest;
-        if (token !== previewToken || key !== previewKey || base.revision !== revision) {
-          URL.revokeObjectURL(base.url);
-          return;
-        }
-        setMeshPreviewBase(base, { ...draft, originX: base.x, originY: base.y });
-      } catch (_error) {
-        clearMeshPreviewBase();
-      }
-    }
   } catch (error) {
     if (token !== previewToken || key !== previewKey) return;
-    setStylePreview(null);
     patch({ stylePreview: { status: "error", message: error.message || "Не удалось обновить предпросмотр" } });
   }
 }

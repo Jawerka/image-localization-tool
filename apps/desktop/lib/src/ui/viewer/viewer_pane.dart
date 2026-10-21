@@ -61,7 +61,7 @@ class ViewerPane extends StatelessWidget {
                     ? () => workspace.stepPage(1)
                     : null,
               ),
-              if (viewer.hasDeferredDraft)
+              if (viewer.hasDeferredDraft || viewer.isApplying)
                 Positioned(
                   left: 0,
                   right: 0,

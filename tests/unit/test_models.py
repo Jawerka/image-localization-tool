@@ -134,3 +134,22 @@ class TestMaskStroke:
         assert MaskStroke.from_dict(erase_fill.to_dict()) == erase_fill
         with pytest.raises(ValueError):
             MaskStroke.from_dict({"mode": "scribble", "radius": 1, "points": []})
+
+def test_mask_stroke_flood_roundtrip():
+    stroke = MaskStroke.from_dict({
+        "mode": "flood",
+        "radius": 0,
+        "points": [[3, 4]],
+        "tolerance": 60,
+    })
+    assert stroke.mode == "flood"
+    assert stroke.tolerance == 60
+    assert MaskStroke.from_dict(stroke.to_dict()) == stroke
+    erase = MaskStroke.from_dict({
+        "mode": "erase_flood",
+        "radius": 0,
+        "points": [[1, 2]],
+        "tolerance": 150,
+    })
+    assert erase.tolerance == 100
+    assert MaskStroke.from_dict(erase.to_dict()) == erase

@@ -89,6 +89,7 @@ class ViewerState extends ChangeNotifier {
   bool _showBoxes = true;
   bool _showMask = true;
   double _brushSize = 12;
+  double _fillTolerance = 20;
 
   /// Уведомить о смене слоёв для сохранения в настройках.
   void Function(bool boxes, bool mask)? onLayersChanged;
@@ -102,6 +103,11 @@ class ViewerState extends ChangeNotifier {
   final Set<String> _loadingImages = {};
   final List<String> _imageOrder = [];
   static const _imageCacheLimit = 16;
+  static const _imageByteLimit = 128 * 1024 * 1024;
+  static const _fillPreviewLimit = 32;
+
+  final Map<String, FillPreview> _fillPreviews = {};
+  final Set<String> _fillPending = {};
 
   final Map<String, Map<String, dynamic>> _pendingBody = {};
   final Map<String, int> _acked = {};
@@ -149,7 +155,25 @@ class ViewerState extends ChangeNotifier {
   int _previewToken = 0;
   String _previewKey = '';
 
+  final Map<String, Future<ui.Image?>> _imageLoads = {};
+
+  ui.Image? _basePageImage;
+  ui.Image? _textLayerImage;
+  ui.Image? _overlayLayerImage;
+  Offset _textLayerOrigin = Offset.zero;
+  Offset _textLayerAnchor = Offset.zero;
+  Offset _overlayLayerOrigin = Offset.zero;
+  String _localLayoutKey = '';
+  String _localPreviewRegionId = '';
+  bool _localPreviewRequested = false;
+
   int _deferredStartDepth = -1;
+  bool _applying = false;
+  bool _awaitingBake = false;
+  bool _bakeFailed = false;
+  String _applyError = '';
+  String _failedSavePage = '';
+  String _lastSavePlan = '';
 
   // ---- геттеры -------------------------------------------------------------
 
@@ -163,12 +187,16 @@ class ViewerState extends ChangeNotifier {
   bool get showBoxes => _showBoxes;
   bool get showMask => _showMask;
   double get brushSize => _brushSize;
+  double get fillTolerance => _fillTolerance;
+  Map<String, FillPreview> get fillPreviews => _fillPreviews;
   ui.Size get imageSize => _imageSize;
   bool get loading => _loading;
   String? get errorText => _errorText;
 
   /// Черновик правок ждёт «Готово».
   bool get hasDeferredDraft => _deferredApply;
+  bool get isApplying => _applying;
+  String get applyError => _applyError;
 
   /// Смещение перетаскиваемой пилюли «N правок» (в пределах сессии).
   Offset _pillOffset = Offset.zero;
@@ -270,6 +298,8 @@ class ViewerState extends ChangeNotifier {
     _deferredBaselineKey = '';
     _deferredApply = false;
     _deferredStartDepth = -1;
+    _awaitingBake = false;
+    _applyError = '';
     _clearPreview();
     _styleLibrary = const [];
     _styleProjectId = '';
@@ -321,7 +351,17 @@ class ViewerState extends ChangeNotifier {
     }
     _images.clear();
     _loadingImages.clear();
+    _imageLoads.clear();
     _imageOrder.clear();
+    _disposeFillPreviews();
+  }
+
+  void _disposeFillPreviews() {
+    for (final preview in _fillPreviews.values) {
+      preview.image.dispose();
+    }
+    _fillPreviews.clear();
+    _fillPending.clear();
   }
 
   // ---- загрузка страницы ---------------------------------------------------
@@ -339,6 +379,9 @@ class ViewerState extends ChangeNotifier {
       _deferredApply = false;
       _deferredBaselineKey = '';
       _deferredStartDepth = -1;
+      _awaitingBake = false;
+      _bakeFailed = false;
+      _applyError = '';
       _coalesceKey = '';
       if (_timerPage == previous) {
         _saveTimer?.cancel();
@@ -348,6 +391,7 @@ class ViewerState extends ChangeNotifier {
       _histories.remove(previous);
     }
     _clearPreview();
+    if (previous != next) _disposeFillPreviews();
     _pendingAction = '';
     _pendingActionRegionId = '';
     _sfxRegionId = '';
@@ -374,20 +418,26 @@ class ViewerState extends ChangeNotifier {
   }
 
   /// Перечитать документ страницы (принудительно — затерев локальные правки).
-  Future<void> reloadDetail(String pageId, {bool force = false}) =>
+  Future<bool> reloadDetail(String pageId, {bool force = false}) =>
       _reloadDetail(pageId, force: force);
 
-  Future<void> _reloadDetail(String pageId, {bool force = false}) async {
+  Future<bool> _reloadDetail(
+    String pageId, {
+    bool force = false,
+    bool keepPreview = false,
+  }) async {
     final api = _api;
-    if (api == null) return;
+    if (api == null) return false;
     final token = ++_loadToken;
     try {
       final data = await api.getJson('/api/pages/$pageId');
-      if (token != _loadToken || pageId != _pageId) return;
-      _applyDetail(pageId, data, force: force);
+      if (token != _loadToken || pageId != _pageId) return false;
+      _applyDetail(pageId, data, force: force, keepPreview: keepPreview);
+      return true;
     } on ApiException catch (error) {
-      if (token != _loadToken) return;
+      if (token != _loadToken) return false;
       _errorText = apiErrorMessage(error);
+      return false;
     } finally {
       if (token == _loadToken && pageId == _pageId) {
         _loading = false;
@@ -401,6 +451,7 @@ class ViewerState extends ChangeNotifier {
     Map<String, dynamic> data, {
     bool keepLocal = false,
     bool force = false,
+    bool keepPreview = false,
   }) {
     final root = data;
     final page = root['page'] is Map ? root['page'] as Map : root;
@@ -428,8 +479,17 @@ class ViewerState extends ChangeNotifier {
       _deferredStartDepth = -1;
     }
     _document = document;
+    _localPreviewRequested = false;
+    if (keepPreview) {
+      _previewTimer?.cancel();
+      _previewTimer = null;
+      _previewToken++;
+    } else {
+      _clearPreview();
+    }
     _pruneSelection();
     ensureImages();
+    _ensureFillPreviews();
     _notify();
   }
 
@@ -452,7 +512,7 @@ class ViewerState extends ChangeNotifier {
       // Оригинал всегда нужен как источник размера листа, пока result
       // ещё не готов или не декодирован.
       'original',
-      if (_view != 'original') 'result',
+      if (_view == 'clean') 'clean' else if (_view != 'original') 'result',
       if (_showMask) 'mask',
     };
     for (final kind in kinds) {
@@ -461,42 +521,81 @@ class ViewerState extends ChangeNotifier {
   }
 
   void _requestImage(String pageId, String kind, int version) {
+    unawaited(_loadImage(pageId, kind, version));
+  }
+
+  /// Дождаться декодированной картинки текущей ревизии (для атомарного Done).
+  Future<bool> _awaitCurrentImage(String pageId) async {
+    final document = _document;
+    if (document == null || pageId != _pageId) return false;
+    final kind = _view == 'clean'
+        ? 'clean'
+        : (_view == 'original' ? 'original' : 'result');
+    final image = await _loadImage(pageId, kind, document.version);
+    return image != null && !_disposed && pageId == _pageId;
+  }
+
+  Future<ui.Image?> _loadImage(String pageId, String kind, int version) {
     final key = '$pageId|$kind|$version';
-    if (_images.containsKey(key) || _loadingImages.contains(key)) return;
+    final cached = _images[key];
+    if (cached != null) return Future<ui.Image?>.value(cached);
+    final loading = _imageLoads[key];
+    if (loading != null) return loading;
     final api = _api;
-    if (api == null) return;
-    _loadingImages.add(key);
-    () async {
+    if (api == null) return Future<ui.Image?>.value();
+    late final Future<ui.Image?> future;
+    future = () async {
+      _loadingImages.add(key);
       try {
         final bytes = await api.getBytes(
           '/api/pages/$pageId/image/$kind?v=$version',
         );
         final codec = await ui.instantiateImageCodec(bytes);
-        final frame = await codec.getNextFrame();
+        late final ui.FrameInfo frame;
+        try {
+          frame = await codec.getNextFrame();
+        } finally {
+          codec.dispose();
+        }
         if (_disposed) {
           frame.image.dispose();
-          return;
+          return null;
         }
         _images[key] = frame.image;
         _imageOrder.remove(key);
         _imageOrder.add(key);
         _evictImages();
         _notify();
+        return frame.image;
       } on ApiException {
         // нет mask/result — нормально: слой просто пуст
+        return null;
       } catch (_) {
         // декод не удался — слой пуст
+        return null;
       } finally {
         _loadingImages.remove(key);
+        _imageLoads.remove(key);
       }
     }();
+    _imageLoads[key] = future;
+    return future;
   }
 
   void _evictImages() {
-    while (_imageOrder.length > _imageCacheLimit) {
+    var total = 0;
+    for (final key in _imageOrder) {
+      final image = _images[key];
+      if (image != null) total += image.width * image.height * 4;
+    }
+    while (_imageOrder.length > _imageCacheLimit ||
+        (total > _imageByteLimit && _imageOrder.length > 1)) {
       final oldest = _imageOrder.removeAt(0);
       final image = _images.remove(oldest);
-      image?.dispose();
+      if (image != null) {
+        total -= image.width * image.height * 4;
+        image.dispose();
+      }
     }
   }
 
@@ -574,6 +673,16 @@ class ViewerState extends ChangeNotifier {
 
   void nudgeBrush(double delta) => setBrushSize(_brushSize + delta);
 
+  void setFillTolerance(double value) {
+    final next = value.clamp(0, 100).toDouble();
+    if (_fillTolerance == next) return;
+    _fillTolerance = next;
+    _notify();
+  }
+
+  void nudgeFillTolerance(double delta) =>
+      setFillTolerance(_fillTolerance + delta);
+
   void setCurtain(double value) {
     final next = value.clamp(0.02, 0.98).toDouble();
     if (_curtain == next) return;
@@ -584,6 +693,7 @@ class ViewerState extends ChangeNotifier {
   void selectRegion(String? id) {
     if (_selectedRegionId == id) return;
     _selectedRegionId = id;
+    _localPreviewRequested = false;
     if (_textMoveRegionId != id) _textMoveRegionId = null;
     _schedulePreview();
     _notify();
@@ -663,6 +773,7 @@ class ViewerState extends ChangeNotifier {
     String coalesce = '',
     int debounceMs = 0,
   }) {
+    if (_applying) return false;
     final pageId = _pageId;
     final current = _document;
     if (pageId == null || current == null) return false;
@@ -677,6 +788,7 @@ class ViewerState extends ChangeNotifier {
       _coalesceKey = coalesce;
     }
     if (coalesce.isEmpty) _coalesceKey = '';
+    _bakeFailed = false;
     final defer = deferApply || _deferredApply;
     if (defer) {
       if (_deferredBaselineKey.isEmpty) {
@@ -715,6 +827,161 @@ class ViewerState extends ChangeNotifier {
     _scheduleSave(pageId, 0);
   }
 
+  /// Применить черновик, дождаться сохранения и результата этой ревизии.
+  ///
+  /// Ошибка на любом шаге оставляет черновик и возможность повторить: тело
+  /// неудачного PUT возвращается в очередь, а после успешного PUT состояние
+  /// запоминается как «сохранено, результат не готов».
+  Future<bool> applyDeferredEdits() async {
+    final pageId = _pageId;
+    final api = _api;
+    if (pageId == null || api == null || _applying) return false;
+    final hasDraft =
+        _deferredApply || _awaitingBake || _pendingBody.containsKey(pageId);
+    if (!hasDraft) return true;
+    _applying = true;
+    _applyError = '';
+    _errorText = null;
+    _failedSavePage = '';
+    _lastSavePlan = '';
+    _notify();
+    final baseline = _deferredBaselineKey;
+    final startDepth = _deferredStartDepth;
+    try {
+      if (!await _refreshDoneSnapshot(pageId)) return false;
+      if (_disposed || _pageId != pageId) return false;
+      _syncPendingSnapshots(pageId);
+      final retryBody = _pendingBody.containsKey(pageId)
+          ? deepCopyMap(_pendingBody[pageId]!)
+          : null;
+      if (_bakeFailed && retryBody == null) {
+        _bakeFailed = false;
+        try {
+          await api.postJson('/api/pages/$pageId/rebake');
+        } on ApiException catch (error) {
+          _bakeFailed = true;
+          _applyError = apiErrorMessage(error);
+          return false;
+        }
+      }
+      if (retryBody != null) {
+        commitDeferredEdits();
+        await whenSaved(pageId);
+        if (_disposed || _pageId != pageId) return false;
+        if (_failedSavePage == pageId) {
+          _restoreApplyDraft(pageId, retryBody, baseline, startDepth);
+          _applyError = (_errorText ?? '').isEmpty
+              ? 'Не удалось сохранить правки'
+              : _errorText!;
+          return false;
+        }
+      }
+      final plan = _lastSavePlan;
+      if (retryBody != null && plan != 'typeset' && plan != 'clean') {
+        if (!await _reloadDetail(pageId)) {
+          _restoreApplyDraft(pageId, retryBody, baseline, startDepth);
+          _applyError = (_errorText ?? '').isEmpty
+              ? 'Не удалось перечитать страницу'
+              : _errorText!;
+          return false;
+        }
+        _clearPreview();
+        _deferredApply = false;
+        _awaitingBake = false;
+        _bakeFailed = false;
+        _deferredBaselineKey = '';
+        _deferredStartDepth = -1;
+        _notify();
+        return true;
+      }
+      final savedVersion = _acked[pageId] ?? 0;
+      final deadline = DateTime.now().add(const Duration(seconds: 30));
+      while (!_disposed &&
+          _pageId == pageId &&
+          DateTime.now().isBefore(deadline)) {
+        late final Map<String, dynamic> detail;
+        try {
+          detail = await api.getJson('/api/pages/$pageId');
+        } on ApiException catch (error) {
+          _applyError = apiErrorMessage(error);
+          _awaitingBake = true;
+          _deferredApply = true;
+          _restoreApplyDepth(baseline, startDepth);
+          return false;
+        }
+        if (_disposed || _pageId != pageId) return false;
+        final status = '${detail['status'] ?? ''}';
+        if (status == 'error') {
+          final message = '${detail['error'] ?? ''}'.trim();
+          _applyError = message.isEmpty
+              ? 'Не удалось собрать результат'
+              : message;
+          _awaitingBake = true;
+          _bakeFailed = true;
+          _deferredApply = true;
+          _restoreApplyDepth(baseline, startDepth);
+          return false;
+        }
+        final renderVersion = (detail['render_version'] as num?)?.toInt() ?? 0;
+        if (renderVersion >= savedVersion) {
+          // Новый документ и картинка устанавливаются вместе: старый preview
+          // остаётся до успешного декодирования результата.
+          if (!await _reloadDetail(pageId, keepPreview: true)) {
+            _restoreApplyDraft(pageId, retryBody, baseline, startDepth);
+            _applyError = (_errorText ?? '').isEmpty
+                ? 'Не удалось перечитать страницу'
+                : _errorText!;
+            return false;
+          }
+          if (!await _awaitCurrentImage(pageId)) {
+            _restoreApplyDraft(pageId, retryBody, baseline, startDepth);
+            _applyError = 'Не удалось загрузить результат';
+            return false;
+          }
+          if (_disposed || _pageId != pageId) return false;
+          _clearPreview();
+          _deferredApply = false;
+          _awaitingBake = false;
+          _bakeFailed = false;
+          _deferredBaselineKey = '';
+          _deferredStartDepth = -1;
+          _notify();
+          return true;
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 150));
+      }
+      _applyError = 'Результат не успел собраться';
+      _awaitingBake = true;
+      _deferredApply = true;
+      _restoreApplyDepth(baseline, startDepth);
+      return false;
+    } finally {
+      if (!_disposed) {
+        if (_applyError.isNotEmpty) _errorText = _applyError;
+        _applying = false;
+        _notify();
+      }
+    }
+  }
+
+  void _restoreApplyDepth(String baseline, int startDepth) {
+    _deferredBaselineKey = baseline;
+    _deferredStartDepth = startDepth;
+    _awaitingBake = true;
+  }
+
+  void _restoreApplyDraft(
+    String pageId,
+    Map<String, dynamic>? body,
+    String baseline,
+    int startDepth,
+  ) {
+    if (body != null) _pendingBody[pageId] = body;
+    _deferredApply = true;
+    _restoreApplyDepth(baseline, startDepth);
+    _awaitingBake = body == null && _awaitingBake;
+  }
+
   /// Сбросить черновик и перечитать документ с сервера.
   Future<void> discardDeferredEdits() async {
     final pageId = _pageId;
@@ -729,12 +996,16 @@ class ViewerState extends ChangeNotifier {
     _deferredBaselineKey = '';
     _deferredApply = false;
     _deferredStartDepth = -1;
+    _awaitingBake = false;
+    _bakeFailed = false;
+    _applyError = '';
     _histories.remove(pageId);
     _notify();
     await _reloadDetail(pageId);
   }
 
   void undo() {
+    if (_applying) return;
     final pageId = _pageId;
     final current = _document;
     if (pageId == null || current == null) return;
@@ -745,6 +1016,7 @@ class ViewerState extends ChangeNotifier {
   }
 
   void redo() {
+    if (_applying) return;
     final pageId = _pageId;
     final current = _document;
     if (pageId == null || current == null) return;
@@ -762,6 +1034,7 @@ class ViewerState extends ChangeNotifier {
     final pending = hadBaseline && key != _deferredBaselineKey;
     _document = next;
     _deferredApply = pending;
+    _ensureFillPreviews();
     _pruneSelection();
     if (pending) {
       _pendingBody[pageId] = deepCopyMap(next.data);
@@ -849,6 +1122,7 @@ class ViewerState extends ChangeNotifier {
       _coalesceKey = '';
       _pendingBody.remove(pageId);
       _queuedPage = '';
+      _failedSavePage = pageId;
       if (error.statusCode == 409) {
         _errorText = 'Страница изменилась, правка не сохранена';
         if (_pageId == pageId) {
@@ -862,6 +1136,7 @@ class ViewerState extends ChangeNotifier {
       _coalesceKey = '';
       _pendingBody.remove(pageId);
       _queuedPage = '';
+      _failedSavePage = pageId;
       _errorText = 'Не удалось сохранить правку: $error';
     } finally {
       final queued = _queuedPage;
@@ -906,6 +1181,7 @@ class ViewerState extends ChangeNotifier {
     int strokeCount,
   ) {
     final version = _readVersion(response, fallback);
+    _lastSavePlan = '${response['plan'] ?? ''}';
     _acked[pageId] = version;
     _strokeCounts['$pageId|$version'] = strokeCount;
     if (_pageId == pageId &&
@@ -967,6 +1243,78 @@ class ViewerState extends ChangeNotifier {
   }
 
   void cancelLassoDraft() => session.clearLasso();
+
+  /// Заливка по цвету исходной страницы (ЛКМ — добавить, ПКМ — вычесть).
+  void floodFill(Offset scene, String mode) {
+    final pageId = _pageId;
+    final document = _document;
+    if (pageId == null || document == null) return;
+    final stroke = Stroke(
+      mode: mode == Stroke.eraseFlood ? Stroke.eraseFlood : Stroke.flood,
+      radius: 1,
+      points: [Offset(scene.dx.roundToDouble(), scene.dy.roundToDouble())],
+      tolerance: _fillTolerance.round(),
+    );
+    editDocument((doc) => doc.addStroke(stroke), deferApply: true);
+    if (!_showMask) setShowMask(true);
+    _requestFillPreview(pageId, stroke);
+  }
+
+  Future<void> _requestFillPreview(String pageId, Stroke stroke) async {
+    final api = _api;
+    final key = fillStrokeKey(stroke);
+    if (api == null || key.isEmpty) return;
+    if (_fillPreviews.containsKey(key) || !_fillPending.add(key)) return;
+    try {
+      final point = stroke.points.first;
+      final response = await api.postBytes('/api/pages/$pageId/fill-preview', {
+        'x': point.dx.round(),
+        'y': point.dy.round(),
+        'tolerance': stroke.tolerance,
+        'mode': stroke.mode,
+      });
+      final codec = await ui.instantiateImageCodec(response.bytes);
+      late final ui.FrameInfo frame;
+      try {
+        frame = await codec.getNextFrame();
+      } finally {
+        codec.dispose();
+      }
+      if (_disposed || pageId != _pageId) {
+        frame.image.dispose();
+        return;
+      }
+      final x = double.tryParse(response.headers['x-fill-x'] ?? '') ?? 0;
+      final y = double.tryParse(response.headers['x-fill-y'] ?? '') ?? 0;
+      _fillPreviews.remove(key)?.image.dispose();
+      _fillPreviews[key] = FillPreview(
+        image: frame.image,
+        offset: Offset(x, y),
+      );
+      while (_fillPreviews.length > _fillPreviewLimit) {
+        final oldest = _fillPreviews.keys.first;
+        _fillPreviews.remove(oldest)?.image.dispose();
+      }
+      _notify();
+    } catch (_) {
+      // Превью необязательно: «Готово» всё равно пересчитает маску.
+    } finally {
+      _fillPending.remove(key);
+    }
+  }
+
+  void _ensureFillPreviews() {
+    final pageId = _pageId;
+    final document = _document;
+    if (pageId == null || document == null) return;
+    final strokes = document.strokes;
+    final baked = bakedStrokeCount.clamp(0, strokes.length).toInt();
+    for (final stroke in strokes.skip(baked)) {
+      if (stroke.mode == Stroke.flood || stroke.mode == Stroke.eraseFlood) {
+        _requestFillPreview(pageId, stroke);
+      }
+    }
+  }
 
   /// Создать регион протяжкой инструмента «Регион».
   void createRegion(Rect rect) {
@@ -1644,9 +1992,20 @@ class ViewerState extends ChangeNotifier {
   String get stylePreviewStatus => _stylePreviewStatus;
   String get stylePreviewMessage => _stylePreviewMessage;
 
+  /// Готовая локальная пара: страница без выбранного региона и его RGBA-слой.
+  ui.Image? get basePageImage => _basePageImage;
+  ui.Image? get textLayerImage => _textLayerImage;
+  ui.Image? get overlayLayerImage => _overlayLayerImage;
+  Offset get textLayerOrigin => _textLayerOrigin;
+  Offset get textLayerAnchor => _textLayerAnchor;
+  Offset get overlayLayerOrigin => _overlayLayerOrigin;
+  bool get hasLocalPreview =>
+      _basePageImage != null &&
+      _textLayerImage != null &&
+      _localPreviewRegionId == _selectedRegionId;
+
   /// Запланировать предпросмотр (400 мс; токен против гонок).
   void _schedulePreview() {
-    _previewTimer?.cancel();
     final pageId = _pageId;
     final regionId = _selectedRegionId;
     final region = regionId == null ? null : _document?.findRegion(regionId);
@@ -1655,6 +2014,29 @@ class ViewerState extends ChangeNotifier {
       _notify();
       return;
     }
+    if (_prefersLocalPreview(region)) {
+      final layoutKey = _regionLayoutKey(pageId, region);
+      // Повторный вызов до срабатывания таймера не должен его отменять:
+      // иначе подготовка зависает в «Подготавливаем текст».
+      if (layoutKey == _localLayoutKey &&
+          (_stylePreviewStatus == 'loading-local' ||
+              _stylePreviewStatus == 'ready-local')) {
+        return;
+      }
+      _previewTimer?.cancel();
+      _previewKey = "";
+      _localLayoutKey = layoutKey;
+      _stylePreviewStatus = 'loading-local';
+      _stylePreviewMessage = 'Подготавливаем текст';
+      final token = ++_previewToken;
+      _previewTimer = Timer(const Duration(milliseconds: 250), () {
+        unawaited(_runLocalPreview(pageId, region.id, layoutKey, token));
+      });
+      _notify();
+      return;
+    }
+    _previewTimer?.cancel();
+    _clearLocalPreview();
     final key =
         '$pageId|${region.id}|${jsonEncode([region.data['style'] ?? const <String, dynamic>{}, region.data['bbox'], region.data['text'], region.data['translation'], region.data['text_position']])}';
     if (key == _previewKey && _stylePreviewStatus != 'idle') return;
@@ -1666,6 +2048,286 @@ class ViewerState extends ChangeNotifier {
       unawaited(_runPreview(pageId, region.id, key));
     });
     _notify();
+  }
+
+  /// Подготовить локальный слой для вкладки «Трансформация»: после этого
+  /// поворот и позиция текста рисуются без HTTP.
+  void prepareLocalPreview(String regionId) {
+    if (regionId != _selectedRegionId) return;
+    final region = _document?.findRegion(regionId);
+    if (region == null) return;
+    final kind = '${region.warp?['kind'] ?? 'none'}';
+    if (!_localWarpKinds.contains(kind)) return;
+    if (_localPreviewRequested) return;
+    _localPreviewRequested = true;
+    _schedulePreview();
+  }
+
+  static const _localWarpKinds = {
+    'none',
+    'mesh',
+    'arc',
+    'wave',
+    'flag',
+    'ring',
+    'perspective',
+  };
+
+  /// Mesh можно двигать локально: пересобирать страницу на каждое движение
+  /// не нужно, пока раскладка (текст, шрифт, bbox) не изменилась.
+  bool _prefersLocalPreview(Region region) {
+    final warp = region.warp;
+    final kind = '${warp?['kind'] ?? 'none'}';
+    if (region.bbox.width <= 0 || region.bbox.height <= 0) return false;
+    final skew = region.styleMap()['skew_x'];
+    if (skew is num && skew.abs() > 1e-6) return false;
+    if (kind == 'none') return _localPreviewRequested;
+    if (!_localWarpKinds.contains(kind)) return false;
+    if (kind == 'mesh' && ((warp?['version'] as num?)?.toInt() ?? 1) < 2) {
+      return false;
+    }
+    if (region.rotation.abs() > 1e-6) {
+      // Для arc/wave/flag/ring слой готовится уже повёрнутым, warp — локально.
+      return _localPreviewRequested && _localRotationWarps.contains(kind);
+    }
+    return kind == 'mesh' || _localPreviewRequested;
+  }
+
+  static const _localRotationWarps = {'arc', 'wave', 'flag', 'ring'};
+
+  String _regionLayoutKey(String pageId, Region region) {
+    final style = <String, dynamic>{...region.styleMap()};
+    style.remove('rotation');
+    style.remove('warp');
+    final kind = '${region.warp?['kind'] ?? 'none'}';
+    return jsonEncode([
+      pageId,
+      region.id,
+      region.data['bbox'],
+      region.data['bubble_bbox'],
+      region.data['class_name'],
+      region.data['block_type'],
+      region.data['text'],
+      region.data['translation'],
+      style,
+      if (_localRotationWarps.contains(kind)) region.rotation,
+      // Композиция ниже/выше выбранной: чужие регионы и их порядок.
+      [
+        for (final item in _document?.regions ?? const <Region>[])
+          if (item.id != region.id) item.data,
+      ],
+    ]);
+  }
+
+  Future<ui.Image?> _decodeImage(ApiBytes response) async {
+    final codec = await ui.instantiateImageCodec(response.bytes);
+    try {
+      final frame = await codec.getNextFrame();
+      return frame.image;
+    } finally {
+      codec.dispose();
+    }
+  }
+
+  /// Свежий snapshot выбранного региона перед Done: закрывает гонку с preview.
+  Future<bool> _refreshDoneSnapshot(String pageId) async {
+    final api = _api;
+    final regionId = _selectedRegionId;
+    final region = _document?.findRegion(regionId);
+    if (api == null || regionId == null || region == null) return true;
+    final draft = <String, dynamic>{
+      'text': region.data['text'],
+      'translation': region.data['translation'],
+      'bbox': region.data['bbox'],
+      'style': region.data['style'],
+      'text_position': region.data['text_position'],
+      if (region.data['layout_snapshot'] != null)
+        'layout_snapshot': region.data['layout_snapshot'],
+    };
+    final drafts = [
+      for (final item in _document?.regions ?? const <Region>[]) item.data,
+    ];
+    try {
+      final data = await api.postJson(
+        '/api/pages/$pageId/layout-snapshot',
+        {'region_id': regionId, 'draft': draft, 'drafts': drafts},
+      );
+      if (_disposed || _pageId != pageId) return false;
+      final snapshot = data['layout_snapshot'];
+      if (snapshot is Map) {
+        final current = _document?.findRegion(regionId);
+        if (current != null) {
+          current.data['layout_snapshot'] =
+              snapshot.cast<String, dynamic>();
+          _syncPendingSnapshots(pageId);
+          _notify();
+        }
+      }
+      return true;
+    } on ApiException catch (error) {
+      _applyError = apiErrorMessage(error);
+      return false;
+    }
+  }
+
+  /// Перенести производные snapshot из текущего документа в ожидающий PUT.
+  void _syncPendingSnapshots(String pageId) {
+    final body = _pendingBody[pageId];
+    final document = _document;
+    final regions = body?['regions'];
+    if (document == null || regions is! List) return;
+    for (final item in regions) {
+      if (item is! Map) continue;
+      final current = document.findRegion('${item['id']}');
+      if (current == null) continue;
+      final snapshot = current.data['layout_snapshot'];
+      if (snapshot != null) {
+        item['layout_snapshot'] = deepCopyMap(snapshot.cast<String, dynamic>());
+      } else {
+        item.remove('layout_snapshot');
+      }
+    }
+  }
+
+  /// Сохранить раскладку, показанную preview, чтобы «Готово» не пересобирало
+  /// строки при изменившемся повороте или warp.
+  void _rememberLayoutSnapshot(String regionId, String? encoded) {
+    if (encoded == null || encoded.isEmpty) return;
+    final pageId = _pageId;
+    final document = _document;
+    final region = document?.findRegion(regionId);
+    if (pageId == null || document == null || region == null) return;
+    try {
+      final decoded = jsonDecode(utf8.decode(base64Decode(encoded)));
+      if (decoded is! Map) return;
+      final snapshot = decoded.cast<String, dynamic>();
+      if (snapshot['version'] != 1) return;
+      final current = region.data['layout_snapshot'];
+      if (current is Map && jsonEncode(current) == jsonEncode(snapshot)) return;
+      region.data['layout_snapshot'] = snapshot;
+      // Снимок — производные данные preview; сохраняем его вместе со
+      // следующим черновиком, но сами по себе правки не создаём.
+      if (_deferredApply) _pendingBody[pageId] = deepCopyMap(document.data);
+      _notify();
+    } catch (_) {
+      // Битый заголовок не должен ломать preview.
+    }
+  }
+
+  Future<void> _runLocalPreview(
+    String pageId,
+    String regionId,
+    String layoutKey,
+    int token,
+  ) async {
+    final api = _api;
+    if (api == null) return;
+    final region = _document?.findRegion(regionId);
+    if (region == null) return;
+    final draft = <String, dynamic>{
+      'text': region.data['text'],
+      'translation': region.data['translation'],
+      'bbox': region.data['bbox'],
+      'style': region.data['style'],
+      'text_position': region.data['text_position'],
+      if (region.data['layout_snapshot'] != null)
+        'layout_snapshot': region.data['layout_snapshot'],
+    };
+    final kind = '${region.warp?['kind'] ?? 'none'}';
+    final applyRotation =
+        _localRotationWarps.contains(kind) && region.rotation.abs() > 1e-6;
+    final drafts = [
+      for (final item in _document?.regions ?? const <Region>[]) item.data,
+    ];
+    try {
+      final responses = await Future.wait([
+        api.postBytes('/api/pages/$pageId/preview-region', {
+          'region_id': regionId,
+          'draft': draft,
+          'drafts': drafts,
+          'drafts_complete': true,
+          'mode': 'base-page',
+        }),
+        api.postBytes('/api/pages/$pageId/preview-region', {
+          'region_id': regionId,
+          'draft': draft,
+          'apply_rotation': applyRotation,
+          'mode': 'base-layer',
+        }),
+        api.postBytes('/api/pages/$pageId/preview-region', {
+          'region_id': regionId,
+          'draft': draft,
+          'drafts': drafts,
+          'drafts_complete': true,
+          'mode': 'base-overlay',
+        }),
+      ]);
+      final basePage = await _decodeImage(responses[0]);
+      final layer = await _decodeImage(responses[1]);
+      final overlay = await _decodeImage(responses[2]);
+      if (_disposed ||
+          token != _previewToken ||
+          layoutKey != _localLayoutKey ||
+          pageId != _pageId) {
+        basePage?.dispose();
+        layer?.dispose();
+        overlay?.dispose();
+        return;
+      }
+      if (basePage == null || layer == null || overlay == null) {
+        basePage?.dispose();
+        layer?.dispose();
+        overlay?.dispose();
+        _localPreviewError('Не удалось декодировать слой текста');
+        return;
+      }
+      _basePageImage?.dispose();
+      _textLayerImage?.dispose();
+      _overlayLayerImage?.dispose();
+      _basePageImage = basePage;
+      _textLayerImage = layer;
+      _overlayLayerImage = overlay;
+      _overlayLayerOrigin = Offset(
+        double.tryParse(responses[2].headers['x-offset-x'] ?? '') ?? 0,
+        double.tryParse(responses[2].headers['x-offset-y'] ?? '') ?? 0,
+      );
+      // Локальная пара заменила старый exact-preview.
+      _stylePreviewImage?.dispose();
+      _stylePreviewImage = null;
+      _stylePreviewOffset = Offset.zero;
+      _textLayerOrigin = Offset(
+        double.tryParse(responses[1].headers['x-offset-x'] ?? '') ?? 0,
+        double.tryParse(responses[1].headers['x-offset-y'] ?? '') ?? 0,
+      );
+      _textLayerAnchor = Offset(
+        double.tryParse(responses[1].headers['x-layer-anchor-x'] ?? '') ??
+            _textLayerOrigin.dx,
+        double.tryParse(responses[1].headers['x-layer-anchor-y'] ?? '') ??
+            _textLayerOrigin.dy,
+      );
+      _localPreviewRegionId = regionId;
+      _rememberLayoutSnapshot(
+        regionId,
+        responses[1].headers['x-layout-snapshot'],
+      );
+      _stylePreviewStatus = 'ready-local';
+      _stylePreviewMessage = '';
+    } on ApiException catch (error) {
+      if (token != _previewToken) return;
+      _localPreviewError(apiErrorMessage(error));
+    } catch (_) {
+      if (token != _previewToken) return;
+      _localPreviewError('Не удалось подготовить текст');
+    } finally {
+      if (token == _previewToken) _notify();
+    }
+  }
+
+  void _localPreviewError(String message) {
+    // Последняя корректная пара остаётся на экране как явно устаревший
+    // fallback; статус «local-error» показывает, что это не новый результат.
+    _stylePreviewStatus = 'local-error';
+    _stylePreviewMessage = message;
   }
 
   Future<void> _runPreview(String pageId, String regionId, String key) async {
@@ -1685,6 +2347,8 @@ class ViewerState extends ChangeNotifier {
       'bbox': region.data['bbox'],
       'style': region.data['style'],
       'text_position': region.data['text_position'],
+      if (region.data['layout_snapshot'] != null)
+        'layout_snapshot': region.data['layout_snapshot'],
     };
     try {
       final response = await api.postBytes(
@@ -1692,7 +2356,12 @@ class ViewerState extends ChangeNotifier {
         {'region_id': regionId, 'draft': draft},
       );
       final codec = await ui.instantiateImageCodec(response.bytes);
-      final frame = await codec.getNextFrame();
+      late final ui.FrameInfo frame;
+      try {
+        frame = await codec.getNextFrame();
+      } finally {
+        codec.dispose();
+      }
       if (_disposed ||
           token != _previewToken ||
           key != _previewKey ||
@@ -1705,6 +2374,7 @@ class ViewerState extends ChangeNotifier {
       _stylePreviewImage?.dispose();
       _stylePreviewImage = frame.image;
       _stylePreviewOffset = Offset(x, y);
+      _rememberLayoutSnapshot(regionId, response.headers['x-layout-snapshot']);
       _stylePreviewStatus = 'ready';
       _stylePreviewMessage = '';
     } on ApiException catch (error) {
@@ -1724,6 +2394,20 @@ class ViewerState extends ChangeNotifier {
     }
   }
 
+  void _clearLocalPreview() {
+    _basePageImage?.dispose();
+    _basePageImage = null;
+    _textLayerImage?.dispose();
+    _textLayerImage = null;
+    _overlayLayerImage?.dispose();
+    _overlayLayerImage = null;
+    _textLayerOrigin = Offset.zero;
+    _textLayerAnchor = Offset.zero;
+    _overlayLayerOrigin = Offset.zero;
+    _localLayoutKey = '';
+    _localPreviewRegionId = '';
+  }
+
   void _clearPreview() {
     _previewTimer?.cancel();
     _previewTimer = null;
@@ -1734,6 +2418,7 @@ class ViewerState extends ChangeNotifier {
     _stylePreviewOffset = Offset.zero;
     _stylePreviewStatus = 'idle';
     _stylePreviewMessage = '';
+    _clearLocalPreview();
   }
 
   // ---- страж ухода со страницы --------------------------------------------
@@ -1809,6 +2494,9 @@ class CanvasSession extends ChangeNotifier {
 
   /// Колбэк для проброса «лёгких» изменений (зум-режим) в состояние.
   final void Function() onChanged;
+
+  /// Отменить текущий жест на канвасе (Esc); null, если жеста нет.
+  bool Function()? onCancelGesture;
 
   ViewTransform _transform = const ViewTransform();
   Object _zoomMode = 'fit';
@@ -1934,6 +2622,14 @@ class CanvasSession extends ChangeNotifier {
 
   void setZoom(Object mode) {
     _zoomMode = mode;
+    if (mode is num && !_imageSize.isEmpty && !_viewport.isEmpty) {
+      _transform = _transform
+          .zoomAt(mode.toDouble(), _viewport.center(ui.Offset.zero))
+          .clamped(_imageSize, _viewport, verticalMargin: _verticalMargin);
+      notifyListeners();
+      onChanged();
+      return;
+    }
     _recompute();
   }
 
@@ -1951,13 +2647,10 @@ class CanvasSession extends ChangeNotifier {
       onChanged();
       return;
     }
-    _transform = focal == null
-        ? ViewTransform(
-            scale: next,
-          ).clamped(_imageSize, _viewport, verticalMargin: _verticalMargin)
-        : _transform
-              .zoomAt(next, focal)
-              .clamped(_imageSize, _viewport, verticalMargin: _verticalMargin);
+    final center = focal ?? _viewport.center(ui.Offset.zero);
+    _transform = _transform
+        .zoomAt(next, center)
+        .clamped(_imageSize, _viewport, verticalMargin: _verticalMargin);
     notifyListeners();
     onChanged();
   }
@@ -2019,6 +2712,13 @@ class CanvasSession extends ChangeNotifier {
   void setLassoHover(ui.Offset? point) {
     lassoHover = point;
     notifyListeners();
+  }
+
+  bool cancelGesture() {
+    final callback = onCancelGesture;
+    if (callback == null || !callback()) return false;
+    clearPreviews();
+    return true;
   }
 
   void clearPreviews() {

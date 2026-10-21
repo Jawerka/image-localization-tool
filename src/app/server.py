@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import base64
 import hmac
 import json
 import logging
@@ -58,6 +59,9 @@ _PAGE_RESET = re.compile(r"^/api/pages/([^/]+)/reset$")
 _PAGE_ACTION = re.compile(r"^/api/pages/([^/]+)/action$")
 _PAGE_IMAGE = re.compile(r"^/api/pages/([^/]+)/image/([^/]+)$")
 _PAGE_PREVIEW = re.compile(r"^/api/pages/([^/]+)/preview-region$")
+_PAGE_LAYOUT_SNAPSHOT = re.compile(r"^/api/pages/([^/]+)/layout-snapshot$")
+_PAGE_REBAKE = re.compile(r"^/api/pages/([^/]+)/rebake$")
+_PAGE_FILL_PREVIEW = re.compile(r"^/api/pages/([^/]+)/fill-preview$")
 _PAGE_SFX = re.compile(r"^/api/pages/([^/]+)/regions/([^/]+)/sfx-style$")
 _FONT_PREVIEW = re.compile(r"^/api/fonts/([^/]+)/preview$")
 _FONT_FILE = re.compile(r"^/api/fonts/([^/]+)/file$")
@@ -192,6 +196,8 @@ class AppState:
         self._drain_lock = threading.Lock()
         # Серверные read-modify-write одного page.json (reset, sfx).
         self._page_edit_lock = threading.RLock()
+        # Атомарная проверка активной задачи и постановка rebake.
+        self._rebake_lock = threading.Lock()
         self._stop = threading.Event()
         self._closed = False
         self._pump: threading.Thread | None = None
@@ -745,6 +751,18 @@ def _api(state: AppState, method: str, path: str, body: dict, query: dict | None
     if matched:
         _need_method(method, "POST")
         return _preview_region(state, _page_id(matched.group(1)), body)
+    matched = _PAGE_LAYOUT_SNAPSHOT.fullmatch(path)
+    if matched:
+        _need_method(method, "POST")
+        return _Result(_layout_snapshot(state, _page_id(matched.group(1)), body))
+    matched = _PAGE_REBAKE.fullmatch(path)
+    if matched:
+        _need_method(method, "POST")
+        return _Result(_rebake_page(state, _page_id(matched.group(1))))
+    matched = _PAGE_FILL_PREVIEW.fullmatch(path)
+    if matched:
+        _need_method(method, "POST")
+        return _fill_preview(state, _page_id(matched.group(1)), body)
     matched = _PAGE_SFX.fullmatch(path)
     if matched:
         _need_method(method, "POST")
@@ -856,6 +874,12 @@ def _collection(state: AppState) -> dict:
 def _page_row(state: AppState, record: dict) -> dict:
     page_id = str(record.get("id") or "")
     status = state.store.page_status(state.project_id or "", page_id)
+    try:
+        provenance = state.store.read_result_provenance(
+            state.project_id or "", page_id
+        )
+    except (FileNotFoundError, OSError, ValueError):
+        provenance = None
     return {
         "id": page_id,
         "name": str(record.get("name") or ""),
@@ -866,6 +890,7 @@ def _page_row(state: AppState, record: dict) -> dict:
         "stage": status["stage"],
         "error": status["error"],
         "warnings": status["warnings"],
+        "render_version": int(provenance["document_version"]) if provenance else 0,
     }
 
 
@@ -967,6 +992,53 @@ def _reset_page(state: AppState, page_id: str) -> dict:
         },
     )
     return {"document": saved.to_dict(), "plan": "clean"}
+
+
+def _rebake_page(state: AppState, page_id: str) -> dict:
+    """Повторить вёрстку текущей версии документа без нового PUT."""
+    with state._rebake_lock:
+        _require_page(state, page_id)
+        project_id = state.project_id or ""
+        document = state.store.read_document(project_id, page_id)
+        existing = state.queue.active_job("apply_document", page_id, project_id)
+        if existing is not None:
+            return {
+                "job_id": existing.id,
+                "status": state.queue.job_status(existing.id),
+                "reused": True,
+            }
+        if state.store.result_provenance_is_current(
+            project_id, page_id, document.version
+        ):
+            # Результат уже собран из этой версии: снимаем только устаревшую ошибку.
+            if state.store.page_status(project_id, page_id).get("status") == "error":
+                state.store.update_status(
+                    project_id, page_id,
+                    status="done", progress=100, stage="typeset", error="",
+                )
+            return {"job_id": "", "status": "done", "reused": True}
+        previous_status = state.store.page_status(project_id, page_id)["status"]
+        failed = state.queue.failed_job("apply_document", page_id, project_id)
+        plan = str((failed.payload or {}).get("plan") or "") if failed else ""
+        if plan not in ("clean", "typeset"):
+            plan = "typeset"
+        _mark_queued(state, [page_id])
+        try:
+            job = _submit(
+                state,
+                "apply_document",
+                page_id,
+                {"plan": plan, "base_version": int(document.version)},
+            )
+        except Exception:
+            try:
+                state.store.update_status(
+                    project_id, page_id, status=previous_status, error=""
+                )
+            except (FileNotFoundError, OSError, ValueError):
+                pass
+            raise
+        return {"job_id": job.id, "status": "queued", "reused": False}
 
 
 def _page_action(state: AppState, page_id: str, body: dict) -> dict:
@@ -2088,12 +2160,27 @@ def _render_font_png(path: str, text: str) -> bytes:
     return buffer.getvalue()
 
 
-def _preview_region(state: AppState, page_id: str, body: dict) -> _Result:
-    started = time.perf_counter()
+def _preview_region_inputs(state: AppState, page_id: str, body: dict):
+    """Страница и регион с наложенным черновиком — общая логика preview."""
     region_id = _region_id(body.get("region_id"))
     record = _require_page(state, page_id)
     document = state.store.read_document(state.project_id or "", page_id)
     region = next((item for item in document.regions if item.id == region_id), None)
+    if region is None:
+        # Новый регион ещё не в документе: берём его из полного снимка drafts.
+        raw_drafts = body.get("drafts")
+        if isinstance(raw_drafts, list):
+            from src.models import TextRegion
+
+            for item in raw_drafts:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    if int(item.get("id", -1)) == region_id:
+                        region = TextRegion.from_dict(item)
+                        break
+                except (TypeError, ValueError, KeyError, OverflowError, AttributeError):
+                    continue
     if region is None:
         raise _HttpError(400, "Регион не найден")
     # Черновик используется только для образца: документ проекта не меняется.
@@ -2105,7 +2192,10 @@ def _preview_region(state: AppState, page_id: str, body: dict) -> _Result:
             raise _HttpError(400, "Некорректный черновик региона")
         try:
             values = region.to_dict()
-            for key in ("text", "translation", "bbox", "style", "text_position"):
+            for key in (
+                "text", "translation", "bbox", "style", "text_position",
+                "layout_snapshot",
+            ):
                 if key in draft:
                     values[key] = draft[key]
             region = TextRegion.from_dict(values)
@@ -2115,20 +2205,49 @@ def _preview_region(state: AppState, page_id: str, body: dict) -> _Result:
                 raise ValueError("bbox")
         except (TypeError, ValueError, KeyError, OverflowError, AttributeError) as exc:
             raise _HttpError(400, "Некорректный черновик региона") from exc
+    return record, document, region
+
+
+def _preview_region(state: AppState, page_id: str, body: dict) -> _Result:
+    started = time.perf_counter()
+    record, document, region = _preview_region_inputs(state, page_id, body)
+    drafts_regions = []
+    drafts_complete = body.get("drafts_complete") is True
+    raw_drafts = body.get("drafts")
+    if raw_drafts is not None:
+        from src.models import TextRegion
+
+        if not isinstance(raw_drafts, list):
+            raise _HttpError(400, "Черновики регионов должны быть списком")
+        try:
+            for item in raw_drafts:
+                if not isinstance(item, dict):
+                    raise ValueError("draft")
+                candidate = TextRegion.from_dict(item)
+                if len(candidate.bbox) != 4:
+                    raise ValueError("bbox")
+                if candidate.bbox[2] <= 0 or candidate.bbox[3] <= 0:
+                    raise ValueError("bbox")
+                drafts_regions.append(candidate)
+        except (TypeError, ValueError, KeyError, OverflowError, AttributeError) as exc:
+            raise _HttpError(400, "Некорректный черновик региона") from exc
     mode = str(body.get("mode") or "exact").strip().lower()
-    if mode not in {"exact", "base-layer"}:
+    if mode not in {"exact", "base-layer", "base-page", "base-overlay"}:
         raise _HttpError(400, "Неизвестный режим предпросмотра")
+    apply_rotation = body.get("apply_rotation") is True
     source_path, source_fingerprint = _page_image_fingerprint(state, page_id, record)
     settings = state.settings
     from src.app.render_cache import cache_key
 
     preview_key = cache_key({
-        "kind": "preview-v1",
+        "kind": "preview-v2",
         "page_id": page_id,
         "page_version": document.version,
         "source": source_fingerprint,
         "mode": mode,
+        "apply_rotation": apply_rotation,
         "region": region.to_dict(),
+        "drafts": [item.to_dict() for item in drafts_regions],
         "renderer": {
             "min_font_size": settings.min_font_size,
             "max_font_size": settings.max_font_size,
@@ -2140,34 +2259,94 @@ def _preview_region(state: AppState, page_id: str, body: dict) -> _Result:
     cache = _render_cache(state)
     cached = cache.get(preview_key)
     cached_body = cached if isinstance(cached, tuple) and cached[0] == "preview" else None
+
     try:
         if cached_body is not None:
-            _kind, png, origin_x, origin_y = cached_body
+            _kind, png, origin_x, origin_y, meta = cached_body
         else:
             if mode == "base-layer":
-                png, origin_x, origin_y = _typeset_base_layer(state, page_id, record, region)
+                png, origin_x, origin_y, meta = _typeset_base_layer(
+                    state, page_id, record, region, apply_rotation
+                )
+            elif mode == "base-page":
+                png, origin_x, origin_y, meta = _typeset_base_page(
+                    state, page_id, record, region, drafts_regions, drafts_complete
+                )
+            elif mode == "base-overlay":
+                png, origin_x, origin_y, meta = _typeset_base_overlay(
+                    state, page_id, record, region, drafts_regions, drafts_complete
+                )
             else:
-                png, origin_x, origin_y = _typeset_crop(state, page_id, record, region)
-            cache.put(preview_key, ("preview", png, origin_x, origin_y), len(png))
+                png, origin_x, origin_y, meta = _typeset_crop(state, page_id, record, region)
+            cache.put(preview_key, ("preview", png, origin_x, origin_y, meta), len(png))
     except _HttpError:
         raise
     except Exception as exc:
-        logger.exception("Предпросмотр региона")
-        raise _HttpError(400, "Не удалось нарисовать образец") from exc
+        logger.exception("Не удалось построить предпросмотр")
+        raise _HttpError(400, "Не удалось построить предпросмотр региона") from exc
     revision = body.get("revision", 0)
     try:
         revision = max(0, min(2_147_483_647, int(revision)))
     except (TypeError, ValueError, OverflowError):
         revision = 0
+    headers = {
+        "X-Offset-X": str(origin_x),
+        "X-Offset-Y": str(origin_y),
+        "X-Preview-Revision": str(revision),
+        "X-Preview-Mode": mode,
+        "X-Preview-Duration-Ms": str(max(0, round((time.perf_counter() - started) * 1000))),
+    }
+    if isinstance(meta, dict):
+        for key, value in meta.items():
+            headers[f"X-{key.replace('_', '-').title()}"] = str(value)
+    return _Result(body=png, content_type="image/png", headers=headers)
+
+
+def _fill_preview(state: AppState, page_id: str, body: dict) -> _Result:
+    """Полупрозрачный PNG заливки по цвету исходной страницы.
+
+    shortcut: превью считается на исходнике без layout_long_side; на мелких
+    страницах край заливки может отличаться от финального clean на пару px.
+    """
+    record = _require_page(state, page_id)
+    source = Path(str(record.get("source_path") or ""))
+    if not source.is_file():
+        raise _HttpError(400, "Нет исходного изображения")
+    try:
+        x = int(body.get("x"))
+        y = int(body.get("y"))
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise _HttpError(400, "Нужны координаты заливки") from exc
+    try:
+        tolerance = max(0, min(100, int(body.get("tolerance", 20))))
+    except (TypeError, ValueError, OverflowError):
+        tolerance = 20
+    mode = str(body.get("mode") or "flood").strip().lower()
+    if mode not in {"flood", "erase_flood", "erase"}:
+        raise _HttpError(400, "Неизвестный режим заливки")
+    if mode == "erase":
+        mode = "erase_flood"
+    from src.components.flood_fill import fill_preview_png
+
+    try:
+        from PIL import Image
+
+        with Image.open(source) as opened:
+            opened.load()
+            png, origin_x, origin_y = fill_preview_png(
+                opened.convert("RGB"), (x, y), tolerance, mode
+            )
+    except _HttpError:
+        raise
+    except Exception as exc:
+        logger.exception("Предпросмотр заливки")
+        raise _HttpError(400, "Не удалось посчитать заливку") from exc
+    if not png:
+        raise _HttpError(400, "Пустая область заливки")
     return _Result(
         body=png,
         content_type="image/png",
-        headers={
-            "X-Offset-X": str(origin_x),
-            "X-Offset-Y": str(origin_y),
-            "X-Preview-Revision": str(revision),
-            "X-Preview-Duration-Ms": str(max(0, round((time.perf_counter() - started) * 1000))),
-        },
+        headers={"X-Fill-X": str(origin_x), "X-Fill-Y": str(origin_y)},
     )
 
 
@@ -2223,24 +2402,47 @@ def _page_image_fingerprint(state: AppState, page_id: str, record: dict) -> tupl
     return path, fingerprint
 
 
-def _typeset_crop(state: AppState, page_id: str, record: dict, region) -> tuple[bytes, int, int]:
-    from copy import deepcopy
-    from io import BytesIO
-
+def _preview_typesetter(state: AppState):
     from src.components.typesetter import Typesetter
 
-    image = _open_page_rgb(state, page_id, record)
-    region_copy = deepcopy(region)
-    if not str(region_copy.translation or "").strip():
-        region_copy.translation = str(region_copy.text or "").strip() or "А"
     settings = state.settings
-    setter = Typesetter(
+    return Typesetter(
         min_font_size=int(getattr(settings, "min_font_size", 10) or 10),
         max_font_size=int(getattr(settings, "max_font_size", 128) or 128),
         lang=str(getattr(settings, "target_lang", "ru") or "ru"),
         stroke_ratio=float(getattr(settings, "text_stroke_ratio", 0) or 0),
         margin_ratio=float(getattr(settings, "text_margin", 0) or 0),
     )
+
+
+def _preview_region_copy(region):
+    from copy import deepcopy
+
+    region_copy = deepcopy(region)
+    if not str(region_copy.translation or "").strip():
+        region_copy.translation = str(region_copy.text or "").strip() or " "
+    return region_copy
+
+
+def _layout_snapshot_meta(layouts: dict, region) -> dict:
+    """Снимок раскладки для клиента: base64 JSON в заголовке ответа."""
+    snapshot = layouts.get(int(region.id)) if isinstance(layouts, dict) else None
+    if not isinstance(snapshot, dict) or not snapshot:
+        return {}
+    payload = json.dumps(snapshot, ensure_ascii=False, separators=(",", ":"))
+    try:
+        encoded = base64.b64encode(payload.encode("utf-8")).decode("ascii")
+    except (UnicodeEncodeError, ValueError):
+        return {}
+    return {"layout_snapshot": encoded}
+
+
+def _typeset_crop(state: AppState, page_id: str, record: dict, region) -> tuple[bytes, int, int, dict]:
+    from io import BytesIO
+
+    image = _open_page_rgb(state, page_id, record)
+    region_copy = _preview_region_copy(region)
+    setter = _preview_typesetter(state)
     layer, layer_origin, _overflow = setter.render_layer(image, [region_copy], force=True)
     x, y, width, height = (int(value) for value in region.bbox)
     x = min(x, layer_origin[0])
@@ -2259,43 +2461,159 @@ def _typeset_crop(state: AppState, page_id: str, record: dict, region) -> tuple[
     crop = crop.convert("RGB")
     buffer = BytesIO()
     crop.save(buffer, format="PNG")
-    return buffer.getvalue(), x0, y0
+    return buffer.getvalue(), x0, y0, _layout_snapshot_meta(setter._last_layouts, region)
 
 
-def _typeset_base_layer(state: AppState, page_id: str, record: dict, region) -> tuple[bytes, int, int]:
-    """Вернуть исходную RGBA-текстуру без фона, mesh и поворота для локального preview."""
-    from copy import deepcopy
+def _layout_snapshot(state: AppState, page_id: str, body: dict) -> dict:
+    """Свежая раскладка текущего черновика без PNG: для Done после preview."""
+    record, _document, region = _preview_region_inputs(state, page_id, body)
+    region_copy = _preview_region_copy(region)
+    try:
+        setter = _preview_typesetter(state)
+        setter.render_layer(
+            _open_page_rgb(state, page_id, record),
+            [region_copy],
+            force=True,
+            apply_geometry=False,
+            trim=False,
+        )
+    except _HttpError:
+        raise
+    except Exception as exc:
+        logger.exception("Не удалось построить раскладку региона")
+        raise _HttpError(400, "Не удалось построить раскладку региона") from exc
+    snapshot = setter._last_layouts.get(int(region_copy.id))
+    if not isinstance(snapshot, dict) or not snapshot:
+        # Пустой регион: раскладки ещё нет, но это не сбой запроса.
+        return {"region_id": int(region_copy.id), "layout_snapshot": None}
+    return {"region_id": int(region_copy.id), "layout_snapshot": snapshot}
+
+
+def _typeset_base_layer(
+    state: AppState,
+    page_id: str,
+    record: dict,
+    region,
+    apply_rotation: bool = False,
+) -> tuple[bytes, int, int, dict]:
+    """Прозрачный слой надписи с замороженной раскладкой.
+
+    Без ``apply_rotation`` поворот и warp не применяются: это база для
+    локального preview. С ``apply_rotation`` слой заранее повёрнут, а warp
+    остаётся клиенту — так работают комбинации rotation + arc/wave/flag/ring.
+    """
     from io import BytesIO
 
-    from src.components.typesetter import Typesetter
+    image = _open_page_rgb(state, page_id, record)
+    region_copy = _preview_region_copy(region)
+    if apply_rotation:
+        warp = dict(region_copy.style.warp or {})
+        warp["kind"] = "none"
+        region_copy.style.warp = warp
+        region_copy.text_position = None
+    setter = _preview_typesetter(state)
+    layer, (origin_x, origin_y), _overflow = setter.render_layer(
+        image,
+        [region_copy],
+        force=True,
+        apply_geometry=apply_rotation,
+        trim=False,
+        capture=apply_rotation,
+        stable_pad=abs(float(region_copy.style.skew_x or 0.0)) < 1e-6,
+    )
+    anchor = setter._last_anchors.get(int(region_copy.id), (0.0, 0.0))
+    buffer = BytesIO()
+    layer.save(buffer, format="PNG", optimize=True)
+    return (
+        buffer.getvalue(),
+        int(origin_x),
+        int(origin_y),
+        {
+            "layer_anchor_x": round(float(anchor[0]), 3),
+            "layer_anchor_y": round(float(anchor[1]), 3),
+            "renderer_version": 2,
+            **_layout_snapshot_meta(setter._last_layouts, region_copy),
+        },
+    )
+
+
+def _preview_order(
+    state: AppState,
+    page_id: str,
+    region,
+    drafts=None,
+    complete: bool = False,
+) -> tuple[list, list]:
+    """Регионы до и после выбранного в порядке документа.
+
+    ``complete`` — drafts является полным снимком (поддерживает удаление).
+    Иначе drafts только заменяют совпавшие ID и добавляют новые.
+    """
+    document = state.store.read_document(state.project_id or "", page_id)
+    saved = list(document.regions)
+    if not drafts:
+        ordered = saved
+    elif complete:
+        ordered = list(drafts)
+    else:
+        by_id = {int(item.id): item for item in drafts}
+        ordered = [by_id.get(int(item.id), item) for item in saved]
+        known = {int(item.id) for item in saved}
+        ordered.extend(item for item in drafts if int(item.id) not in known)
+    index = next(
+        (position for position, item in enumerate(ordered) if int(item.id) == int(region.id)),
+        -1,
+    )
+    if index < 0:
+        return ordered, []
+    return ordered[:index], ordered[index + 1:]
+
+
+def _typeset_base_page(
+    state: AppState,
+    page_id: str,
+    record: dict,
+    region,
+    drafts=None,
+    complete: bool = False,
+) -> tuple[bytes, int, int, dict]:
+    """Страница без выбранного региона и всего, что рисуется выше него."""
+    from io import BytesIO
 
     image = _open_page_rgb(state, page_id, record)
-    region_copy = deepcopy(region)
-    if not str(region_copy.translation or "").strip():
-        region_copy.translation = str(region_copy.text or "").strip() or "А"
-    region_copy.text_position = None
-    region_copy.style.rotation = 0.0
-    region_copy.style.warp = {
-        "version": 2,
-        "kind": "none",
-        "bend": 0.0,
-        "quad": None,
-        "mesh": None,
-    }
-    settings = state.settings
-    setter = Typesetter(
-        min_font_size=int(getattr(settings, "min_font_size", 10) or 10),
-        max_font_size=int(getattr(settings, "max_font_size", 128) or 128),
-        lang=str(getattr(settings, "target_lang", "ru") or "ru"),
-        stroke_ratio=float(getattr(settings, "text_stroke_ratio", 0) or 0),
-        margin_ratio=float(getattr(settings, "text_margin", 0) or 0),
-    )
+    before, _after = _preview_order(state, page_id, region, drafts, complete)
+    setter = _preview_typesetter(state)
+    rendered, _overflow = setter.render(image, before, force=True)
+    buffer = BytesIO()
+    rendered.convert("RGB").save(buffer, format="PNG", optimize=True)
+    return buffer.getvalue(), 0, 0, {"renderer_version": 2}
+
+
+def _typeset_base_overlay(
+    state: AppState,
+    page_id: str,
+    record: dict,
+    region,
+    drafts=None,
+    complete: bool = False,
+) -> tuple[bytes, int, int, dict]:
+    """Прозрачный слой надписей, которые по порядку лежат выше выбранной."""
+    from io import BytesIO
+
+    image = _open_page_rgb(state, page_id, record)
+    _before, after = _preview_order(state, page_id, region, drafts, complete)
+    setter = _preview_typesetter(state)
     layer, (origin_x, origin_y), _overflow = setter.render_layer(
-        image.copy(), [region_copy], force=True
+        image, after, force=True
     )
     buffer = BytesIO()
     layer.save(buffer, format="PNG", optimize=True)
-    return buffer.getvalue(), int(origin_x), int(origin_y)
+    return (
+        buffer.getvalue(),
+        int(origin_x),
+        int(origin_y),
+        {"renderer_version": 2},
+    )
 
 
 def _apply_sfx_style(state: AppState, page_id: str, region_raw: str) -> dict:

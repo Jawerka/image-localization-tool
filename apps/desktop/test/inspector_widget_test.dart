@@ -146,6 +146,9 @@ void main() {
     expect(skipRegion['skip'], true);
 
     // Пресет искривления — в черновик, пилюля «N правок».
+    await tester.tap(find.byKey(const Key('region-tab-transform-1')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('region-translation-1')), findsNothing);
     await tester.ensureVisible(find.byKey(const Key('style-warp-wave')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('style-warp-wave')));
@@ -155,6 +158,20 @@ void main() {
     expect(find.byKey(const Key('viewer-done-pill')), findsOneWidget);
     final style = state.workspace.viewer.document!.findRegion('1')!.styleMap();
     expect(style['warp']['kind'], 'wave');
+
+    // Вкладки не занимают место скрытыми секциями и запоминаются для региона.
+    await tester.tap(find.byKey(const Key('region-tab-font-1')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('style-font-select')), findsOneWidget);
+    expect(find.byKey(const Key('style-warp-wave')), findsNothing);
+    await tester.tap(find.byKey(const Key('region-card-head-2')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('region-card-head-1')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('style-font-select')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('region-tab-transform-1')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('style-warp-wave')), findsOneWidget);
 
     // Удаление — в черновик, выделение снимается.
     await tester.tap(find.byKey(const Key('region-delete-1')));

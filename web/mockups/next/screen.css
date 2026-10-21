@@ -14,18 +14,8 @@
 }
 
 @font-face {
-  font-family: "Unsightly";
-  src: url("../../../src/resources/fonts/Unsightly.ttf");
-}
-
-@font-face {
   font-family: "OperationNapalm";
   src: url("../../../src/resources/fonts/OperationNapalm-Regular.ttf");
-}
-
-@font-face {
-  font-family: "DeltaBlock";
-  src: url("../../../src/resources/fonts/DeltaBlock-Regular.ttf");
 }
 
 /* Утилиты */

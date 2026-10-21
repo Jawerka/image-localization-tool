@@ -184,3 +184,23 @@ def test_apply_strokes_erase_fill_polygon():
     assert erased[10, 10] == 0
     assert erased[0, 0] == 255
     assert int(mask.sum()) == 20 * 20 * 255
+
+def test_apply_strokes_flood_paint_and_erase_in_order():
+    image = Image.new("RGB", (10, 10), "white")
+    for y in range(10):
+        image.putpixel((5, y), (0, 0, 0))
+    mask = np.zeros((10, 10), dtype=np.uint8)
+    painted = apply_strokes(mask, [
+        MaskStroke(mode="flood", radius=0, points=[(1, 1)], tolerance=20),
+    ], image)
+    assert painted[0, 0] == 255 and painted[0, 4] == 255
+    assert painted[0, 9] == 0
+    erased = apply_strokes(painted, [
+        MaskStroke(mode="erase_flood", radius=0, points=[(9, 9)], tolerance=20),
+    ], image)
+    assert erased[0, 0] == 255
+    assert erased[0, 9] == 0
+    no_image = apply_strokes(mask, [
+        MaskStroke(mode="flood", radius=0, points=[(1, 1)], tolerance=20),
+    ])
+    assert int(no_image.sum()) == 0

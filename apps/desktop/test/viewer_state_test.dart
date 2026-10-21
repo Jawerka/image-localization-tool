@@ -9,6 +9,10 @@ import 'package:ilt_desktop/src/model/page_document.dart';
 import 'package:ilt_desktop/src/sidecar/handshake.dart';
 import 'package:ilt_desktop/src/state/viewer_state.dart';
 
+const _png =
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQ'
+    'DwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
 Map<String, dynamic> _document({
   int version = 3,
   List<dynamic>? regions,
@@ -265,6 +269,30 @@ void main() {
     viewer.dispose();
   });
 
+  test('заливка добавляет flood-штрих и просит превью', () async {
+    handler = (path) => {
+      'page': {'id': 'p1'},
+      'document': _document(),
+    };
+    final viewer = build();
+    await viewer.openPage('p1');
+    requests.clear();
+    bodies.clear();
+    viewer.floodFill(const Offset(12, 14), Stroke.flood);
+    final stroke = viewer.document!.strokes.last;
+    expect(stroke.mode, Stroke.flood);
+    expect(stroke.points.single, const Offset(12, 14));
+    expect(stroke.tolerance, 20);
+    await Future<void>.delayed(Duration.zero);
+    final index = requests.indexWhere((item) => item.contains('fill-preview'));
+    expect(index, isNonNegative);
+    final body = jsonDecode(bodies[index]) as Map<String, dynamic>;
+    expect(body['x'], 12);
+    expect(body['y'], 14);
+    expect(body['tolerance'], 20);
+    viewer.dispose();
+  });
+
   test('страж ухода: черновик поднимает диалог', () async {
     handler = (path) => {
       'page': {'id': 'p1'},
@@ -341,6 +369,10 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 50));
     expect(viewer.imageFor('original'), isNotNull);
     expect(requests.where((r) => r.contains('/image/result')).length, 1);
+    viewer.setView('clean');
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(viewer.imageFor('clean'), isNotNull);
+    expect(requests.where((r) => r.contains('/image/clean')).length, 1);
     viewer.dispose();
   });
 
@@ -476,12 +508,28 @@ void main() {
     session.setViewport(const Size(300, 300));
     session.setImageSize(const Size(100, 400));
     session.setZoom(1.0);
-    expect(session.transform.ty, 0);
+    expect(session.transform.ty, closeTo(-50, 1e-9));
     // Лист выше вьюпорта: запас 100 px сверху и снизу.
     session.panBy(const Offset(0, 500));
     expect(session.transform.ty, closeTo(100, 1e-9));
     session.panBy(const Offset(0, -2000));
     expect(session.transform.ty, closeTo(-200, 1e-9));
+    session.dispose();
+  });
+
+  test('CanvasSession: zoomStep и числовой setZoom держат центр', () {
+    final session = CanvasSession(onChanged: () {});
+    session.setViewport(const Size(300, 300));
+    session.setImageSize(const Size(600, 400));
+    const center = Offset(150, 150);
+    final beforeStep = session.transform.toScene(center);
+    session.zoomStep(1);
+    expect(session.transform.toScene(center).dx, closeTo(beforeStep.dx, 1e-6));
+    expect(session.transform.toScene(center).dy, closeTo(beforeStep.dy, 1e-6));
+    final beforeSet = session.transform.toScene(center);
+    session.setZoom(1.0);
+    expect(session.transform.toScene(center).dx, closeTo(beforeSet.dx, 1e-6));
+    expect(session.transform.toScene(center).dy, closeTo(beforeSet.dy, 1e-6));
     session.dispose();
   });
 
@@ -495,7 +543,6 @@ void main() {
     viewer.session.setViewport(const Size(300, 300));
     viewer.session.setImageSize(const Size(100, 800));
     viewer.session.setZoom(1.0);
-    expect(viewer.session.transform.ty, 0);
     viewer.session.panBy(const Offset(0, -400));
     expect(viewer.session.transform.ty, isNot(0));
     await viewer.openPage('p2');
@@ -528,5 +575,331 @@ void main() {
     expect(viewer.session.zoomMode, 'fit');
     expect(viewer.session.transform.scale, closeTo(scale, 1e-9));
     viewer.dispose();
+  });
+
+  test('applyDeferredEdits: ждёт сохранения и готовый результат', () async {
+    var gets = 0;
+    handler = (path) {
+      if (path == '/api/pages/p1') {
+        gets += 1;
+        return {
+          'page': {'id': 'p1'},
+          'status': gets < 4 ? 'running' : 'done',
+          'render_version': gets < 4 ? 0 : 5,
+          'document': _document(version: 5),
+        };
+      }
+      if (path == '/api/pages/p1/document') {
+        return {'document': _document(version: 4), 'plan': 'typeset'};
+      }
+      if (path == '/api/pages/p1/image/result') {
+        return {'__bytes': base64Decode(_png)};
+      }
+      return <String, dynamic>{};
+    };
+    final viewer = build();
+    await viewer.openPage('p1');
+    viewer.setRegionWarpPreset('1', 'wave');
+    expect(viewer.hasDeferredDraft, isTrue);
+    final ok = await viewer.applyDeferredEdits();
+    expect(ok, isTrue);
+    expect(viewer.isApplying, isFalse);
+    expect(gets, greaterThanOrEqualTo(5));
+    expect(viewer.document?.version, 5);
+    viewer.dispose();
+  });
+
+  test(
+    'applyDeferredEdits: ошибка сохранения сохраняет черновик для повтора',
+    () async {
+      handler = (path) => {
+        'page': {'id': 'p1'},
+        'document': _document(version: 4),
+      };
+      final viewer = build();
+      await viewer.openPage('p1');
+      viewer.setRegionWarpPreset('1', 'wave');
+      var puts = 0;
+      handler = (path) {
+        if (path == '/api/pages/p1/document') {
+          puts += 1;
+          if (puts == 1) {
+            status = 500;
+            return {'error': 'Сбой сохранения'};
+          }
+          return {'document': _document(version: 4), 'plan': 'typeset'};
+        }
+        if (path == '/api/pages/p1') {
+          return {
+            'page': {'id': 'p1'},
+            'status': 'done',
+            'render_version': 4,
+            'document': _document(version: 4),
+          };
+        }
+        if (path == '/api/pages/p1/image/result') {
+          return {'__bytes': base64Decode(_png)};
+        }
+        return <String, dynamic>{};
+      };
+      expect(await viewer.applyDeferredEdits(), isFalse);
+      expect(viewer.hasDeferredDraft, isTrue);
+      expect(viewer.applyError, isNotEmpty);
+      expect(puts, 1);
+
+      expect(await viewer.applyDeferredEdits(), isTrue);
+      expect(puts, 2);
+      expect(viewer.hasDeferredDraft, isFalse);
+      viewer.dispose();
+    },
+  );
+
+  test(
+    'Done получает свежий layout_snapshot и кладёт его в PUT',
+    () async {
+      handler = (path) => {
+        'page': {'id': 'p1'},
+        'document': _document(version: 4),
+      };
+      final viewer = build();
+      await viewer.openPage('p1');
+      viewer.selectRegion('1');
+      viewer.document!.regions[0].data['layout_snapshot'] = {
+        'version': 1,
+        'layout_key': 'old',
+        'font_size': 12,
+        'lines': [
+          ['Old', 0, 0],
+        ],
+      };
+      viewer.setRegionWarpPreset('1', 'wave');
+      Object? snapshotRequest;
+      handler = (path) {
+        if (path == '/api/pages/p1/layout-snapshot') {
+          snapshotRequest = jsonDecode(bodies.last);
+          return {
+            'layout_snapshot': {
+              'version': 1,
+              'layout_key': 'old',
+              'font_size': 12,
+              'lines': [
+                ['Old', 0, 0],
+              ],
+            },
+          };
+        }
+        if (path == '/api/pages/p1/document') {
+          return {'document': _document(version: 4), 'plan': 'typeset'};
+        }
+        if (path == '/api/pages/p1') {
+          return {
+            'page': {'id': 'p1'},
+            'status': 'done',
+            'render_version': 4,
+            'document': _document(version: 4),
+          };
+        }
+        if (path == '/api/pages/p1/image/result') {
+          return {'__bytes': base64Decode(_png)};
+        }
+        return <String, dynamic>{};
+      };
+      expect(await viewer.applyDeferredEdits(), isTrue);
+      final request = snapshotRequest! as Map<String, dynamic>;
+      expect((request['draft'] as Map)['layout_snapshot']['font_size'], 12);
+      expect(request['drafts'], hasLength(1));
+      final index = requests.lastIndexOf('PUT /api/pages/p1/document');
+      final body = jsonDecode(bodies[index]) as Map<String, dynamic>;
+      final region = (body['document'] as Map)['regions'][0] as Map;
+      expect(region['layout_snapshot']['font_size'], 12);
+      expect(region['layout_snapshot']['version'], 1);
+      viewer.dispose();
+    },
+  );
+
+  test(
+    'Done сохраняет новый регион через drafts в layout-snapshot',
+    () async {
+      handler = (path) => {
+        'page': {'id': 'p1'},
+        'document': _document(version: 4, regions: []),
+      };
+      final viewer = build();
+      await viewer.openPage('p1');
+      viewer.session.setImageSize(const Size(500, 500));
+      viewer.createRegion(const Rect.fromLTWH(20, 20, 80, 40));
+      Object? snapshotRequest;
+      handler = (path) {
+        if (path == '/api/pages/p1/layout-snapshot') {
+          snapshotRequest = jsonDecode(bodies.last);
+          return {
+            'layout_snapshot': {
+              'version': 1,
+              'layout_key': 'new',
+              'font_size': 16,
+              'lines': [
+                ['Новый', 0, 0],
+              ],
+            },
+          };
+        }
+        if (path == '/api/pages/p1/document') {
+          return {'document': _document(version: 4, regions: []), 'plan': 'typeset'};
+        }
+        if (path == '/api/pages/p1') {
+          return {
+            'page': {'id': 'p1'},
+            'status': 'done',
+            'render_version': 4,
+            'document': _document(version: 4, regions: []),
+          };
+        }
+        if (path == '/api/pages/p1/image/result') {
+          return {'__bytes': base64Decode(_png)};
+        }
+        return <String, dynamic>{};
+      };
+      expect(await viewer.applyDeferredEdits(), isTrue);
+      final request = snapshotRequest! as Map<String, dynamic>;
+      final drafts = request['drafts'] as List;
+      expect(drafts, hasLength(1));
+      expect('${drafts.first['id']}', '1');
+      final putIndex = requests.lastIndexOf('PUT /api/pages/p1/document');
+      final body = jsonDecode(bodies[putIndex]) as Map<String, dynamic>;
+      expect((body['document'] as Map)['regions'], hasLength(1));
+      viewer.dispose();
+    },
+  );
+
+  test(
+    'applyDeferredEdits: после ошибки bake повтор запускает rebake без нового PUT',
+    () async {
+      handler = (path) => {
+        'page': {'id': 'p1'},
+        'document': _document(version: 4),
+      };
+      final viewer = build();
+      await viewer.openPage('p1');
+      viewer.selectRegion('1');
+      viewer.setRegionWarpPreset('1', 'wave');
+      var puts = 0;
+      var rebakes = 0;
+      handler = (path) {
+        if (path == '/api/pages/p1/document') {
+          puts += 1;
+          return {'document': _document(version: 4), 'plan': 'typeset'};
+        }
+        if (path == '/api/pages/p1/rebake') {
+          rebakes += 1;
+          return {'job_id': 'again'};
+        }
+        if (path == '/api/pages/p1') {
+          if (rebakes == 0) {
+            return {
+              'page': {'id': 'p1'},
+              'status': 'error',
+              'error': 'Не собралось',
+              'render_version': 0,
+              'document': _document(version: 4),
+            };
+          }
+          return {
+            'page': {'id': 'p1'},
+            'status': 'done',
+            'render_version': 4,
+            'document': _document(version: 4),
+          };
+        }
+        if (path == '/api/pages/p1/image/result') {
+          return {'__bytes': base64Decode(_png)};
+        }
+        return <String, dynamic>{};
+      };
+      expect(await viewer.applyDeferredEdits(), isFalse);
+      expect(viewer.hasDeferredDraft, isTrue);
+      expect(puts, 1);
+      expect(rebakes, 0);
+
+      expect(await viewer.applyDeferredEdits(), isTrue);
+      expect(puts, 1);
+      expect(rebakes, 1);
+      expect(viewer.hasDeferredDraft, isFalse);
+      viewer.dispose();
+    },
+  );
+
+  test(
+    'applyDeferredEdits: результат не декодировался — preview остаётся',
+    () async {
+      handler = (path) {
+        if (path == '/api/pages/p1/preview-region') {
+          return {'__bytes': base64Decode(_png)};
+        }
+        return {
+          'page': {'id': 'p1'},
+          'document': _document(version: 4),
+        };
+      };
+      final viewer = build();
+      await viewer.openPage('p1');
+      viewer.selectRegion('1');
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+      expect(viewer.stylePreviewImage, isNotNull);
+      viewer.editDocument(
+        (document) => document.addStroke(
+          const Stroke(mode: Stroke.paint, radius: 4, points: [Offset(1, 1)]),
+        ),
+        deferApply: true,
+      );
+      var badImage = true;
+      handler = (path) {
+        if (path == '/api/pages/p1/document') {
+          return {
+            'document': _document(version: 4, strokes: []),
+            'plan': 'typeset',
+          };
+        }
+        if (path == '/api/pages/p1') {
+          return {
+            'page': {'id': 'p1'},
+            'status': 'done',
+            'render_version': 4,
+            'document': _document(version: 4, strokes: []),
+          };
+        }
+        if (path == '/api/pages/p1/image/result') {
+          return {
+            '__bytes': badImage ? <int>[1, 2, 3] : base64Decode(_png),
+          };
+        }
+        return <String, dynamic>{};
+      };
+      expect(await viewer.applyDeferredEdits(), isFalse);
+      expect(viewer.hasDeferredDraft, isTrue);
+      expect(viewer.stylePreviewImage, isNotNull);
+      expect(viewer.applyError, isNotEmpty);
+
+      badImage = false;
+      expect(await viewer.applyDeferredEdits(), isTrue);
+      expect(viewer.hasDeferredDraft, isFalse);
+      expect(viewer.stylePreviewImage, isNull);
+      viewer.dispose();
+    },
+  );
+
+  test('CanvasSession: cancelGesture отменяет жест и чистит preview', () {
+    final session = CanvasSession(onChanged: () {});
+    var called = 0;
+    session.onCancelGesture = () {
+      called += 1;
+      return true;
+    };
+    session.setPreviewRect('1', const Rect.fromLTWH(1, 2, 3, 4));
+    expect(session.cancelGesture(), isTrue);
+    expect(called, 1);
+    expect(session.previewRect, isNull);
+    session.onCancelGesture = () => false;
+    expect(session.cancelGesture(), isFalse);
+    session.dispose();
   });
 }

@@ -5,7 +5,18 @@ import 'package:ffi/ffi.dart' as ffi;
 import 'package:win32/win32.dart';
 
 /// Заголовок главного окна (`windows/runner/main.cpp`).
-const _windowTitle = 'Image Localization Tool';
+const mainWindowTitle = 'Image Localization Tool';
+
+/// Найти главное окно текущего экземпляра.
+HWND? findMainWindow() {
+  if (!Platform.isWindows) return null;
+  var handle = 0;
+  ffi.using((arena) {
+    final title = mainWindowTitle.toPcwstr(allocator: arena);
+    handle = FindWindow(null, title).value.address;
+  });
+  return handle == 0 ? null : HWND(Pointer.fromAddress(handle));
+}
 
 /// Разрешить процессу [pid] вывести своё окно на передний план.
 ///
@@ -22,11 +33,10 @@ void allowForegroundTo(int pid) {
 /// или фокус не передан.
 bool focusMainWindow({int? pid}) {
   if (!Platform.isWindows) return false;
+  final hwnd = findMainWindow();
+  if (hwnd == null) return false;
   var focused = false;
   ffi.using((arena) {
-    final title = _windowTitle.toPcwstr(allocator: arena);
-    final hwnd = FindWindow(null, title).value;
-    if (hwnd.address == 0) return;
     if (pid != null && pid > 0) {
       final owner = arena.allocate<Uint32>(sizeOf<Uint32>());
       GetWindowThreadProcessId(hwnd, owner);

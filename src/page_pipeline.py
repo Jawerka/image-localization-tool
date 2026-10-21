@@ -128,6 +128,14 @@ def _scale_regions(regions: list[TextRegion], factor: float) -> None:
             region.style.font_size_override = max(1, int(round(override * factor)))
 
 
+def _has_frozen_layout(regions) -> bool:
+    """Есть ли на странице snapshot: тогда рендер идёт в нативном разрешении."""
+    return any(
+        isinstance(getattr(region, "layout_snapshot", None), dict)
+        for region in regions or ()
+    )
+
+
 def _draw_detections(image: Image.Image, detections) -> Image.Image:
     canvas = image.copy()
     draw = ImageDraw.Draw(canvas)
@@ -351,6 +359,7 @@ class PagePipeline:
                                 (int(round(x * layout_scale)), int(round(y * layout_scale)))
                                 for x, y in stroke.points
                             ],
+                            tolerance=stroke.tolerance,
                         )
                         for stroke in strokes
                     ]
@@ -366,7 +375,7 @@ class PagePipeline:
         mask_sfx = segment_regions(work, sfx_regions, capture_ink=inks, bubble_inset_px=bubble_inset)
         mask = np.maximum(mask_other, mask_sfx)
         self._merge_captured_sfx(work, sfx_regions, inks)
-        mask = apply_strokes(mask, strokes or [])
+        mask = apply_strokes(mask, strokes or [], work)
         self._step_timings["segment"] = time.perf_counter() - started
         if debug:
             Image.fromarray(mask).save(debug / "03_mask.png")
@@ -413,7 +422,10 @@ class PagePipeline:
             warnings = []
         work = cleaned
         layout_scale = 1.0
-        if not _skip_layout_scale:
+        # Snapshot живёт в координатах preview: масштабирование страницы
+        # сдвинуло бы bbox/кегли и сделало раскладку невалидной.
+        frozen = _has_frozen_layout(regions)
+        if not _skip_layout_scale and not frozen:
             work, layout_scale = _layout_scale(
                 cleaned, int(getattr(self.config, "layout_long_side", 2000) or 0)
             )
@@ -423,6 +435,12 @@ class PagePipeline:
         self.typesetter.lang = target_lang
         started = time.perf_counter()
         incremental_details = None
+        # Partial compose переиспользует старую растеризацию. Если прошлый
+        # документ был в другом режиме масштаба, соседние регионы разойдутся.
+        if incremental and frozen != _has_frozen_layout(
+            incremental.get("previous_regions") or []
+        ):
+            incremental = None
         if incremental and layout_scale == 1.0:
             assign_stylized_fonts(
                 regions,

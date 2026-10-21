@@ -31,6 +31,7 @@ class _InspectorRailState extends State<InspectorRail> {
   String? _lastSelected;
   final ScrollController _scroll = ScrollController();
   final Map<String, GlobalKey> _cardKeys = {};
+  final Map<String, RegionTab> _regionTabs = {};
 
   WorkspaceState get _workspace => widget.workspace;
   ViewerState get _viewer => _workspace.viewer;
@@ -73,6 +74,12 @@ class _InspectorRailState extends State<InspectorRail> {
     _viewer.ensureFonts();
     setState(() {});
   }
+
+  String _regionTabKey(String regionId) =>
+      '${_workspace.project?.id ?? ''}/${_viewer.pageId ?? ''}/$regionId';
+
+  RegionTab _regionTab(String regionId) =>
+      _regionTabs[_regionTabKey(regionId)] ?? RegionTab.text;
 
   void _ensureVisible(String regionId) {
     final context = _cardKeys[regionId]?.currentContext;
@@ -274,6 +281,10 @@ class _InspectorRailState extends State<InspectorRail> {
                   region: region,
                   index: index,
                   selected: region.id == _viewer.selectedRegionId,
+                  tab: _regionTab(region.id),
+                  onTabSelected: (tab) => setState(
+                    () => _regionTabs[_regionTabKey(region.id)] = tab,
+                  ),
                 ),
               );
             },

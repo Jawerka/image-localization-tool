@@ -37,7 +37,22 @@ def test_reorder_and_pack_prefixes(tmp_path):
     first, second = pages[0], pages[1]
 
     doc = store.read_document(project["id"], first["id"])
-    doc.regions = [TextRegion(id=1, bbox=(0, 0, 4, 4), text="hi", translation="привет")]
+    snapshot = {
+        "version": 1,
+        "layout_key": "key",
+        "font_size": 18,
+        "font": "Heroika-Regular.otf",
+        "lines": [["hi", 2, 3]],
+    }
+    doc.regions = [
+        TextRegion(
+            id=1,
+            bbox=(0, 0, 4, 4),
+            text="hi",
+            translation="привет",
+            layout_snapshot=snapshot,
+        )
+    ]
     store.write_document(project["id"], first["id"], doc, base_version=1)
 
     store.reorder_pages(project["id"], [second["id"], first["id"]])
@@ -54,11 +69,13 @@ def test_reorder_and_pack_prefixes(tmp_path):
     assert manifest["schema_version"] == SCHEMA_VERSION
     assert [item["name"] for item in manifest["pages"]] == ["b.png", "a.png"]
     assert manifest["pages"][1]["document"]["regions"][0]["translation"] == "привет"
+    assert manifest["pages"][1]["document"]["regions"][0]["layout_snapshot"]["font_size"] == 18
 
     loaded = unpack_project(store, packed.path)
     assert [item["name"] for item in loaded.project["pages"]] == ["b.png", "a.png"]
     restored = store.read_document(loaded.project["id"], loaded.project["pages"][1]["id"])
     assert restored.regions[0].translation == "привет"
+    assert restored.regions[0].layout_snapshot == snapshot
     assert Path(loaded.project["pages"][0]["source_path"]).is_file()
 
 

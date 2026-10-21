@@ -8,6 +8,7 @@ import 'src/app.dart';
 import 'src/sidecar/sidecar_controller.dart';
 import 'src/sidecar/single_instance.dart';
 import 'src/sidecar/window_focus.dart';
+import 'src/sidecar/window_state.dart';
 import 'src/state/shell_state.dart';
 import 'src/ui/platform.dart' as platform;
 
@@ -23,6 +24,7 @@ Future<void> main(List<String> args) async {
     exit(0);
   }
   final state = ShellState(sidecar: SidecarController(attach: attach));
+  final window = WindowState();
   state.secondary.onOpenFolder = platform.openFolder;
   if (!attach) {
     try {
@@ -33,6 +35,8 @@ Future<void> main(List<String> args) async {
       return;
     }
   }
+  // Окно ещё скрыто до первого кадра — восстановление не прыгает.
+  window.restore();
   // Слушатель держит ссылку сам WidgetsBinding: он нужен, чтобы убрать
   // instance.json при штатном выходе. При незавершённом прогоне выход
   // подтверждается диалогом (ShellRoot).
@@ -40,12 +44,14 @@ Future<void> main(List<String> args) async {
     onExitRequested: () async {
       final response = await state.confirmExit();
       if (response == ui.AppExitResponse.exit) {
+        window.saveNow();
         await single.dispose();
       }
       return response;
     },
   );
   runApp(IltApp(state: state));
+  window.start();
   unawaited(state.start());
 }
 

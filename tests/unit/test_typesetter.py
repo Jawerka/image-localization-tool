@@ -101,6 +101,55 @@ def test_render_layer_is_transparent_cropped_and_composes_to_same_pixels():
     assert np.array_equal(np.asarray(composed.convert("RGB")), np.asarray(expected))
 
 
+def test_base_layer_freezes_layout_without_geometry():
+    image = Image.new("RGB", (260, 140), "white")
+    raw = TextRegion(
+        id=1,
+        bbox=(30, 30, 110, 55),
+        translation="Повёрнутый текст",
+        block_type="narration",
+        text_position=(250, 120),
+        style=TextStyle(
+            font_size_override=18,
+            rotation=30,
+            warp={
+                "version": 2,
+                "kind": "mesh",
+                "bend": 0.0,
+                "quad": None,
+                    "mesh": [
+                        [col * 110 / 3, row * 55 / 3]
+                        for row in range(4)
+                        for col in range(4)
+                    ],
+            },
+        ),
+    )
+    setter = Typesetter(min_font_size=18, max_font_size=18, lang="ru")
+    setter.render_layer(image.copy(), [TextRegion.from_dict(raw.to_dict())], force=True)
+    layout_on = dict(setter._last_layouts[1])
+    layer, origin, _overflow = setter.render_layer(
+        image.copy(),
+        [TextRegion.from_dict(raw.to_dict())],
+        force=True,
+        apply_geometry=False,
+        trim=False,
+    )
+    layout_off = dict(setter._last_layouts[1])
+    assert layout_on == layout_off
+    trimmed, _trimmed_origin, _ = setter.render_layer(
+        image.copy(),
+        [TextRegion.from_dict(raw.to_dict())],
+        force=True,
+        apply_geometry=False,
+    )
+    bounds = setter._last_layer_bounds[1]
+    assert abs(origin[0] - bounds[0]) <= 1
+    assert abs(origin[1] - bounds[1]) <= 1
+    assert layer.size[0] >= trimmed.size[0]
+    assert layer.size[1] >= trimmed.size[1]
+
+
 def test_render_layer_matches_full_render_for_overlapping_regions():
     image = Image.new("RGB", (240, 130), (238, 238, 238))
     regions = [
@@ -684,3 +733,144 @@ def test_incremental_composition_matches_full_for_arc_and_perspective():
         )
         assert details["mode"] == "partial"
         assert np.array_equal(np.asarray(incremental), np.asarray(full))
+
+def test_frozen_layout_survives_rotation_change():
+    image = Image.new("RGB", (400, 300), "white")
+    region = TextRegion(
+        id=1,
+        bbox=(80, 80, 160, 75),
+        translation="This is a longer sentence for a rotation layout comparison",
+        block_type="dialogue",
+        style=TextStyle(),
+    )
+    setter = Typesetter(min_font_size=10, max_font_size=28, lang="en")
+    setter.render_layer(
+        image.copy(), [TextRegion.from_dict(region.to_dict())],
+        force=True, apply_geometry=False, trim=False,
+    )
+    snapshot = dict(setter._last_layouts[1])
+
+    frozen = TextRegion.from_dict(region.to_dict())
+    frozen.layout_snapshot = snapshot
+    frozen.style.rotation = 35
+    setter.render_layer(
+        image.copy(), [frozen], force=True, apply_geometry=False, trim=False,
+    )
+    frozen_layout = dict(setter._last_layouts[1])
+
+    fresh = TextRegion.from_dict(region.to_dict())
+    fresh.style.rotation = 35
+    setter.render_layer(
+        image.copy(), [fresh], force=True, apply_geometry=False, trim=False,
+    )
+    fresh_layout = dict(setter._last_layouts[1])
+
+    assert frozen_layout["font_size"] == snapshot["font_size"]
+    assert frozen_layout["lines"] == snapshot["lines"]
+    assert fresh_layout["lines"] != snapshot["lines"]
+
+    setter.render(
+        image.copy(), [TextRegion.from_dict(frozen.to_dict())], force=True,
+    )
+    assert setter._last_layouts[1]["lines"] == snapshot["lines"]
+
+
+def test_base_layer_extent_is_independent_of_warp_and_rotation():
+    image = Image.new("RGB", (600, 500), "white")
+    region = TextRegion(
+        id=1,
+        bbox=(150, 150, 160, 75),
+        translation="This is a longer sentence",
+        block_type="narration",
+        style=TextStyle(font_size_override=18, warp={"kind": "arc", "bend": 0.0}),
+    )
+    setter = Typesetter(min_font_size=18, max_font_size=18, lang="en")
+    base, _origin, _ = setter.render_layer(
+        image.copy(), [TextRegion.from_dict(region.to_dict())],
+        force=True, apply_geometry=False, trim=False,
+    )
+    snapshot = dict(setter._last_layouts[1])
+    changed = TextRegion.from_dict(region.to_dict())
+    changed.layout_snapshot = snapshot
+    changed.style.rotation = 30
+    changed.style.warp = {"kind": "arc", "bend": 0.4}
+    warped, _origin, _ = setter.render_layer(
+        image.copy(), [changed], force=True, apply_geometry=False, trim=False,
+    )
+    assert warped.size == base.size
+
+def test_pre_rotated_base_layer_without_snapshot_uses_stable_extent():
+    image = Image.new("RGB", (600, 500), "white")
+    for kind in ("arc", "wave", "flag", "ring"):
+        region = TextRegion(
+            id=1,
+            bbox=(150, 150, 160, 75),
+            translation="This is a longer sentence",
+            block_type="narration",
+            style=TextStyle(
+                font_size_override=18,
+                rotation=35,
+                warp={"kind": kind, "bend": 0.4},
+            ),
+        )
+        setter = Typesetter(min_font_size=18, max_font_size=18, lang="en")
+        first = TextRegion.from_dict(region.to_dict())
+        first.style.warp = {"kind": "none"}
+        layer, origin, _ = setter.render_layer(
+            image.copy(), [first],
+            force=True, apply_geometry=True, trim=False,
+            capture=True, stable_pad=True,
+        )
+        snapshot = dict(setter._last_layouts[1])
+        repeated = TextRegion.from_dict(region.to_dict())
+        repeated.style.warp = {"kind": "none"}
+        repeated.layout_snapshot = snapshot
+        next_layer, next_origin, _ = setter.render_layer(
+            image.copy(), [repeated],
+            force=True, apply_geometry=True, trim=False,
+            capture=True, stable_pad=True,
+        )
+        assert next_layer.size == layer.size, kind
+        assert next_origin == origin, kind
+
+
+def test_base_layer_keeps_padding_outside_page_edges():
+    image = Image.new("RGB", (140, 100), "white")
+    region = TextRegion(
+        id=1,
+        bbox=(0, 0, 100, 50),
+        translation="EDGE",
+        block_type="narration",
+        style=TextStyle(font_size_override=18),
+    )
+    layer, origin, _overflow = Typesetter(
+        min_font_size=18, max_font_size=18, lang="en"
+    ).render_layer(
+        image, [region], force=True, apply_geometry=False, trim=False,
+    )
+    assert origin[0] < 0 or origin[1] < 0
+    assert origin[0] + layer.width > image.width or origin[1] + layer.height > image.height
+
+def test_frozen_layout_survives_missing_font_file():
+    image = Image.new("RGB", (240, 120), "white")
+    region = TextRegion(
+        id=1,
+        bbox=(20, 20, 120, 50),
+        translation="MISSING FONT",
+        block_type="narration",
+        style=TextStyle(font_size_override=18, font_id="no-such-font"),
+    )
+    setter = Typesetter(min_font_size=18, max_font_size=18, lang="en")
+    setter.render_layer(
+        image, [TextRegion.from_dict(region.to_dict())],
+        force=True, apply_geometry=False, trim=False,
+    )
+    snapshot = dict(setter._last_layouts[1])
+    snapshot["font"] = "definitely-missing-font.ttf"
+
+    frozen = TextRegion.from_dict(region.to_dict())
+    frozen.layout_snapshot = snapshot
+    rendered, overflow = setter.render(image, [frozen], force=True)
+    assert overflow == []
+    assert setter._last_layouts[1]["lines"] == snapshot["lines"]
+    assert rendered.size == image.size

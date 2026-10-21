@@ -66,3 +66,10 @@
 .box__point { width: 14px; height: 14px; margin: -7px 0 0 -7px; background: var(--bg-card); border-color: var(--primary); box-shadow: 0 0 0 1px white, 0 1px 4px #0008; touch-action: none; }
 .box__point:hover { background: var(--primary); transform: scale(1.25); }
 .box__rotate { width: 16px; height: 16px; top: -26px; margin-left: -8px; touch-action: none; }
+
+/* Вкладки раскрытой карточки: скрытые секции не занимают место. */
+.inspector .region-card__tabs { display: flex; gap: 2px; padding: 5px 8px; border-top: 1px solid var(--border); background: var(--bg-secondary); overflow-x: auto; }
+.inspector .region-tab { flex: 1 0 auto; min-width: 0; height: 30px; padding: 0 8px; border: 0; border-radius: 5px; background: transparent; color: var(--text-muted); font: inherit; font-size: var(--font-size-small); cursor: pointer; white-space: nowrap; }
+.inspector .region-tab[aria-selected="true"] { background: var(--bg-card); color: var(--text-primary); }
+.inspector .region-tab:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.inspector .region-panel[hidden] { display: none; }

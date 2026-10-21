@@ -45,7 +45,16 @@ class ScenePainter extends CustomPainter {
 
   void _paintScene(Canvas canvas, double scale) {
     final view = viewer.view;
-    final base = viewer.imageFor(view == 'original' ? 'original' : 'result');
+    final local = viewer.hasLocalPreview && view == 'result';
+    final base = local
+        ? viewer.basePageImage
+        : viewer.imageFor(
+            view == 'original'
+                ? 'original'
+                : view == 'clean'
+                ? 'clean'
+                : 'result',
+          );
     final imageSize = viewer.imageSize;
     if (base != null) {
       _drawImage(canvas, base);
@@ -78,6 +87,7 @@ class ScenePainter extends CustomPainter {
           bounds: ui.Rect.fromLTWH(0, 0, width, height),
           strokes: viewer.document?.strokes ?? const [],
           bakedStrokeCount: viewer.bakedStrokeCount,
+          fillPreviews: viewer.fillPreviews,
           activeStroke: session.strokePoints.isEmpty
               ? null
               : Stroke(
@@ -89,30 +99,35 @@ class ScenePainter extends CustomPainter {
       }
     }
 
-    final preview = viewer.stylePreviewImage;
-    if (preview != null) {
-      final src = ui.Rect.fromLTWH(
-        0,
-        0,
-        preview.width.toDouble(),
-        preview.height.toDouble(),
-      );
-      final textOffset = session.previewTextId == viewer.selectedRegionId
-          ? session.previewTextOffset ?? Offset.zero
-          : Offset.zero;
-      final region = viewer.document?.findRegion(viewer.selectedRegionId);
-      final meshPoints = session.previewWarpPoints;
-      if (meshPoints != null &&
-          meshPoints.length == 16 &&
-          region?.warp?['kind'] == 'mesh') {
-        _drawMeshPreview(canvas, preview, meshPoints);
-      } else {
-        canvas.drawImageRect(
-          preview,
-          src,
-          src.shift(viewer.stylePreviewOffset + textOffset),
-          _imagePaint,
+    if (local) {
+      _drawLocalText(canvas);
+      _drawOverlayLayer(canvas);
+    } else {
+      final preview = viewer.stylePreviewImage;
+      if (preview != null) {
+        final src = ui.Rect.fromLTWH(
+          0,
+          0,
+          preview.width.toDouble(),
+          preview.height.toDouble(),
         );
+        final textOffset = session.previewTextId == viewer.selectedRegionId
+            ? session.previewTextOffset ?? Offset.zero
+            : Offset.zero;
+        final region = viewer.document?.findRegion(viewer.selectedRegionId);
+        final meshPoints = session.previewWarpPoints;
+        if (meshPoints != null &&
+            meshPoints.length == 16 &&
+            region?.warp?['kind'] == 'mesh') {
+          _drawMeshPreview(canvas, preview, meshPoints);
+        } else {
+          canvas.drawImageRect(
+            preview,
+            src,
+            src.shift(viewer.stylePreviewOffset + textOffset),
+            _imagePaint,
+          );
+        }
       }
     }
 
@@ -141,6 +156,195 @@ class ScenePainter extends CustomPainter {
       points,
       textureCoordinates: meshTextureCoordinates(image.width, image.height),
       indices: meshPreviewIndices(),
+    );
+    final shader = ui.ImageShader(
+      image,
+      ui.TileMode.clamp,
+      ui.TileMode.clamp,
+      Matrix4.identity().storage,
+      filterQuality: FilterQuality.medium,
+    );
+    canvas.drawVertices(
+      vertices,
+      BlendMode.srcOver,
+      Paint()
+        ..shader = shader
+        ..filterQuality = FilterQuality.medium,
+    );
+  }
+
+  /// Надписи, которые по порядку документа лежат выше выбранной.
+  void _drawOverlayLayer(Canvas canvas) {
+    final image = viewer.overlayLayerImage;
+    if (image == null) return;
+    final page = viewer.imageSize;
+    final src = ui.Rect.fromLTWH(
+      0,
+      0,
+      image.width.toDouble(),
+      image.height.toDouble(),
+    );
+    canvas.save();
+    if (!page.isEmpty) canvas.clipRect(Offset.zero & page);
+    canvas.drawImageRect(
+      image,
+      src,
+      src.shift(viewer.overlayLayerOrigin),
+      _imagePaint,
+    );
+    canvas.restore();
+  }
+
+  /// Локальный слой текста: страница уже без выбранного региона, mesh
+  /// двигается без HTTP и без пересборки раскладки.
+  void _drawLocalText(Canvas canvas) {
+    final image = viewer.textLayerImage;
+    final region = viewer.document?.findRegion(viewer.selectedRegionId);
+    if (image == null || region == null) return;
+    final kind = '${region.warp?['kind'] ?? 'none'}';
+    if (kind == 'none') {
+      _drawRotatedLayer(canvas, image, region);
+      return;
+    }
+    if (kind != 'mesh' &&
+        kind != 'arc' &&
+        kind != 'wave' &&
+        kind != 'flag' &&
+        kind != 'ring' &&
+        kind != 'perspective') {
+      return;
+    }
+    final warp = region.warp ?? const <String, dynamic>{};
+    var delta = Offset.zero;
+    final position = region.textPosition;
+    if (position != null) delta += position - viewer.textLayerAnchor;
+    if (session.previewTextId == region.id) {
+      delta += session.previewTextOffset ?? Offset.zero;
+    }
+    final page = viewer.imageSize;
+    canvas.save();
+    if (!page.isEmpty) {
+      canvas.clipRect(Offset.zero & page);
+    }
+    if (kind == 'mesh') {
+      final points =
+          session.previewWarpId == region.id &&
+              session.previewWarpPoints != null
+          ? session.previewWarpPoints!
+          : warpPointsFor(region);
+      if (points.length == 16) {
+        _drawMeshSurface(canvas, image, [
+          for (final point in points) point + delta,
+        ]);
+      }
+    } else {
+      _drawWarpSurface(
+        canvas,
+        image,
+        region,
+        kind,
+        (warp['bend'] as num?)?.toDouble() ?? 0,
+        delta,
+      );
+    }
+    canvas.restore();
+  }
+
+  void _drawWarpSurface(
+    Canvas canvas,
+    ui.Image image,
+    Region region,
+    String kind,
+    double bend,
+    Offset delta,
+  ) {
+    final surface = buildWarpSurface(
+      kind: kind,
+      width: image.width.toDouble(),
+      height: image.height.toDouble(),
+      origin: viewer.textLayerOrigin,
+      bend: bend,
+      quad: kind == 'perspective'
+          ? (session.previewWarpId == region.id &&
+                    session.previewWarpPoints != null
+                ? session.previewWarpPoints
+                : warpPointsFor(region))
+          : null,
+    );
+    _paintVertices(
+      canvas,
+      image,
+      [for (final point in surface.positions) point + delta],
+      surface.textureCoordinates,
+      surface.indices,
+    );
+  }
+
+  /// Поворот без warp: слой уже подготовлен без геометрии, поэтому его можно
+  /// вращать вокруг якоря на каждом кадре.
+  void _drawRotatedLayer(Canvas canvas, ui.Image image, Region region) {
+    final rotation =
+        session.previewRegionId == region.id && session.previewRotation != null
+        ? session.previewRotation!
+        : region.rotation;
+    var delta = Offset.zero;
+    final position = region.textPosition;
+    if (position != null) delta += position - viewer.textLayerAnchor;
+    if (session.previewTextId == region.id) {
+      delta += session.previewTextOffset ?? Offset.zero;
+    }
+    final anchor = viewer.textLayerAnchor;
+    final page = viewer.imageSize;
+    final src = ui.Rect.fromLTWH(
+      0,
+      0,
+      image.width.toDouble(),
+      image.height.toDouble(),
+    );
+    canvas.save();
+    if (!page.isEmpty) {
+      canvas.clipRect(Offset.zero & page);
+    }
+    canvas.translate(anchor.dx + delta.dx, anchor.dy + delta.dy);
+    canvas.rotate(rotation * math.pi / 180);
+    canvas.translate(-anchor.dx, -anchor.dy);
+    canvas.drawImageRect(
+      image,
+      src,
+      src.shift(viewer.textLayerOrigin),
+      _imagePaint,
+    );
+    canvas.restore();
+  }
+
+  void _drawMeshSurface(Canvas canvas, ui.Image image, List<Offset> points) {
+    final mesh = buildMeshSurface(
+      points,
+      image.width.toDouble(),
+      image.height.toDouble(),
+    );
+    _paintVertices(
+      canvas,
+      image,
+      mesh.positions,
+      mesh.textureCoordinates,
+      mesh.indices,
+    );
+  }
+
+  void _paintVertices(
+    Canvas canvas,
+    ui.Image image,
+    List<Offset> positions,
+    List<Offset> textureCoordinates,
+    List<int> indices,
+  ) {
+    if (positions.isEmpty) return;
+    final vertices = ui.Vertices(
+      ui.VertexMode.triangles,
+      positions,
+      textureCoordinates: textureCoordinates,
+      indices: indices,
     );
     final shader = ui.ImageShader(
       image,

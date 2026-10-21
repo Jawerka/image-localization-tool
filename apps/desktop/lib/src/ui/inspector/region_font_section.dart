@@ -5,11 +5,12 @@ import '../../model/page_document.dart';
 import '../../state/viewer_state.dart';
 import '../theme.dart';
 import 'inspector_controls.dart';
+import 'sfx_section.dart';
 
-/// Секция «Стиль» развёрнутой карточки: шрифт, кегль, чернила, цвета,
-/// искривление, стили проекта и буфер стиля (024).
-class RegionStyleSection extends StatefulWidget {
-  const RegionStyleSection({
+/// Вкладка «Шрифт»: семейство, кегль, чернила, цвета, обводка,
+/// стили проекта и буфер стиля (024).
+class RegionFontSection extends StatefulWidget {
+  const RegionFontSection({
     super.key,
     required this.viewer,
     required this.region,
@@ -19,10 +20,10 @@ class RegionStyleSection extends StatefulWidget {
   final Region region;
 
   @override
-  State<RegionStyleSection> createState() => _RegionStyleSectionState();
+  State<RegionFontSection> createState() => _RegionFontSectionState();
 }
 
-class _RegionStyleSectionState extends State<RegionStyleSection> {
+class _RegionFontSectionState extends State<RegionFontSection> {
   final _size = TextEditingController();
   final _sizeFocus = FocusNode();
   final _fill = TextEditingController();
@@ -31,23 +32,6 @@ class _RegionStyleSectionState extends State<RegionStyleSection> {
   final _strokeFocus = FocusNode();
   final _width = TextEditingController();
   final _widthFocus = FocusNode();
-  final _rotation = TextEditingController();
-  final _rotationFocus = FocusNode();
-  final _positionX = TextEditingController();
-  final _positionY = TextEditingController();
-  final _positionXFocus = FocusNode();
-  final _positionYFocus = FocusNode();
-
-  static const _warps = [
-    ('none', 'Нет'),
-    ('arc-up', 'Дуга вверх'),
-    ('arc-down', 'Дуга вниз'),
-    ('ring', 'Кольцо'),
-    ('wave', 'Волна'),
-    ('flag', 'Флаг'),
-    ('perspective', 'Перспектива'),
-    ('mesh', 'Сетка'),
-  ];
 
   String get _id => widget.region.id;
 
@@ -71,15 +55,6 @@ class _RegionStyleSectionState extends State<RegionStyleSection> {
     _widthFocus.addListener(() {
       if (!_widthFocus.hasFocus) _commitWidth();
     });
-    _rotationFocus.addListener(() {
-      if (!_rotationFocus.hasFocus) _commitRotation();
-    });
-    _positionXFocus.addListener(() {
-      if (!_positionXFocus.hasFocus) _commitPosition();
-    });
-    _positionYFocus.addListener(() {
-      if (!_positionYFocus.hasFocus) _commitPosition();
-    });
   }
 
   @override
@@ -91,12 +66,7 @@ class _RegionStyleSectionState extends State<RegionStyleSection> {
     _stroke.dispose();
     _strokeFocus.dispose();
     _width.dispose();
-    _rotation.dispose();
-    _rotationFocus.dispose();
-    _positionX.dispose();
-    _positionY.dispose();
-    _positionXFocus.dispose();
-    _positionYFocus.dispose();
+    _widthFocus.dispose();
     super.dispose();
   }
 
@@ -112,28 +82,11 @@ class _RegionStyleSectionState extends State<RegionStyleSection> {
     final style = _style;
     final auto = (style['font_size'] as num?)?.round() ?? 0;
     final family = viewer.fontFamilyFor('${style['font_id'] ?? ''}');
-    final rotation = region.rotation;
-    final position = viewer.textAnchorFor(region);
-    final warp = style['warp'] is Map
-        ? (style['warp'] as Map).cast<String, dynamic>()
-        : const <String, dynamic>{};
-    final bendRaw = warp['bend'];
-    final bend = bendRaw is num ? bendRaw.toDouble() : 0.0;
-    final choice = _warpChoice('${warp['kind'] ?? 'none'}', bend);
 
     _sync(_size, _sizeText(style), _sizeFocus);
     _sync(_fill, rgbToHex(style['fill_rgb']), _fillFocus);
     _sync(_stroke, rgbToHex(style['stroke_rgb']), _strokeFocus);
     _sync(_width, _widthText(style), _widthFocus);
-    _sync(
-      _rotation,
-      rotation == rotation.roundToDouble()
-          ? '${rotation.round()}'
-          : rotation.toStringAsFixed(1),
-      _rotationFocus,
-    );
-    _sync(_positionX, '${position.dx.round()}', _positionXFocus);
-    _sync(_positionY, '${position.dy.round()}', _positionYFocus);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -292,106 +245,19 @@ class _RegionStyleSectionState extends State<RegionStyleSection> {
             ),
           ],
         ),
-        SizedBox(
-          width: 96,
-          child: InspectorField(
-            label: 'Поворот, °',
-            child: InspectorInput(
-              key: const Key('style-rotation'),
-              controller: _rotation,
-              focusNode: _rotationFocus,
-              numeric: true,
-              onSubmitted: (_) => _commitRotation(),
-            ),
-          ),
-        ),
-        InspectorField(
-          label: 'Позиция текста',
-          child: Row(
-            children: [
-              Expanded(
-                child: InspectorInput(
-                  key: const Key('style-text-position-x'),
-                  controller: _positionX,
-                  focusNode: _positionXFocus,
-                  numeric: true,
-                  onSubmitted: (_) => _commitPosition(),
-                ),
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                child: InspectorInput(
-                  key: const Key('style-text-position-y'),
-                  controller: _positionY,
-                  focusNode: _positionYFocus,
-                  numeric: true,
-                  onSubmitted: (_) => _commitPosition(),
-                ),
-              ),
-              IconButton(
-                key: const Key('style-text-position-reset'),
-                tooltip: 'Сбросить позицию текста',
-                visualDensity: VisualDensity.compact,
-                iconSize: 16,
-                onPressed: () => viewer.resetTextPosition(_id),
-                icon: const Icon(Icons.restart_alt),
-              ),
-            ],
-          ),
-        ),
-        InspectorLabel('Искривление'),
         Wrap(
           spacing: 4,
           runSpacing: 4,
           children: [
-            for (final (value, label) in _warps)
-              InspectorAction(
-                key: Key('style-warp-$value'),
-                label: label,
-                active: choice == value,
-                onPressed: () => viewer.setRegionWarpPreset(_id, value),
-              ),
-          ],
-        ),
-        Row(
-          children: [
-            Expanded(
-              child: Slider(
-                key: const Key('style-warp-bend'),
-                value: bend.clamp(-1, 1),
-                min: -1,
-                max: 1,
-                onChanged: (value) => viewer.setRegionWarpBend(_id, value),
-              ),
-            ),
-            SizedBox(
-              width: 40,
-              child: Text(
-                bend.toStringAsFixed(2),
-                style: Theme.of(context).textTheme.labelSmall,
-              ),
-            ),
-          ],
-        ),
-        Wrap(
-          spacing: 4,
-          runSpacing: 4,
-          children: [
-            InspectorAction(
-              key: const Key('style-reset'),
-              label: 'Сбросить стили',
-              icon: Icons.refresh,
-              onPressed: () => viewer.resetRegionStyle(_id),
-            ),
             InspectorAction(
               key: const Key('style-copy'),
-              label: 'Копировать',
+              label: 'Копировать весь стиль',
               icon: Icons.copy,
               onPressed: viewer.copyStyle,
             ),
             InspectorAction(
               key: const Key('style-paste'),
-              label: 'Вставить',
+              label: 'Вставить стиль',
               icon: Icons.paste,
               onPressed: viewer.hasStyleClipboard ? viewer.pasteStyle : null,
             ),
@@ -437,6 +303,7 @@ class _RegionStyleSectionState extends State<RegionStyleSection> {
                 ),
             ],
           ),
+        if (region.isSfx) SfxFontSection(viewer: viewer, region: region),
       ],
     );
   }
@@ -457,19 +324,6 @@ class _RegionStyleSectionState extends State<RegionStyleSection> {
               3
         : 0;
     return dark ? mean <= 127.5 : mean > 127.5;
-  }
-
-  String _warpChoice(String kind, double bend) {
-    if (kind == 'arc') return bend >= 0 ? 'arc-up' : 'arc-down';
-    if (kind == 'wave' ||
-        kind == 'flag' ||
-        kind == 'ring' ||
-        kind == 'perspective' ||
-        kind == 'mesh' ||
-        kind == 'none') {
-      return kind;
-    }
-    return 'none';
   }
 
   Widget _fontSelect(Map<String, dynamic> style, String? family) {
@@ -576,30 +430,6 @@ class _RegionStyleSectionState extends State<RegionStyleSection> {
   void _commitWidth() {
     final value = num.tryParse(_width.text.replaceAll(',', '.'));
     widget.viewer.setRegionStrokeWidth(_id, value ?? 0);
-  }
-
-  void _commitRotation() {
-    final value = num.tryParse(_rotation.text.replaceAll(',', '.'));
-    widget.viewer.setRegionRotation(_id, (value ?? 0).toDouble());
-  }
-
-  void _commitPosition() {
-    final x = num.tryParse(_positionX.text.replaceAll(',', '.'));
-    final y = num.tryParse(_positionY.text.replaceAll(',', '.'));
-    if (x == null || y == null) {
-      final current = widget.viewer.textAnchorFor(widget.region);
-      _positionX.text = '${current.dx.round()}';
-      _positionY.text = '${current.dy.round()}';
-      return;
-    }
-    final size = widget.viewer.imageSize;
-    final dx = size.width > 0
-        ? x.toDouble().clamp(0, size.width).toDouble()
-        : x.toDouble();
-    final dy = size.height > 0
-        ? y.toDouble().clamp(0, size.height).toDouble()
-        : y.toDouble();
-    widget.viewer.setTextPosition(_id, Offset(dx, dy));
   }
 
   String _sizeText(Map<String, dynamic> style) {

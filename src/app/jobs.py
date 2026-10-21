@@ -374,6 +374,41 @@ class JobQueue:
         with self._lock:
             return self._jobs.get(str(job_id or ""))
 
+    def active_job(self, kind: str, page_id: str, project_id: str = "") -> Job | None:
+        """Незавершённое задание нужного вида для страницы (для rebake)."""
+        with self._lock:
+            active = self._inflight_jobs_locked()
+            active.extend(self._batch)
+            active.extend(self._edits)
+            active.extend(self._exports)
+            statuses = dict(self._status)
+        for job in active:
+            if job.kind != kind or str(job.page_id) != str(page_id):
+                continue
+            if project_id and job.project_id != project_id:
+                continue
+            if statuses.get(job.id) in _HISTORY_STATUSES:
+                continue
+            return job
+        return None
+
+    def failed_job(self, kind: str, page_id: str, project_id: str = "") -> Job | None:
+        """Последнее задание нужного вида, завершившееся ошибкой."""
+        with self._lock:
+            order = list(reversed(self._results))
+            jobs = dict(self._jobs)
+            statuses = dict(self._status)
+        for job_id in order:
+            job = jobs.get(job_id)
+            if job is None or statuses.get(job_id) != "error":
+                continue
+            if job.kind != kind or str(job.page_id) != str(page_id):
+                continue
+            if project_id and job.project_id != project_id:
+                continue
+            return job
+        return None
+
     def active_page_ids(self, exclude: str = "", project_id: str = "") -> set[str]:
         """Страницы незавершённых заданий, которые меняют статус страниц.
 

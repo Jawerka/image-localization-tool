@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -8,6 +9,14 @@ import 'package:ilt_desktop/src/model/page_document.dart';
 import 'package:ilt_desktop/src/ui/viewer/canvas_view.dart';
 
 import 'support/fake_host.dart';
+
+Future<void> _scrollOver(WidgetTester tester, Key key, double dy) async {
+  final center = tester.getCenter(find.byKey(key));
+  await tester.sendEventToBinding(
+    PointerScrollEvent(position: center, scrollDelta: Offset(0, dy)),
+  );
+  await tester.pump();
+}
 
 void main() {
   testWidgets('просмотрщик: канвас, чипы, док, пилюля и уход со страницы', (
@@ -76,6 +85,9 @@ void main() {
     await tester.pump();
     expect(state.workspace.viewer.view, 'compare');
     expect(state.workspace.viewer.curtain, closeTo(0.46, 1e-9));
+    await tester.tap(find.byKey(const Key('dock-view-clean')));
+    await tester.pump();
+    expect(state.workspace.viewer.view, 'clean');
     await tester.tap(find.byKey(const Key('dock-boxes')));
     await tester.pump();
     expect(state.workspace.viewer.showBoxes, isFalse);
@@ -236,6 +248,68 @@ void main() {
     expect(find.byKey(const Key('viewer-brush-cursor')), findsOneWidget);
   });
 
+  testWidgets('заливка: кнопка, G и допуск', (tester) async {
+    sizeWindow(tester);
+    final (state, host) = await readyHost(
+      bootstrap: <String, dynamic>{
+        'settings': settingsDone(<String, dynamic>{}),
+        'project': {'id': 'pr', 'name': 'Глава'},
+        'pages': [
+          {'id': 'a', 'name': '001.jpg', 'status': 'done', 'progress': 100},
+        ],
+      },
+      reply: (path, method) => path == '/api/pages/a'
+          ? <String, dynamic>{
+              'page': {'id': 'a'},
+              'document': {
+                'version': 1,
+                'regions': <dynamic>[],
+                'strokes': <dynamic>[],
+              },
+            }
+          : <String, dynamic>{},
+    );
+    addTearDown(() {
+      state.dispose();
+      host.events.close();
+    });
+    await tester.pumpWidget(IltApp(state: state));
+    await tester.tap(find.byKey(const Key('page-row-a')));
+    await tester.pumpAndSettle();
+
+    final viewer = state.workspace.viewer;
+    await tester.tap(find.byKey(const Key('dock-tool-fill')));
+    await tester.pumpAndSettle();
+    expect(viewer.tool, 'fill');
+    expect(find.byKey(const Key('dock-fill-tolerance')), findsOneWidget);
+    expect(find.byKey(const Key('dock-brush-size')), findsNothing);
+
+    await tester.tap(find.byKey(const Key('dock-fill-tolerance')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('dock-fill-slider')), findsOneWidget);
+
+    final tolerance = viewer.fillTolerance;
+    await _scrollOver(tester, const Key('dock-fill-tolerance'), -20);
+    expect(viewer.fillTolerance, tolerance + 1);
+
+    await tester.tap(find.byKey(const Key('dock-tool-brush')));
+    await tester.pumpAndSettle();
+    expect(viewer.tool, 'brush');
+    expect(find.byKey(const Key('dock-brush-size')), findsOneWidget);
+    final brush = viewer.brushSize;
+    await _scrollOver(tester, const Key('dock-brush-size'), -20);
+    expect(viewer.brushSize, brush + 1);
+    await _scrollOver(tester, const Key('dock-brush-size'), 20);
+    expect(viewer.brushSize, brush);
+
+    await _scrollOver(tester, const Key('dock-tool-brush'), -20);
+    expect(viewer.brushSize, brush + 1);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyG);
+    await tester.pump();
+    expect(viewer.tool, 'fill');
+  });
+
   testWidgets('вкладки «Страницы» и «Очередь» переключают содержимое', (
     tester,
   ) async {
@@ -342,6 +416,8 @@ void main() {
     await tester.pumpAndSettle();
     viewer.addRegionAtViewCenter();
     await tester.pumpAndSettle();
+    // Дать сработать отложенному preview, иначе остаётся pending timer.
+    await tester.pump(const Duration(milliseconds: 500));
     expect(viewer.showBoxes, isTrue);
     expect(lastBody()['viewer_show_boxes'], isTrue);
   });

@@ -140,7 +140,6 @@ def read_app_version(root: Path | None = None) -> str:
 _REQUIRED_BASE_FONTS = (
     "Heroika-Regular.otf",
     "Jupiteroid-Light.ttf",
-    "Novem.ttf",
 )
 
 

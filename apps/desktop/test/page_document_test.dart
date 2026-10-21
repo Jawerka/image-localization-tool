@@ -108,6 +108,33 @@ void main() {
     expect(document.contentKey(), keyAfter);
   });
 
+  test('flood-штрих сохраняет режим и допуск', () {
+    final document = PageDocument.fromJson(<String, dynamic>{
+      'version': 1,
+      'regions': <dynamic>[],
+      'strokes': [
+        {
+          'mode': 'flood',
+          'radius': 0,
+          'points': [[3, 4]],
+          'tolerance': 60,
+        },
+        {
+          'mode': 'erase_flood',
+          'radius': 1,
+          'points': [[5, 6]],
+          'tolerance': 150,
+        },
+      ],
+    });
+    expect(document.strokes.first.mode, Stroke.flood);
+    expect(document.strokes.first.tolerance, 60);
+    expect(document.strokes.first.points, [const Offset(3, 4)]);
+    expect(document.strokes.last.mode, Stroke.eraseFlood);
+    expect(document.strokes.last.tolerance, 100);
+    expect(document.strokes.first.toJson()['tolerance'], 60);
+  });
+
   test('флаги региона: skip/overflow/sfx', () {
     final document = PageDocument.fromJson(<String, dynamic>{
       'regions': [

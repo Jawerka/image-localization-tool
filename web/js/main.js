@@ -47,8 +47,8 @@ import {
 } from "./settings.js";
 import {
   applyBootstrap,
+  applyDeferredEdits,
   deviceLabel,
-  commitDeferredEdits,
   discardDeferredEdits,
   editDocument,
   findRegion,
@@ -74,13 +74,13 @@ import {
   undo,
   updatePage,
   visualStatus,
-  whenSaved,
 } from "./state.js";
 import { initShellChrome } from "./shell_chrome.js";
 import {
   cancelPolylineDraft,
   applyEditorSession,
   captureEditorSession,
+  clearMeshPreviewBase,
   commitPolylineDraft,
   init as initViewer,
   nudgeBrush,
@@ -105,7 +105,13 @@ function start() {
   initPages(onPageCommand, { beforeLeavePage: resolveDeferredOrAbort });
   initSidebarTabs(() => closeMenu());
   initViewer();
-  initApplyChip({ onCommit: () => commitDeferredEdits() });
+  initApplyChip({
+    onCommit: async () => {
+      const ok = await applyDeferredEdits();
+      if (ok) clearMeshPreviewBase();
+      return ok;
+    },
+  });
   initInspector();
   initSettings();
   initDialogs();
@@ -265,9 +271,9 @@ function render(state) {
   document.querySelector("[data-role='translate-all']").disabled = !hasPages;
   const applyEdits = document.querySelector("[data-role='apply-edits']");
   if (applyEdits) {
-    const pending = Boolean(state.deferredApply);
+    const pending = Boolean(state.deferredApply || state.applying);
     applyEdits.hidden = !pending;
-    applyEdits.disabled = !pending;
+    applyEdits.disabled = !pending || Boolean(state.applying);
   }
   document.querySelectorAll("[data-role='export']").forEach((button) => {
     button.disabled = !hasPages;
@@ -466,10 +472,9 @@ async function resolveDeferredOrAbort() {
     cancel: "Остаться",
   });
   if (choice === "commit") {
-    const pageId = getState().activePageId;
-    commitDeferredEdits();
-    if (pageId) await whenSaved(pageId);
-    return true;
+    const ok = await applyDeferredEdits();
+    if (ok) clearMeshPreviewBase();
+    return ok;
   }
   if (choice === "discard") {
     await discardDeferredEdits();

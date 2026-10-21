@@ -1,6 +1,6 @@
 /* Просмотрщик: масштаб, шторка, рамки, кисть и ластик. */
 
-import { imageUrl } from "./api.js";
+import { fillPreview, imageUrl } from "./api.js";
 import { MeshPreviewRenderer } from "./mesh_preview_renderer.js";
 import {
   brushModeFromButton,
@@ -35,13 +35,18 @@ import {
 import { isSpaceDown } from "./keys.js";
 import { isValidMesh } from "./text_mesh.js";
 
-const TOOLS = ["select", "region", "brush", "polyline", "hand"];
-const VIEWS = ["original", "result", "compare"];
+const TOOLS = ["select", "region", "brush", "fill", "polyline", "hand"];
+const VIEWS = ["original", "result", "compare", "clean"];
 const ZOOM_MIN_PERCENT = 10;
 const ZOOM_MAX_PERCENT = 200;
 const ZOOM_STEP_PERCENT = 5;
-const MASK_DRAW_TOOLS = new Set(["brush", "polyline"]);
+const MASK_DRAW_TOOLS = new Set(["brush", "fill", "polyline"]);
 const BRUSH_SIZE_TOOLS = new Set(["brush"]);
+
+function viewKind(view) {
+  if (view === "original") return "original";
+  return view === "clean" ? "clean" : "result";
+}
 
 let stageHost;
 let stage;
@@ -69,11 +74,18 @@ let selectedWarpNodes = new Set();
 let lastWarpPointer = null;
 let previewImage = null;
 let previewUrl = "";
+let basePageImage = null;
+let basePageUrl = "";
 let meshPreviewCanvas = null;
 let meshPreviewRenderer = null;
+let meshOverlayImage = null;
+let meshOverlayUrl = "";
 let meshBaseUrl = "";
 let meshBaseImage = null;
 let meshBaseRegion = null;
+let meshBaseLayoutKey = "";
+let meshBaseOrigin = [0, 0];
+let meshBaseAnchor = null;
 let spaceDown = false;
 let seenPageId = "";
 let scrollHome = false;
@@ -87,6 +99,8 @@ let maskPendingVersion = null;
 let maskPendingPageId = "";
 /** Черновик ломаной: вершины + точка под курсором для резинки. */
 let polyDraft = null;
+/** Превью заливок: ключ штриха → {img, url, x, y}. */
+const fillPreviews = new Map();
 /** Отложенное восстановление scroll после layout. */
 let pendingScroll = null;
 
@@ -100,9 +114,14 @@ export function init() {
   maskImage = document.querySelector("[data-role='img-mask']");
   boxes = document.querySelector("[data-role='boxes']");
   previewImage = document.querySelector("[data-role='style-preview']");
+  basePageImage = document.querySelector("[data-role='base-page']");
   meshPreviewCanvas = document.querySelector("[data-role='mesh-preview']");
+  meshOverlayImage = document.querySelector("[data-role='mesh-overlay']");
   meshPreviewRenderer = new MeshPreviewRenderer(meshPreviewCanvas, (message) => {
     if (previewImage && previewImage.src) previewImage.hidden = false;
+    document.dispatchEvent(new CustomEvent("ilt-mesh-unavailable", {
+      detail: { regionId: meshBaseRegion?.id || "" },
+    }));
     document.dispatchEvent(new CustomEvent("ilt-banner", { detail: { id: "mesh-renderer", text: message } }));
   });
   bar = document.querySelector("[data-role='curtain-bar']");
@@ -125,6 +144,30 @@ export function init() {
   sizeStrip?.addEventListener("wheel", (event) => {
     event.preventDefault();
     nudgeBrush(event.deltaY < 0 ? 1 : -1);
+  }, { passive: false });
+  const toleranceRange = document.querySelector("[data-role='fill-tolerance']");
+  toleranceRange?.addEventListener("input", () => {
+    patch({ fillTolerance: Number(toleranceRange.value) || 0 });
+  });
+  document.querySelector("[data-role='fill-tolerance-label']")?.addEventListener("wheel", (event) => {
+    event.preventDefault();
+    nudgeTolerance(event.deltaY < 0 ? 1 : -1);
+  }, { passive: false });
+  document.querySelector("[data-role='tool-brush']")?.addEventListener("wheel", (event) => {
+    event.preventDefault();
+    nudgeBrush(event.deltaY < 0 ? 1 : -1);
+  }, { passive: false });
+  document.querySelector("[data-role='tool-fill']")?.addEventListener("wheel", (event) => {
+    event.preventDefault();
+    nudgeTolerance(event.deltaY < 0 ? 1 : -1);
+  }, { passive: false });
+  document.querySelector("[data-role='brush-size-toggle']")?.addEventListener("wheel", (event) => {
+    event.preventDefault();
+    nudgeBrush(event.deltaY < 0 ? 1 : -1);
+  }, { passive: false });
+  document.querySelector("[data-role='fill-tolerance-toggle']")?.addEventListener("wheel", (event) => {
+    event.preventDefault();
+    nudgeTolerance(event.deltaY < 0 ? 1 : -1);
   }, { passive: false });
   document.querySelector("[data-role='zoom-out']").addEventListener("click", () => stepZoom(-1));
   document.querySelector("[data-role='zoom-in']").addEventListener("click", () => stepZoom(1));
@@ -211,11 +254,14 @@ export function viewCenter() {
 }
 
 export function setZoom(mode) {
-  patch({ zoom: mode });
-  if (mode === "fit" || mode === "fit-width") {
-    stage.scrollLeft = 0;
-    stage.scrollTop = 0;
+  if (typeof mode === "number") {
+    const box = stage.getBoundingClientRect();
+    zoomTo(mode, box.left + box.width / 2, box.top + box.height / 2);
+    return;
   }
+  patch({ zoom: mode });
+  stage.scrollLeft = 0;
+  stage.scrollTop = 0;
 }
 
 /** Снимок UI-сессии для сохранения в пакет. */
@@ -275,19 +321,60 @@ export function setStylePreview(preview) {
   previewImage.src = preview.url;
 }
 
-export function setMeshPreviewBase(preview, region) {
+export function setBasePage(preview) {
+  if (!basePageImage) return;
+  if (basePageUrl && basePageUrl !== (preview && preview.url)) URL.revokeObjectURL(basePageUrl);
+  basePageUrl = preview && preview.url ? preview.url : "";
+  if (!basePageUrl) {
+    basePageImage.hidden = true;
+    basePageImage.removeAttribute("src");
+    return;
+  }
+  basePageImage.hidden = false;
+  basePageImage.src = basePageUrl;
+}
+
+export function setMeshPreviewBase(preview, pagePreview, region, layoutKey = "") {
   if (meshBaseUrl && meshBaseUrl !== (preview && preview.url)) URL.revokeObjectURL(meshBaseUrl);
   meshBaseUrl = preview && preview.url ? preview.url : "";
   meshBaseImage = null;
   meshBaseRegion = region || null;
+  meshBaseLayoutKey = layoutKey;
+  meshBaseOrigin = [Number(preview.x) || 0, Number(preview.y) || 0];
+  meshBaseAnchor = Number.isFinite(preview.anchorX) && Number.isFinite(preview.anchorY)
+    ? [preview.anchorX, preview.anchorY]
+    : null;
+  setBasePage(pagePreview);
   if (!meshBaseUrl || !meshPreviewRenderer) return;
   const image = new Image();
   image.onload = () => {
     if (meshBaseUrl !== preview.url) return;
     meshBaseImage = image;
     meshPreviewRenderer.setLayer(image);
+    const mesh = region?.style?.warp?.mesh || defaultMesh(region.bbox[2], region.bbox[3]);
+    drawMeshDraft(region, mesh);
   };
   image.src = meshBaseUrl;
+}
+
+export function setMeshPreviewOverlay(preview) {
+  if (!meshOverlayImage) return;
+  if (meshOverlayUrl && meshOverlayUrl !== (preview && preview.url)) URL.revokeObjectURL(meshOverlayUrl);
+  meshOverlayUrl = preview && preview.url ? preview.url : "";
+  if (!meshOverlayUrl) {
+    meshOverlayImage.hidden = true;
+    meshOverlayImage.removeAttribute("src");
+    return;
+  }
+  meshOverlayImage.hidden = false;
+  meshOverlayImage.onload = () => {
+    if (!natural.w || !natural.h) return;
+    meshOverlayImage.style.left = pct(preview.x || 0, natural.w);
+    meshOverlayImage.style.top = pct(preview.y || 0, natural.h);
+    meshOverlayImage.style.width = pct(meshOverlayImage.naturalWidth || 1, natural.w);
+    meshOverlayImage.style.height = pct(meshOverlayImage.naturalHeight || 1, natural.h);
+  };
+  meshOverlayImage.src = meshOverlayUrl;
 }
 
 export function clearMeshPreviewBase() {
@@ -295,21 +382,47 @@ export function clearMeshPreviewBase() {
   meshBaseUrl = "";
   meshBaseImage = null;
   meshBaseRegion = null;
+  meshBaseLayoutKey = "";
+  meshBaseOrigin = [0, 0];
+  meshBaseAnchor = null;
+  setBasePage(null);
+  setMeshPreviewOverlay(null);
   meshPreviewRenderer?.hide();
+}
+
+export function meshPreviewActiveFor(layoutKey, regionId) {
+  return Boolean(
+    meshBaseImage
+      && meshBaseRegion
+      && meshBaseLayoutKey === layoutKey
+      && sameId(meshBaseRegion.id, regionId)
+  );
+}
+
+/** Перерисовать активный локальный слой при смене bend без нового запроса. */
+export function redrawMeshPreview(region) {
+  if (!region || !meshBaseImage) return false;
+  const warp = region.style?.warp || {};
+  const mesh = warp.mesh || defaultMesh(region.bbox[2], region.bbox[3]);
+  return drawMeshDraft(region, mesh);
 }
 
 function drawMeshDraft(region, mesh) {
   if (!meshBaseImage || !meshBaseRegion || !meshPreviewRenderer) return false;
   if (!sameId(meshBaseRegion.id, region.id) || meshBaseImage.naturalWidth < 1) return false;
   const anchorBox = region.bubble_bbox || region.bbox;
-  const style = region.style || {};
+  const warp = region.style?.warp || {};
   const result = meshPreviewRenderer.render({
+    kind: warp.kind || "mesh",
     mesh,
+    bend: Number(warp.bend) || 0,
     bbox: region.bbox,
-    origin: [meshBaseRegion.originX, meshBaseRegion.originY],
-    rotation: Number(style.rotation) || 0,
+    origin: meshBaseOrigin,
     textPosition: region.text_position,
-    anchor: [anchorBox[0] + anchorBox[2] / 2, anchorBox[1] + anchorBox[3] / 2],
+    anchor: meshBaseAnchor || [
+      anchorBox[0] + anchorBox[2] / 2,
+      anchorBox[1] + anchorBox[3] / 2,
+    ],
     pageSize: [natural.w, natural.h],
   });
   if (result && previewImage) previewImage.hidden = true;
@@ -317,6 +430,10 @@ function drawMeshDraft(region, mesh) {
 }
 
 function finishMeshDraft() {
+  if (meshBaseImage && basePageUrl) {
+    if (previewImage) previewImage.hidden = true;
+    return;
+  }
   meshPreviewRenderer?.hide();
   if (previewImage && previewImage.src) previewImage.hidden = false;
 }
@@ -324,6 +441,11 @@ function finishMeshDraft() {
 export function nudgeBrush(delta) {
   const next = Math.max(1, Math.min(64, (getState().brushSize || 12) + delta));
   patch({ brushSize: next });
+}
+
+function nudgeTolerance(delta) {
+  const next = Math.max(0, Math.min(100, (getState().fillTolerance ?? 20) + delta));
+  patch({ fillTolerance: next });
 }
 
 export function hasPolylineDraft() {
@@ -405,6 +527,19 @@ function sync(state) {
   }
   if (document.activeElement !== range) range.value = String(state.brushSize);
   if (sizeLabel) sizeLabel.textContent = String(state.brushSize);
+  const toleranceRange = document.querySelector("[data-role='fill-tolerance']");
+  const toleranceToggle = document.querySelector("[data-role='fill-tolerance-toggle']");
+  const tolerancePop = document.getElementById("fill-tolerance-pop");
+  const toleranceOn = state.tool === "fill";
+  if (toleranceToggle) toleranceToggle.hidden = !toleranceOn;
+  if (!toleranceOn && tolerancePop) {
+    tolerancePop.hidden = true;
+    if (toleranceToggle) toleranceToggle.setAttribute("aria-expanded", "false");
+  }
+  const tolerance = String(state.fillTolerance ?? 20);
+  if (toleranceRange && document.activeElement !== toleranceRange) toleranceRange.value = tolerance;
+  const toleranceLabel = document.querySelector("[data-role='fill-tolerance-value']");
+  if (toleranceLabel) toleranceLabel.textContent = tolerance;
 
   setRadio("[data-role='view-group']", state.view);
   setRadio("[data-role='tool-group']", state.tool);
@@ -430,12 +565,15 @@ function sync(state) {
   }
 
   const version = state.document?.version || page.version || 0;
-  setSrc(baseImage, page, state.view === "original" ? "original" : "result", version);
+  setSrc(baseImage, page, viewKind(state.view), version);
   setSrc(curtainImage, page, "original", version);
   maskPendingVersion = version;
   maskPendingPageId = page.id;
   setSrc(maskImage, page, "mask", version);
-  baseImage.alt = `${state.view === "original" ? "Оригинал" : "Результат"} страницы ${page.name}`;
+  const label = state.view === "original" ? "Оригинал" : state.view === "clean" ? "Очищенная страница" : "Результат";
+  baseImage.alt = `${label} страницы ${page.name}`;
+  const placeholderText = state.view === "clean" ? "Нет очищенной страницы" : "Ещё нет перевода";
+  placeholder.querySelector("p").textContent = placeholderText;
   frame.classList.toggle("frame--mask", state.showMask);
   syncMaskDraft(state, page);
   const compare = state.view === "compare";
@@ -498,7 +636,7 @@ function setSrc(image, page, kind, version) {
     // Старый кадр не должен мигать на новой странице, пока грузится новый.
     showResultGap(true);
   }
-  if (image === baseImage && kind === "result" && !isReadyStatus(page.status)) {
+  if (image === baseImage && (kind === "result" || kind === "clean") && !isReadyStatus(page.status)) {
     // Пока идёт повторная вёрстка — оставляем прежний результат, но только
     // если это та же страница: иначе на новой странице висел бы чужой кадр.
     const samePage = image.dataset.pageId === page.id;
@@ -537,6 +675,7 @@ function clearMaskDraft() {
   maskLoadedPageId = "";
   maskPendingVersion = null;
   maskPendingPageId = "";
+  clearFillPreviews();
   if (maskLocal) {
     maskLocal.hidden = true;
     if (maskLocal.width && maskLocal.height) {
@@ -608,6 +747,41 @@ function bakedStrokeCount(strokes, page, hasBase) {
   return count == null ? strokes.length : count;
 }
 
+function fillPreviewFor(page, stroke) {
+  if (!stroke.points?.length) return null;
+  const [x, y] = stroke.points[0];
+  const tolerance = stroke.tolerance ?? 20;
+  const key = `${page.id}|${x}|${y}|${tolerance}|${stroke.mode}`;
+  let entry = fillPreviews.get(key);
+  if (entry) return entry.img ? entry : null;
+  entry = { img: null, url: "", x: 0, y: 0 };
+  fillPreviews.set(key, entry);
+  fillPreview(page.id, x, y, tolerance, stroke.mode).then((result) => {
+    if (!fillPreviews.has(key)) {
+      URL.revokeObjectURL(result.url);
+      return;
+    }
+    entry.url = result.url;
+    entry.x = result.x;
+    entry.y = result.y;
+    const img = new Image();
+    img.onload = () => {
+      entry.img = img;
+      const state = getState();
+      if (state.activePageId === page.id) syncMaskDraft(state, page);
+    };
+    img.src = result.url;
+  }).catch(() => fillPreviews.delete(key));
+  return null;
+}
+
+function clearFillPreviews() {
+  for (const entry of fillPreviews.values()) {
+    if (entry.url) URL.revokeObjectURL(entry.url);
+  }
+  fillPreviews.clear();
+}
+
 function paintLocalMask(strokes, activeStroke = null, page = activePage(getState())) {
   if (!maskLocal || !natural.w || !natural.h || !page) return;
   if (maskLocal.width !== natural.w || maskLocal.height !== natural.h) {
@@ -621,6 +795,11 @@ function paintLocalMask(strokes, activeStroke = null, page = activePage(getState
   if (base) ctx.drawImage(base, 0, 0);
   const baked = bakedStrokeCount(strokes, page, Boolean(base));
   for (const stroke of unbakedStrokes(strokes, baked)) {
+    if (stroke.mode === "flood" || stroke.mode === "erase_flood") {
+      const entry = fillPreviewFor(page, stroke);
+      if (entry) ctx.drawImage(entry.img, entry.x, entry.y);
+      continue;
+    }
     paintStrokeOnMask(ctx, stroke, modeColor(stroke.mode));
   }
   if (activeStroke && activeStroke.points?.length) {
@@ -641,7 +820,7 @@ function showResultGap(on) {
 
 function onBaseError() {
   const view = getState().view;
-  if (view === "result" || view === "compare") {
+  if (viewKind(view) !== "original") {
     showResultGap(true);
     applyOriginalNatural();
   }
@@ -744,21 +923,30 @@ function zoomAt(scale, direction) {
 }
 
 function stepZoom(direction) {
-  patch({ zoom: zoomAt(currentScale(), direction) });
+  const box = stage.getBoundingClientRect();
+  zoomTo(
+    zoomAt(currentScale(), direction),
+    box.left + box.width / 2,
+    box.top + box.height / 2,
+  );
+}
+
+function zoomTo(next, clientX, clientY) {
+  const rect = frame.getBoundingClientRect();
+  const u = rect.width ? (clientX - rect.left) / rect.width : 0.5;
+  const v = rect.height ? (clientY - rect.top) / rect.height : 0.5;
+  patch({ zoom: next });
+  layout();
+  const nextRect = frame.getBoundingClientRect();
+  stage.scrollLeft += nextRect.left + u * nextRect.width - clientX;
+  stage.scrollTop += nextRect.top + v * nextRect.height - clientY;
 }
 
 function onWheel(event) {
   if (!event.ctrlKey || stage.hidden) return;
   event.preventDefault();
   const next = zoomAt(currentScale(), event.deltaY < 0 ? 1 : -1);
-  const rect = frame.getBoundingClientRect();
-  const u = rect.width ? (event.clientX - rect.left) / rect.width : 0.5;
-  const v = rect.height ? (event.clientY - rect.top) / rect.height : 0.5;
-  patch({ zoom: next });
-  layout();
-  const nextRect = frame.getBoundingClientRect();
-  stage.scrollLeft += nextRect.left + u * nextRect.width - event.clientX;
-  stage.scrollTop += nextRect.top + v * nextRect.height - event.clientY;
+  zoomTo(next, event.clientX, event.clientY);
 }
 
 function renderBoxes(state) {
@@ -905,6 +1093,20 @@ function onPointerDown(event) {
     frame.setPointerCapture(event.pointerId);
     return;
   }
+  if (state.tool === "fill") {
+    if (event.button !== 0 && event.button !== 2) return;
+    event.preventDefault();
+    editDocument((document) => {
+      document.strokes.push({
+        mode: event.button === 2 ? "erase_flood" : "flood",
+        radius: 0,
+        tolerance: getState().fillTolerance ?? 20,
+        points: [[Math.round(point[0]), Math.round(point[1])]],
+      });
+    }, { deferApply: true });
+    if (!state.showMask) patch({ showMask: true });
+    return;
+  }
   if (state.tool === "polyline") {
     if (event.button !== 0 && event.button !== 2) return;
     event.preventDefault();
@@ -1042,6 +1244,13 @@ function onPointerMove(event) {
     else if (event.shiftKey) dx = 0;
     drag.final = [drag.origin[0] + dx, drag.origin[1] + dy];
     drag.moved = Math.abs(dx) >= 0.5 || Math.abs(dy) >= 0.5;
+    const live = findRegion(getState().document, drag.id);
+    if (live && meshBaseRegion && sameId(meshBaseRegion.id, live.id)) {
+      drawMeshDraft(
+        { ...live, text_position: drag.final },
+        live.style?.warp?.mesh || defaultMesh(live.bbox[2], live.bbox[3]),
+      );
+    }
     if (previewImage && !previewImage.hidden) {
       previewImage.style.transform = `translate(${dx / natural.w * frame.clientWidth}px, ${dy / natural.h * frame.clientHeight}px)`;
     }

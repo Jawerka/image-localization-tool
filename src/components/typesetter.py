@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 from pathlib import Path
 
@@ -168,6 +169,74 @@ def _wrap(
     if current:
         lines.append(current)
     return lines
+
+
+def _layout_key(region: TextRegion) -> str:
+    """Ключ раскладки: всё, что меняет строки и кегль, но не геометрию.
+
+    Поворот, skew и warp применяются после раскладки, поэтому в ключ не входят.
+    """
+    style = region.style.to_dict()
+    for key in ("rotation", "skew_x", "warp"):
+        style.pop(key, None)
+    # Только входные параметры раскладки: font_size и цвета Typesetter
+    # подставляет сам, поэтому они не должны инвалидировать снимок.
+    style = {
+        key: style.get(key)
+        for key in (
+            "alignment",
+            "uppercase",
+            "line_height",
+            "font_size_override",
+            "font_id",
+            "stroke_mode",
+            "stroke_width",
+            "letter_spacing",
+            "line_spacing",
+        )
+    }
+    return json.dumps(
+        {
+            "id": int(region.id),
+            "bbox": [int(value) for value in region.bbox],
+            "bubble_bbox": [int(value) for value in region.bubble_bbox]
+            if region.bubble_bbox
+            else None,
+            "class_name": region.class_name,
+            "block_type": region.block_type,
+            "document": bool(region.document),
+            "text": region.text,
+            "translation": region.translation,
+            "style": style,
+        },
+        sort_keys=True,
+        ensure_ascii=False,
+    )
+
+
+def _frozen_layout(region: TextRegion) -> dict | None:
+    """Проверенная раскладка из документа; None — если устарела."""
+    raw = getattr(region, "layout_snapshot", None)
+    if not isinstance(raw, dict) or int(raw.get("version", 0) or 0) != 1:
+        return None
+    if raw.get("layout_key") != _layout_key(region):
+        return None
+    size = int(raw.get("font_size", 0) or 0)
+    lines = raw.get("lines")
+    if size <= 0 or not isinstance(lines, list) or not lines:
+        return None
+    placed: list[tuple[str, int, int]] = []
+    try:
+        for item in lines:
+            placed.append((str(item[0]), int(item[1]), int(item[2])))
+    except (TypeError, ValueError, IndexError):
+        return None
+    font = raw.get("font")
+    return {
+        "font_size": size,
+        "lines": placed,
+        "font": str(font) if isinstance(font, str) and font else "",
+    }
 
 
 def _layout_spans(area: np.ndarray, region: TextRegion) -> list[tuple[int, int] | None]:
@@ -481,9 +550,26 @@ def _scale_points(points, scale: float):
     return scaled
 
 
-def _layer_pad(width: int, height: int, stroke: int, style: TextStyle) -> int:
-    """Запас вокруг блока, чтобы скос, поворот и дуга не обрезались."""
+def _layer_pad(
+    width: int,
+    height: int,
+    stroke: int,
+    style: TextStyle,
+    *,
+    stable: bool = False,
+) -> int:
+    """Запас вокруг блока, чтобы скос, поворот и дуга не обрезались.
+
+    ``stable`` — запас не зависит от текущего поворота/warp: одна и та же
+    текстура подходит для локального preview и финального рендера.
+    """
     pad = max(4, int(stroke) + 2)
+    if stable:
+        # Любой угол поворота вокруг центра.
+        pad += int(math.ceil((math.hypot(width, height) - min(width, height)) / 2.0))
+        # Худший из arc/wave/flag/ring/perspective/mesh при |bend| <= 1.
+        pad += max(width, height) + 4
+        return pad + 2
     skew = max(-70.0, min(70.0, float(style.skew_x or 0.0)))
     shear = abs(math.tan(math.radians(skew)))
     pad += int(math.ceil(shear * max(height, 1)))
@@ -839,6 +925,11 @@ def _composite_styled_layer(
     style: TextStyle,
     measure: ImageDraw.ImageDraw,
     region: TextRegion | None = None,
+    *,
+    apply_geometry: bool = True,
+    stable_pad: bool = False,
+    layer_bounds: dict[int, tuple[int, int, int, int] | None] | None = None,
+    capture: dict | None = None,
 ) -> tuple[int, int, int, int] | None:
     """Нарисовать блок на слое 2×, скосить, повернуть, поварпить и вклеить в страницу.
 
@@ -862,7 +953,11 @@ def _composite_styled_layer(
     max_y += grow
     box_w = max(1, max_x - min_x)
     box_h = max(1, max_y - min_y)
-    pad = _layer_pad(box_w, box_h, stroke_width, style)
+    frozen = _frozen_layout(region) if region is not None else None
+    stable = stable_pad or not apply_geometry or (
+        frozen is not None and abs(float(style.skew_x or 0.0)) < 1e-6
+    )
+    pad = _layer_pad(box_w, box_h, stroke_width, style, stable=stable)
     layer_w = (box_w + pad * 2) * scale
     layer_h = (box_h + pad * 2) * scale
     while (layer_w > 4096 or layer_h > 4096) and pad > 2:
@@ -891,20 +986,28 @@ def _composite_styled_layer(
     glyph_cx = min_x + box_w / 2.0
     glyph_cy = min_y + box_h / 2.0
     world_cx, world_cy = _field_center(region, (glyph_cx, glyph_cy))
-    if region is not None and region.text_position is not None:
+    if apply_geometry and region is not None and region.text_position is not None:
         translate_x = float(region.text_position[0]) - world_cx
         translate_y = float(region.text_position[1]) - world_cy
     else:
         translate_x = translate_y = 0.0
     pivot = ((world_cx - origin_x) * scale, (world_cy - origin_y) * scale)
     point = pivot
-    if style.skew_x:
+    if not apply_geometry:
+        if layer_bounds is not None and region is not None:
+            layer_bounds[int(region.id)] = (
+                int(math.floor(origin_x)),
+                int(math.floor(origin_y)),
+                int(math.ceil(origin_x + layer.size[0] / scale)),
+                int(math.ceil(origin_y + layer.size[1] / scale)),
+            )
+    if apply_geometry and style.skew_x:
         layer, point = _skew_layer(layer, float(style.skew_x), point)
         pivot = point
-    if style.rotation:
+    if apply_geometry and style.rotation:
         layer, point = _rotate_layer(layer, float(style.rotation), point, pivot=pivot)
     kind, bend, quad, mesh = _warp_spec(style)
-    if kind != "none":
+    if apply_geometry and kind != "none":
         layer_quad = _bbox_local_to_layer(quad, region, origin_x, origin_y, scale)
         layer_mesh = _bbox_local_to_layer(mesh, region, origin_x, origin_y, scale)
         if kind == "mesh" and not layer_mesh:
@@ -937,11 +1040,14 @@ def _composite_styled_layer(
             Image.Resampling.LANCZOS,
         )
         point = (point[0] / scale, point[1] / scale)
-    return _paste_rgba(
-        overlay,
-        layer,
-        (world_cx - point[0] + translate_x, world_cy - point[1] + translate_y),
+    destination = (
+        world_cx - point[0] + translate_x,
+        world_cy - point[1] + translate_y,
     )
+    if capture is not None:
+        capture["layer"] = layer
+        capture["origin"] = destination
+    return _paste_rgba(overlay, layer, destination)
 
 
 def _channel_luminance(value: float) -> float:
@@ -1058,6 +1164,9 @@ class Typesetter:
         self.user_fonts = Path(user_fonts) if user_fonts else None
         self._font_faces = None
         self._last_region_bounds: dict[int, tuple[int, int, int, int] | None] = {}
+        self._last_layer_bounds: dict[int, tuple[int, int, int, int] | None] = {}
+        self._last_anchors: dict[int, tuple[float, float]] = {}
+        self._last_layouts: dict[int, dict] = {}
 
     def _region_font(self, region: TextRegion) -> Path | None:
         """Пустой ``font_id`` оставляет прежний подбор. Иначе — файл из каталога."""
@@ -1077,15 +1186,58 @@ class Typesetter:
         image: Image.Image,
         regions: list[TextRegion],
         force: bool = False,
+        *,
+        apply_geometry: bool = True,
+        trim: bool = True,
+        capture: bool = False,
+        stable_pad: bool = False,
     ) -> tuple[Image.Image, tuple[int, int], list[int]]:
-        """Вернуть прозрачный слой надписей, его origin на странице и переполнения."""
-        self._render(image, regions, force=force, compose=False)
+        """Отрисовать прозрачный слой регионов, без origin по альфе или по рамке слоя.
+
+        ``apply_geometry=False`` замораживает раскладку, но не применяет поворот,
+        warp и ``text_position``. Это база для локального предпросмотра.
+        ``trim=False`` возвращает слой вместе с полями обводки: координаты mesh
+        должны совпадать с той же сеткой, что использует финальный рендер.
+        """
+        self._render(
+            image,
+            regions,
+            force=force,
+            compose=False,
+            apply_geometry=apply_geometry,
+            capture_layers=capture,
+            stable_pad=stable_pad,
+        )
+        if not trim and (capture or not apply_geometry) and len(regions) == 1:
+            # Целый исходный слой с отрицательным origin у края страницы:
+            # локальные преобразования не теряют пиксели за границей листа.
+            part = self._last_layer_parts.get(int(regions[0].id))
+            if part and part.get("layer") is not None:
+                origin = part.get("origin") or (0.0, 0.0)
+                return (
+                    part["layer"].copy(),
+                    (int(round(origin[0])), int(round(origin[1]))),
+                    list(self._last_overflow),
+                )
         layer = self._last_overlay.copy()
-        bounds = layer.getchannel("A").getbbox()
+        if trim:
+            bounds = layer.getchannel("A").getbbox()
+        else:
+            bounds = self._last_layer_bounds.get(int(regions[0].id)) if regions else None
+            if bounds is None:
+                bounds = layer.getchannel("A").getbbox()
         if bounds is None:
             return Image.new("RGBA", (1, 1), (0, 0, 0, 0)), (0, 0), []
         left, top, right, bottom = bounds
-        return layer.crop(bounds), (left, top), list(self._last_overflow)
+        clipped = (
+            max(0, left),
+            max(0, top),
+            min(layer.width, right),
+            min(layer.height, bottom),
+        )
+        if clipped[2] <= clipped[0] or clipped[3] <= clipped[1]:
+            return Image.new("RGBA", (1, 1), (0, 0, 0, 0)), (0, 0), []
+        return layer.crop(clipped), (clipped[0], clipped[1]), list(self._last_overflow)
 
     def _stroke_paint(
         self,
@@ -1197,8 +1349,11 @@ class Typesetter:
         force: bool,
         *,
         compose: bool,
+        apply_geometry: bool = True,
+        capture_layers: bool = False,
+        stable_pad: bool = False,
     ) -> tuple[Image.Image, list[int]]:
-        """Выполнить раскладку и при необходимости собрать итоговую RGB-страницу."""
+        """Отрисовать регионы и при необходимости собрать RGB-страницу."""
         rgb = np.array(image.convert("RGB"))
         canvas = image.convert("RGBA") if compose else None
         overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
@@ -1208,6 +1363,10 @@ class Typesetter:
         clip = np.zeros(rgb.shape[:2], dtype=np.uint8)
         moved_ink = np.zeros(rgb.shape[:2], dtype=np.uint8)
         region_bounds: dict[int, tuple[int, int, int, int] | None] = {}
+        self._last_layer_bounds = {}
+        self._last_anchors = {}
+        self._last_layouts = {}
+        self._last_layer_parts = {}
 
         for region in regions:
             text = region.translation.strip()
@@ -1231,6 +1390,8 @@ class Typesetter:
             inset = layout_inset_px(region, self.margin_ratio)
             layout_area = inset_layout_mask(area, inset)
             spans = _layout_spans(layout_area, region)
+            layout_key = _layout_key(region)
+            frozen = _frozen_layout(region)
             placed = None
             chosen_font = None
             override = int(region.style.font_size_override or 0)
@@ -1255,7 +1416,18 @@ class Typesetter:
             def stroke_pad(size: int) -> int:
                 return self._fit_stroke_width(region, size, complex_background)
 
-            if override > 0:
+            if frozen is not None:
+                # Раскладка уже закреплена preview: не подбираем строки заново.
+                size = int(frozen["font_size"])
+                frozen_font = (
+                    resolve_font(str(frozen["font"])) if frozen.get("font") else None
+                )
+                if frozen_font is None or not frozen_font.is_file():
+                    frozen_font = font_path
+                font_path = frozen_font
+                chosen_font = _load_font(font_path, size)
+                placed = list(frozen["lines"])
+            elif override > 0:
                 size = min(self.max_font_size, max(self.min_font_size, override))
                 chosen_font = _load_font(font_path, size)
                 placed, fits = layout_fn(
@@ -1329,21 +1501,41 @@ class Typesetter:
             before_alpha = np.array(overlay)[..., 3].copy()
             size = int(getattr(chosen_font, "size", self.min_font_size))
             region.style.font_size = size
+            anchor = _field_center(region, (0.0, 0.0))
+            self._last_anchors[int(region.id)] = (float(anchor[0]), float(anchor[1]))
+            self._last_layouts[int(region.id)] = {
+                "version": 1,
+                "layout_key": layout_key,
+                "font_size": size,
+                "lines": [(str(line), int(x), int(y)) for line, x, y in placed],
+                "anchor": [float(anchor[0]), float(anchor[1])],
+                "font": str(font_path.name) if font_path is not None else "",
+            }
             stroke, stroke_width = self._stroke_paint(rgb, area, region, size)
             fill = region.style.fill_rgb
             if region.block_type != "sfx" and not region.style.fill_locked:
                 fill = _readable_fill(fill, _area_color(rgb, area))
                 region.style.fill_rgb = fill
-            if _style_needs_layer(region.style):
+            needs_layer = (
+                _style_needs_layer(region.style)
+                or frozen is not None
+                or not apply_geometry
+            )
+            if needs_layer:
+                capture = {} if (not apply_geometry or capture_layers) else None
                 visible_bounds = _composite_styled_layer(
                     overlay, placed, chosen_font, font_path, fill, stroke, stroke_width,
-                    region.style, draw, region=region,
+                    region.style, draw, region=region, apply_geometry=apply_geometry,
+                    stable_pad=stable_pad, layer_bounds=self._last_layer_bounds,
+                    capture=capture,
                 )
+                if capture is not None and "layer" in capture:
+                    self._last_layer_parts[int(region.id)] = capture
                 region_bounds[int(region.id)] = _union_bounds(
                     region_bounds.get(int(region.id)), visible_bounds,
                 )
             else:
-                if text_moved:
+                if text_moved and apply_geometry:
                     source_box = region.bubble_bbox or region.bbox
                     source_cx = float(source_box[0]) + float(source_box[2]) / 2.0
                     source_cy = float(source_box[1]) + float(source_box[3]) / 2.0

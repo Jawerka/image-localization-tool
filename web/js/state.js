@@ -1,6 +1,6 @@
 /* Состояние вкладки: проект, документ, стек отмены. После перезагрузки берётся с сервера. */
 
-import { getPage, putDocument } from "./api.js";
+import { getPage, imageUrl, layoutSnapshot, putDocument, rebakePage } from "./api.js";
 import {
   isDeferredPending,
   nextDeferredBaseline,
@@ -77,6 +77,13 @@ let inflight = "";
 let queuedPage = "";
 let loadToken = 0;
 const pendingBody = new Map();
+/** Тело последнего неудачного PUT: нужно для повторного Done. */
+const failedBodies = new Map();
+let saveFailedPage = "";
+let awaitingBakePage = "";
+let bakeFailedPage = "";
+let applying = false;
+let lastSavePlan = "";
 
 function emptyState() {
   return {
@@ -112,6 +119,7 @@ function emptyState() {
     showMask: false,
     tool: "brush",
     brushSize: 12,
+    fillTolerance: 20,
     zoom: "fit",
     curtain: 0.58,
     imageSize: { w: 0, h: 0 },
@@ -123,6 +131,7 @@ function emptyState() {
     package: { path: null, dirty: false },
     pendingAction: null,
     deferredApply: false,
+    applying: false,
   };
 }
 
@@ -232,17 +241,19 @@ export function normalizeDocument(raw) {
     version: Number(data.version) || 0,
     regions: Array.isArray(data.regions) ? data.regions.map(normalizeRegion) : [],
     strokes: Array.isArray(data.strokes)
-      ? data.strokes.map((stroke) => ({
-        mode: stroke.mode === "erase"
-          ? "erase"
-          : (stroke.mode === "erase_fill"
-            ? "erase_fill"
-            : (stroke.mode === "fill" ? "fill" : "paint")),
-        radius: Math.max(1, Number(stroke.radius) || 1),
-        points: Array.isArray(stroke.points)
-          ? stroke.points.map((point) => [Number(point[0]) || 0, Number(point[1]) || 0])
-          : [],
-      }))
+      ? data.strokes.map((stroke) => {
+        const mode = ["erase", "fill", "erase_fill", "flood", "erase_flood"].includes(stroke.mode)
+          ? stroke.mode
+          : "paint";
+        return {
+          mode,
+          radius: Math.max(1, Number(stroke.radius) || 1),
+          points: Array.isArray(stroke.points)
+            ? stroke.points.map((point) => [Number(point[0]) || 0, Number(point[1]) || 0])
+            : [],
+          tolerance: Math.max(0, Math.min(100, Number(stroke.tolerance) || 0)),
+        };
+      })
       : [],
     reading_direction: data.reading_direction || "ltr",
     warnings: Array.isArray(data.warnings) ? data.warnings.map(String) : [],
@@ -602,6 +613,7 @@ function contentKey(document) {
 }
 
 export function editDocument(mutator, options = {}) {
+  if (state.applying) return;
   if (!state.activePageId || !state.document) return;
   const pageId = state.activePageId;
   const before = contentKey(state.document);
@@ -617,6 +629,7 @@ export function editDocument(mutator, options = {}) {
     coalesceKey = key;
   }
   if (!key) coalesceKey = "";
+  bakeFailedPage = "";
   const defer = shouldDeferEdit(options.deferApply, state.deferredApply);
   if (defer) {
     deferredBaselineKey = nextDeferredBaseline(deferredBaselineKey, before);
@@ -644,9 +657,209 @@ export function commitDeferredEdits() {
   scheduleSave(state.activePageId, 0);
 }
 
-/** Сбросить неподтверждённые правки и перезагрузить документ с сервера. */
-export function discardDeferredEdits() {
+/** Свежий snapshot выбранного региона перед Done: закрывает гонку с preview. */
+async function refreshDoneSnapshot(pageId) {
+  const regionId = state.selectedRegionId;
+  const region = findRegion(state.document, regionId);
+  if (!region) return true;
+  let data;
+  try {
+    data = await layoutSnapshot(
+      pageId,
+      regionId,
+      region,
+      state.document?.regions || [],
+    );
+  } catch (error) {
+    setBanner("save", {
+      tone: "warning",
+      text: error.message || "Не удалось подготовить раскладку",
+    });
+    return false;
+  }
+  if (state.activePageId !== pageId) return false;
+  const snapshot = data && data.layout_snapshot;
+  if (!snapshot) return true;
+  const current = findRegion(state.document, regionId) || region;
+  current.layout_snapshot = snapshot;
+  syncPendingSnapshot(pageId, regionId, snapshot);
+  return true;
+}
+
+/** Перенести производные snapshot из текущего документа в ожидающий PUT. */
+function syncSnapshots(body) {
+  if (!body || !Array.isArray(body.regions) || !state.document) return;
+  for (const item of body.regions) {
+    const current = findRegion(state.document, item && item.id);
+    if (!current) continue;
+    if (current.layout_snapshot) item.layout_snapshot = clone(current.layout_snapshot);
+    else delete item.layout_snapshot;
+  }
+}
+
+function syncPendingSnapshots(pageId) {
+  syncSnapshots(pendingBody.get(pageId));
+}
+
+function syncPendingSnapshot(pageId, regionId, snapshot) {
+  const body = pendingBody.get(pageId);
+  if (!body || !Array.isArray(body.regions)) return;
+  const item = body.regions.find((entry) => entry && sameId(entry.id, regionId));
+  if (item) item.layout_snapshot = clone(snapshot);
+}
+
+/**
+ * Применить черновик: сохранить, дождаться результата ревизии и загрузить PNG.
+ * Ошибка оставляет черновик и возможность повторить.
+ */
+export async function applyDeferredEdits() {
   const pageId = state.activePageId;
+  if (!pageId || !state.document || applying) return false;
+  const hasDraft = state.deferredApply
+    || pendingBody.has(pageId)
+    || failedBodies.has(pageId)
+    || awaitingBakePage === pageId;
+  if (!hasDraft) return true;
+  applying = true;
+  saveFailedPage = "";
+  lastSavePlan = "";
+  state = { ...state, applying: true };
+  emit();
+  try {
+    if (!(await refreshDoneSnapshot(pageId))) return false;
+    if (state.activePageId !== pageId) return false;
+    syncPendingSnapshots(pageId);
+    const retryBody = pendingBody.get(pageId) || failedBodies.get(pageId) || null;
+    syncSnapshots(retryBody);
+    if (bakeFailedPage === pageId && !retryBody) {
+      bakeFailedPage = "";
+      try {
+        await rebakePage(pageId);
+      } catch (error) {
+        bakeFailedPage = pageId;
+        setBanner("save", {
+          tone: "warning",
+          text: error.message || "Не удалось повторить сборку результата",
+        });
+        return false;
+      }
+    }
+    if (retryBody) {
+      failedBodies.delete(pageId);
+      pendingBody.set(pageId, retryBody);
+      state = { ...state, deferredApply: true };
+      commitDeferredEdits();
+      await whenSaved(pageId);
+      if (saveFailedPage === pageId) {
+        pendingBody.set(pageId, retryBody);
+        state = { ...state, deferredApply: true };
+        setBanner("save", {
+          tone: "warning",
+          text: "Не удалось сохранить правки; черновик сохранён для повтора",
+        });
+        return false;
+      }
+    }
+    if (isDirty(pageId)) await whenSaved(pageId);
+    if (retryBody && lastSavePlan !== "typeset" && lastSavePlan !== "clean") {
+      let detail;
+      try {
+        detail = await getPage(pageId);
+      } catch (error) {
+        pendingBody.set(pageId, retryBody);
+        state = { ...state, deferredApply: true };
+        setBanner("save", {
+          tone: "warning",
+          text: error.message || "Не удалось перечитать страницу",
+        });
+        return false;
+      }
+      if (state.activePageId !== pageId) return false;
+      applyDetail(pageId, detail, false, true);
+      deferredBaselineKey = "";
+      awaitingBakePage = "";
+      bakeFailedPage = "";
+      state = { ...state, deferredApply: false };
+      emit();
+      return true;
+    }
+    const savedVersion = acked.get(pageId) || 0;
+    const deadline = Date.now() + 30000;
+    while (Date.now() < deadline) {
+      if (state.activePageId !== pageId) return false;
+      let detail;
+      try {
+        detail = await getPage(pageId);
+      } catch (error) {
+        awaitingBakePage = pageId;
+        state = { ...state, deferredApply: true };
+        setBanner("save", {
+          tone: "warning",
+          text: error.message || "Результат не успел собраться",
+        });
+        return false;
+      }
+      if (state.activePageId !== pageId) return false;
+      if (String(detail.status || "") === "error") {
+        awaitingBakePage = pageId;
+        bakeFailedPage = pageId;
+        state = { ...state, deferredApply: true };
+        setBanner("save", {
+          tone: "warning",
+          text: String(detail.error || "Не удалось собрать результат"),
+        });
+        return false;
+      }
+      const renderVersion = Number(detail.render_version) || 0;
+      if (renderVersion >= savedVersion) {
+        const document = detail.document || null;
+        const version = document && document.version != null
+          ? Number(document.version)
+          : savedVersion;
+        const decoded = await preloadImage(imageUrl(pageId, "result", version));
+        if (!decoded) {
+          awaitingBakePage = pageId;
+          state = { ...state, deferredApply: true };
+          setBanner("save", {
+            tone: "warning",
+            text: "Результат собран, но картинка не загрузилась",
+          });
+          return false;
+        }
+        if (state.activePageId !== pageId) return false;
+        applyDetail(pageId, detail, false, true);
+        deferredBaselineKey = "";
+        awaitingBakePage = "";
+        bakeFailedPage = "";
+        saveFailedPage = "";
+        state = { ...state, deferredApply: false };
+        emit();
+        return true;
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 150));
+    }
+    awaitingBakePage = pageId;
+    state = { ...state, deferredApply: true };
+    setBanner("save", { tone: "warning", text: "Результат не успел собраться" });
+    return false;
+  } finally {
+    applying = false;
+    state = { ...state, applying: false };
+    emit();
+  }
+}
+
+function preloadImage(url) {
+  return new Promise((resolve) => {
+    const image = new Image();
+    image.onload = () => resolve(true);
+    image.onerror = () => resolve(false);
+    image.src = url;
+  });
+}
+
+/** Сбросить неподтверждённые правки и перезагрузить документ с сервера. */
+export function discardDeferredEdits() {  const pageId = state.activePageId;
   if (!pageId) return Promise.resolve();
   pendingBody.delete(pageId);
   if (timerPage === pageId) {
@@ -656,6 +869,7 @@ export function discardDeferredEdits() {
   }
   coalesceKey = "";
   deferredBaselineKey = "";
+  bakeFailedPage = "";
   state = { ...state, deferredApply: false };
   clearHistory(pageId);
   emit();
@@ -700,6 +914,7 @@ function restoreHistoryDocument(document) {
 }
 
 export function undo() {
+  if (state.applying) return;
   if (!state.activePageId || !state.document) return;
   const history = historyOf(state.activePageId);
   if (!history.past.length) return;
@@ -708,6 +923,7 @@ export function undo() {
 }
 
 export function redo() {
+  if (state.applying) return;
   if (!state.activePageId || !state.document) return;
   const history = historyOf(state.activePageId);
   if (!history.future.length) return;
@@ -730,10 +946,10 @@ export function whenSaved(pageId) {
     timerPage = "";
     flush(id);
   }
-  if (!id || !isDirty(id)) return Promise.resolve();
+  if (!id || !isDirty(id) || saveFailedPage === id) return Promise.resolve();
   return new Promise((resolve) => {
     const check = () => {
-      if (!isDirty(id)) resolve();
+      if (!isDirty(id) || saveFailedPage === id) resolve();
       else window.setTimeout(check, 20);
     };
     check();
@@ -783,6 +999,8 @@ async function flush(pageId) {
     coalesceKey = "";
     pendingBody.delete(pageId);
     queuedPage = "";
+    failedBodies.set(pageId, clone(sent));
+    saveFailedPage = pageId;
     if (error.status === 409) {
       setBanner("conflict", {
         tone: "warning",
@@ -814,6 +1032,9 @@ async function flush(pageId) {
 
 function acceptSave(pageId, response, fallback, strokeCount) {
   const version = readVersion(response, fallback);
+  lastSavePlan = String((response && response.plan) || "");
+  failedBodies.delete(pageId);
+  if (saveFailedPage === pageId) saveFailedPage = "";
   acked.set(pageId, version);
   strokeCounts.set(strokeKey(pageId, version), strokeCount);
   if (state.activePageId === pageId && state.document && !pendingBody.has(pageId)) {

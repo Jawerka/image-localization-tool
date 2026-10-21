@@ -241,14 +241,28 @@ def segment_region(
     return full
 
 
-def apply_strokes(mask: np.ndarray, strokes: list[MaskStroke]) -> np.ndarray:
-    """Наложить штрихи кисти, ластика и заливку лассо. Входная маска не меняется."""
+def apply_strokes(
+    mask: np.ndarray,
+    strokes: list[MaskStroke],
+    image: Image.Image | None = None,
+) -> np.ndarray:
+    """Наложить штрихи кисти, ластика и заливку лассо. Входная маска не меняется.
+
+    ``image`` — исходная страница для заливки по цвету (flood/erase_flood).
+    """
     result = np.array(mask, copy=True)
     if not strokes:
         return result
     for stroke in strokes:
         points = [(int(point[0]), int(point[1])) for point in stroke.points]
         if not points:
+            continue
+        if stroke.mode in ("flood", "erase_flood"):
+            if image is None:
+                continue
+            from src.components.flood_fill import flood_region, paint_region
+
+            paint_region(result, flood_region(image, points[0], stroke.tolerance), stroke.mode)
             continue
         if stroke.mode in ("fill", "erase_fill"):
             if len(points) >= 3:

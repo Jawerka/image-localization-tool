@@ -100,3 +100,10 @@ describe("paintStrokeOnMask color override", () => {
     assert.equal(ctx.fillStyle, "#000000");
   });
 });
+
+describe("modeColor flood", () => {
+  it("uses red for erase_flood", () => {
+    assert.equal(modeColor("erase_flood"), MASK_REMOVE_COLOR);
+    assert.equal(modeColor("flood"), MASK_ADD_COLOR);
+  });
+});

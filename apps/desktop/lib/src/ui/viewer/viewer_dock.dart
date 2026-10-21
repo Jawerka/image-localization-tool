@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../../state/viewer_state.dart';
@@ -163,7 +164,10 @@ class ViewerDock extends StatelessWidget {
               _separator(palette),
               _toolSegment(palette),
               _separator(palette),
-              _brushSize(palette, context),
+              if (viewer.tool == 'fill')
+                _fillTolerance(palette, context)
+              else
+                _brushSize(palette, context),
               _separator(palette),
               _iconButton(
                 palette,
@@ -216,6 +220,14 @@ class ViewerDock extends StatelessWidget {
           onTap: () => viewer.setView('compare'),
           keyName: 'dock-view-compare',
         ),
+        _iconButton(
+          palette,
+          icon: Icons.auto_fix_high,
+          tooltip: 'Чистый (4)',
+          active: viewer.view == 'clean',
+          onTap: () => viewer.setView('clean'),
+          keyName: 'dock-view-clean',
+        ),
       ],
     );
   }
@@ -247,6 +259,17 @@ class ViewerDock extends StatelessWidget {
           active: viewer.tool == 'brush',
           onTap: () => viewer.setTool('brush'),
           keyName: 'dock-tool-brush',
+          onScroll: (event) => viewer.nudgeBrush(event.scrollDelta.dy < 0 ? 1 : -1),
+        ),
+        _iconButton(
+          palette,
+          icon: Icons.format_color_fill,
+          tooltip: 'Заливка (G)',
+          active: viewer.tool == 'fill',
+          onTap: () => viewer.setTool('fill'),
+          keyName: 'dock-tool-fill',
+          onScroll: (event) =>
+              viewer.nudgeFillTolerance(event.scrollDelta.dy < 0 ? 1 : -1),
         ),
         _iconButton(
           palette,
@@ -320,6 +343,66 @@ class ViewerDock extends StatelessWidget {
             controller.isOpen ? controller.close() : controller.open(),
         keyName: 'dock-brush-size',
         label: '${viewer.brushSize.round()}',
+        onScroll: (event) =>
+            viewer.nudgeBrush(event.scrollDelta.dy < 0 ? 1 : -1),
+      ),
+    );
+  }
+
+  Widget _fillTolerance(IltPalette palette, BuildContext context) {
+    final theme = Theme.of(context);
+    return MenuAnchor(
+      style: MenuStyle(
+        backgroundColor: WidgetStatePropertyAll(palette.surface2),
+      ),
+      menuChildren: [
+        SizedBox(
+          width: 230,
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Text('Допуск заливки', style: theme.textTheme.labelSmall),
+                    const Spacer(),
+                    Text(
+                      '${viewer.fillTolerance.round()}',
+                      style: theme.textTheme.labelSmall,
+                    ),
+                  ],
+                ),
+                Slider(
+                  key: const Key('dock-fill-slider'),
+                  min: 0,
+                  max: 100,
+                  divisions: 100,
+                  value: viewer.fillTolerance.clamp(0, 100),
+                  onChanged: viewer.setFillTolerance,
+                ),
+                Text(
+                  'ЛКМ — добавить, ПКМ — вычесть. Колесо меняет допуск.',
+                  style: theme.textTheme.labelSmall
+                      ?.copyWith(color: palette.textMuted),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+      builder: (context, controller, child) => _iconButton(
+        palette,
+        icon: Icons.opacity,
+        tooltip: 'Допуск заливки',
+        active: viewer.tool == 'fill',
+        onTap: () =>
+            controller.isOpen ? controller.close() : controller.open(),
+        keyName: 'dock-fill-tolerance',
+        label: '${viewer.fillTolerance.round()}',
+        onScroll: (event) =>
+            viewer.nudgeFillTolerance(event.scrollDelta.dy < 0 ? 1 : -1),
       ),
     );
   }
@@ -400,13 +483,14 @@ class ViewerDock extends StatelessWidget {
     required String keyName,
     bool active = false,
     String? label,
+    void Function(PointerScrollEvent event)? onScroll,
   }) {
     final color = onTap == null
         ? palette.textMuted.withValues(alpha: 0.4)
         : active
             ? palette.primary
             : palette.textPrimary;
-    return Tooltip(
+    final button = Tooltip(
       message: tooltip,
       waitDuration: const Duration(milliseconds: 500),
       child: InkWell(
@@ -437,6 +521,13 @@ class ViewerDock extends StatelessWidget {
           ),
         ),
       ),
+    );
+    if (onScroll == null) return button;
+    return Listener(
+      onPointerSignal: (event) {
+        if (event is PointerScrollEvent) onScroll(event);
+      },
+      child: button,
     );
   }
 }

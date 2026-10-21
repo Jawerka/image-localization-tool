@@ -30,15 +30,12 @@ _CYRILLIC = range(0x0410, 0x0450)
 FONT_ROLE_DIALOGUE = "Heroika-Regular"
 FONT_ROLE_HANDWRITTEN = "FirstTimeWriting"
 FONT_ROLE_TITLE = "Jupiteroid-Light"
-FONT_ROLE_SHOUT = "Blaec-Regular"
-FONT_ROLE_SHOUT_ITALIC = "Blaec-Italic"
+FONT_ROLE_SHOUT = "OperationNapalm-Regular"
 FONT_ROLE_STENCIL = "OperationNapalm-Regular"
-FONT_ROLE_SFX = "DeltaBlock-Regular"
-FONT_ROLE_SFX_TECH = "Liber-Struct"
-FONT_ROLE_SFX_COMEDY = "Unsightly"
-FONT_ROLE_PIXEL = "Pixelzone"
-FONT_ROLE_PIXEL_BOLD = "PublicPixel"
-FONT_ROLE_DECOR = "VyazPixel"
+FONT_ROLE_SFX = "Liber-Struct"
+FONT_ROLE_SFX_TECH = FONT_ROLE_SFX
+FONT_ROLE_SFX_COMEDY = FONT_ROLE_SFX
+FONT_ROLE_PIXEL = FONT_ROLE_SFX
 
 # Обратная совместимость со старыми именами в тестах/импортах.
 TRIAL_SFX_FONT = FONT_ROLE_SFX

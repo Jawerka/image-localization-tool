@@ -214,10 +214,11 @@ function onKey(event) {
     KeyV: "select",
     KeyR: "region",
     KeyB: "brush",
+    KeyG: "fill",
     KeyP: "polyline",
     KeyH: "hand",
   };
-  const viewByCode = { Digit1: "original", Digit2: "result", Digit3: "compare" };
+  const viewByCode = { Digit1: "original", Digit2: "result", Digit3: "compare", Digit4: "clean" };
   if (toolByCode[event.code]) {
     event.preventDefault();
     actions.tool?.(toolByCode[event.code]);

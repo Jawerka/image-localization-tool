@@ -227,5 +227,92 @@ void main() {
       expect(coords[12], const Offset(0, 200));
       expect(coords.last, const Offset(300, 200));
     });
+
+    test('buildMeshSurface сохраняет identity при подразбиении', () {
+      const width = 120.0;
+      const height = 80.0;
+      const origin = Offset(100, 50);
+      final control = [
+        for (var row = 0; row < 4; row++)
+          for (var col = 0; col < 4; col++)
+            origin +
+                Offset(col * (width - 1) / 3, row * (height - 1) / 3),
+      ];
+      final surface = buildMeshSurface(control, width, height, subdivisions: 4);
+      expect(surface.positions, hasLength(9 * 25));
+      expect(surface.indices, hasLength(9 * 4 * 4 * 6));
+      for (var index = 0; index < surface.positions.length; index++) {
+        final source = surface.textureCoordinates[index];
+        expect(
+          surface.positions[index].dx,
+          closeTo(origin.dx + source.dx, 1e-6),
+        );
+        expect(
+          surface.positions[index].dy,
+          closeTo(origin.dy + source.dy, 1e-6),
+        );
+      }
+    });
+
+    test('buildWarpSurface: bend=0 и identity quad не меняют слой', () {
+      const width = 120.0;
+      const height = 80.0;
+      const origin = Offset(100, 50);
+      final identityQuad = [
+        origin,
+        origin + const Offset(width - 1, 0),
+        origin + const Offset(width - 1, height - 1),
+        origin + const Offset(0, height - 1),
+      ];
+      for (final kind in ['arc', 'wave', 'flag', 'ring', 'perspective']) {
+        final surface = buildWarpSurface(
+          kind: kind,
+          width: width,
+          height: height,
+          origin: origin,
+          bend: 0,
+          quad: kind == 'perspective' ? identityQuad : null,
+        );
+        expect(surface.positions, hasLength(25 * 17), reason: kind);
+        expect(surface.indices, hasLength(24 * 16 * 6), reason: kind);
+        for (var index = 0; index < surface.positions.length; index++) {
+          final source = surface.textureCoordinates[index];
+          expect(
+            surface.positions[index].dx,
+            closeTo(origin.dx + source.dx, 1e-6),
+            reason: kind,
+          );
+          expect(
+            surface.positions[index].dy,
+            closeTo(origin.dy + source.dy, 1e-6),
+            reason: kind,
+          );
+        }
+      }
+    });
+
+    test('buildWarpSurface: ненулевой bend двигает точки', () {
+      const width = 120.0;
+      const height = 80.0;
+      const origin = Offset.zero;
+      for (final kind in ['arc', 'wave', 'flag', 'ring']) {
+        final surface = buildWarpSurface(
+          kind: kind,
+          width: width,
+          height: height,
+          origin: origin,
+          bend: 1,
+        );
+        var moved = false;
+        for (var index = 0; index < surface.positions.length; index++) {
+          final source = surface.textureCoordinates[index];
+          if ((surface.positions[index] - source).distance > 0.5) {
+            moved = true;
+            break;
+          }
+        }
+        expect(moved, isTrue, reason: kind);
+      }
+    });
   });
 }

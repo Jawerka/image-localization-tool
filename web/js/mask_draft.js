@@ -28,8 +28,11 @@ export function normalizeMaskStroke(stroke) {
   if (item.mode === "erase") mode = "erase";
   else if (item.mode === "fill") mode = "fill";
   else if (item.mode === "erase_fill") mode = "erase_fill";
-  const color = mode === "erase" || mode === "erase_fill" ? "#000000" : "#ffffff";
-  return { mode, radius, points, color };
+  else if (item.mode === "flood") mode = "flood";
+  else if (item.mode === "erase_flood") mode = "erase_flood";
+  const color = mode === "erase" || mode === "erase_fill" || mode === "erase_flood" ? "#000000" : "#ffffff";
+  const tolerance = Math.max(0, Math.min(100, Number(item.tolerance) || 0));
+  return { mode, radius, points, color, tolerance };
 }
 
 /**
