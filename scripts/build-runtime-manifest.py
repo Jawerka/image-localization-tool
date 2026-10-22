@@ -38,13 +38,19 @@ def load_packs(path: Path) -> list[dict]:
 
 
 def write_if_changed(path: Path, text: str) -> bool:
-    """Не трогать tracked JSON, если меняются только переводы строк."""
+    """Записать канонический LF-файл; True — изменилось содержимое.
+
+    Переводы строк не считаются изменением для сообщения, но байты всё равно
+    приводятся к LF: release_candidate сравнивает каталоги побайтно.
+    """
+    desired = text.encode("utf-8")
+    changed = True
     if path.is_file():
-        existing = path.read_text(encoding="utf-8")
-        if existing.replace("\r\n", "\n") == text:
+        changed = path.read_text(encoding="utf-8").replace("\r\n", "\n") != text
+        if path.read_bytes() == desired:
             return False
-    path.write_text(text, encoding="utf-8", newline="\n")
-    return True
+    path.write_bytes(desired)
+    return changed
 
 
 def main(argv: list[str] | None = None) -> int:
