@@ -48,7 +48,7 @@ PACK_TITLES = {
 }
 KIND = {"torch-cpu": "torch", "torch-cu128": "torch", "torch-cu130": "torch", "argos": "argos"}
 DRIVER_MIN = {"torch-cu128": 570, "torch-cu130": 580}
-WHEEL_BASE = "https://raw.githubusercontent.com/Jawerka/image-localization-tool/cbe2960b7d620cbc0348f50ba325e8945384d795/assets"
+WHEEL_BASE = "https://raw.githubusercontent.com/Jawerka/image-localization-tool/e113a9e92f0486518d9ab51803b7a8e27f350506/assets"
 
 TORCH_VERSION = "2.11.0"
 # argostranslate из официального git: в 1.11.1 stanza стал optional extra,

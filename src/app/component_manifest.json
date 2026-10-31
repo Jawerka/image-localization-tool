@@ -122,19 +122,19 @@
       "files": [
         {
           "name": "FirstTimeWriting.ttf",
-          "url": "https://raw.githubusercontent.com/Jawerka/image-localization-tool/cbe2960b7d620cbc0348f50ba325e8945384d795/src/resources/fonts/FirstTimeWriting.ttf",
+          "url": "https://raw.githubusercontent.com/Jawerka/image-localization-tool/e113a9e92f0486518d9ab51803b7a8e27f350506/src/resources/fonts/FirstTimeWriting.ttf",
           "sha256": "ff42d749e994863ad8ae6ea3b94843fec55779e343471c09a9debc96c3930f57",
           "size_bytes": 2105720
         },
         {
           "name": "Liber-Struct.ttf",
-          "url": "https://raw.githubusercontent.com/Jawerka/image-localization-tool/cbe2960b7d620cbc0348f50ba325e8945384d795/src/resources/fonts/Liber-Struct.ttf",
+          "url": "https://raw.githubusercontent.com/Jawerka/image-localization-tool/e113a9e92f0486518d9ab51803b7a8e27f350506/src/resources/fonts/Liber-Struct.ttf",
           "sha256": "bbe6e911289aaa4a12e1ff5cbb1288b614b1531f85703f75b17d2571de7b82d1",
           "size_bytes": 195816
         },
         {
           "name": "OperationNapalm-Regular.ttf",
-          "url": "https://raw.githubusercontent.com/Jawerka/image-localization-tool/cbe2960b7d620cbc0348f50ba325e8945384d795/src/resources/fonts/OperationNapalm-Regular.ttf",
+          "url": "https://raw.githubusercontent.com/Jawerka/image-localization-tool/e113a9e92f0486518d9ab51803b7a8e27f350506/src/resources/fonts/OperationNapalm-Regular.ttf",
           "sha256": "24454062e6ad999f3a9e30fd351a1f34bb0f8fcfd121148336d19ed7783060b3",
           "size_bytes": 163880
         }
@@ -152,7 +152,7 @@
       "files": [
         {
           "name": "Heroika-Regular.otf",
-          "url": "https://raw.githubusercontent.com/Jawerka/image-localization-tool/cbe2960b7d620cbc0348f50ba325e8945384d795/src/resources/fonts/Heroika-Regular.otf",
+          "url": "https://raw.githubusercontent.com/Jawerka/image-localization-tool/e113a9e92f0486518d9ab51803b7a8e27f350506/src/resources/fonts/Heroika-Regular.otf",
           "sha256": "538b3b4ff320cfda3b45096480895010b666635df8b7beddf9d84240b764b790",
           "size_bytes": 51552
         }
