@@ -1,0 +1,1243 @@
+/* Состояние вкладки: проект, документ, стек отмены. После перезагрузки берётся с сервера. */
+
+import { getPage, imageUrl, layoutSnapshot, putDocument, rebakePage } from "./api.js";
+import {
+  isDeferredPending,
+  nextDeferredBaseline,
+  shouldDeferEdit,
+  shouldPushHistory,
+} from "./deferred_edits.js";
+
+const HISTORY_LIMIT = 1000;
+const HISTORY_MAX_BYTES = 256 * 1024 * 1024;
+
+export const DEFAULT_SETTINGS = {
+  theme: "system",
+  ui_scale: 100,
+  source_lang: "en",
+  target_lang: "ru",
+  llm_base_url: "",
+  llm_model: "",
+  llm_thinking: false,
+  llm_timeout: 300,
+  ocr_backend: "vlm",
+  translator_backend: "llm",
+  inpainter_backend: "lama",
+  reading_order: "auto",
+  translate_sfx: true,
+  sfx_mode: "replace",
+  auto_stylized_fonts: true,
+  remote_enabled: false,
+  remote_bind: "0.0.0.0",
+  remote_port: 8765,
+  device: "auto",
+  glossary_path: "",
+  detector_conf: 0.3,
+  detector_mode: "ogkalu",
+  ctd_conf: 0.4,
+  ort_intra_op_threads: 0,
+  text_stroke_ratio: 0.08,
+  text_margin: 0.08,
+  min_font_size: 10,
+  max_font_size: 128,
+  export_format: "png",
+  export_jpeg_quality: 90,
+  export_conflict: "rename",
+  models_dir: "",
+  single_key_shortcuts: true,
+  first_run_complete: false,
+  recent_projects: [],
+};
+
+const STAGE_LABELS = {
+  detect: "Детекция",
+  detection: "Детекция",
+  ocr: "OCR",
+  translate: "Перевод",
+  translation: "Перевод",
+  segment: "Маска",
+  mask: "Маска",
+  inpaint: "Очистка",
+  clean: "Очистка",
+  typeset: "Вёрстка",
+  "export-wait": "Ожидание результата",
+};
+
+const listeners = new Set();
+const histories = new Map();
+const acked = new Map();
+/** Число штрихов, запечённых в маску версии (`pageId|version`). */
+const strokeCounts = new Map();
+
+let state = emptyState();
+let coalesceKey = "";
+/** contentKey документа на входе в deferred-сессию (последний applied). */
+let deferredBaselineKey = "";
+let saveTimer = 0;
+let timerPage = "";
+let inflight = "";
+let queuedPage = "";
+let loadToken = 0;
+const pendingBody = new Map();
+/** Тело последнего неудачного PUT: нужно для повторного Done. */
+const failedBodies = new Map();
+let saveFailedPage = "";
+let awaitingBakePage = "";
+let bakeFailedPage = "";
+let applying = false;
+let lastSavePlan = "";
+
+function emptyState() {
+  return {
+    booted: false,
+    offline: false,
+    offlineMessage: "",
+    version: "",
+    settings: { ...DEFAULT_SETTINGS },
+    settingsWarning: "",
+    project: null,
+    pages: [],
+    recent: [],
+    llm: { ok: null, models: [], vision: false },
+    device: "",
+    modelsReady: true,
+    busy: false,
+    job: { stage: "", index: 0, total: 0, pageId: "" },
+    batch: { status: "idle", startedAt: null, done: 0, error: "", currentId: "" },
+    fonts: [],
+    styleLibrary: [],
+    stylePreview: { status: "idle", message: "" },
+    remote: { enabled: false, clients: 0, addresses: [], pairing_code: "", devices: [], recent: [] },
+    hasApiKey: false,
+    activePageId: "",
+    focusPageId: "",
+    selectedPageIds: [],
+    anchorPageId: "",
+    document: null,
+    selectedRegionId: null,
+    textMoveRegionId: "",
+    view: "original",
+    showBoxes: false,
+    showMask: false,
+    tool: "brush",
+    brushSize: 12,
+    fillTolerance: 20,
+    zoom: "fit",
+    curtain: 0.58,
+    imageSize: { w: 0, h: 0 },
+    banners: [],
+    dismissedBanners: [],
+    undoCount: 0,
+    redoCount: 0,
+    paths: null,
+    package: { path: null, dirty: false },
+    pendingAction: null,
+    deferredApply: false,
+    applying: false,
+  };
+}
+
+export function getState() {
+  return state;
+}
+
+export function subscribe(listener) {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+function emit() {
+  listeners.forEach((listener) => listener(state));
+}
+
+export function patch(partial) {
+  state = { ...state, ...partial };
+  emit();
+}
+
+export function clone(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+export function sameId(a, b) {
+  return String(a) === String(b);
+}
+
+export function stageLabel(stage) {
+  if (!stage) return "";
+  const key = String(stage).toLowerCase();
+  return STAGE_LABELS[key] || String(stage);
+}
+
+export function normalizeStatus(status) {
+  const value = String(status || "idle").toLowerCase();
+  if (value === "queue" || value === "queued") return "queued";
+  if (value === "run" || value === "running" || value === "working") return "running";
+  if (value === "ready" || value === "done") return "done";
+  if (value === "edit" || value === "edited") return "edited";
+  if (value === "no_llm" || value === "offline") return "offline";
+  if (value === "failed" || value === "error") return "error";
+  return "idle";
+}
+
+export function isReadyStatus(status) {
+  const value = normalizeStatus(status);
+  return value === "done" || value === "edited" || value === "offline";
+}
+
+export function readyCount(pages) {
+  return (pages || []).filter((page) => isReadyStatus(page.status)).length;
+}
+
+export function statusText(page) {
+  const status = normalizeStatus(page && page.status);
+  if (status === "queued") return "в очереди";
+  if (status === "running") {
+    const progress = Math.max(0, Math.min(100, Math.round(Number(page.progress) || 0)));
+    const stage = stageLabel(page.stage);
+    return stage ? `идёт ${progress} % · ${stage}` : `идёт ${progress} %`;
+  }
+  if (status === "done") return "готово";
+  if (status === "edited") return "есть правки";
+  if (status === "offline") return "без LLM";
+  if (status === "error") return "ошибка";
+  return "не начата";
+}
+
+export function plural(count, one, few, many) {
+  const abs = Math.abs(Number(count)) % 100;
+  const last = abs % 10;
+  if (abs > 10 && abs < 20) return many;
+  if (last === 1) return one;
+  if (last >= 2 && last <= 4) return few;
+  return many;
+}
+
+function normalizeRegion(raw) {
+  const style = raw && raw.style && typeof raw.style === "object" ? { ...raw.style } : {};
+  if (style.font_size_override == null) style.font_size_override = 0;
+  if (style.uppercase == null) style.uppercase = false;
+  const bbox = Array.isArray(raw.bbox) ? raw.bbox.map((item) => Number(item) || 0) : [0, 0, 0, 0];
+  const type = raw.type || raw.block_type || "dialogue";
+  return {
+    ...raw,
+    id: raw.id,
+    bbox,
+    text: raw.text == null ? "" : String(raw.text),
+    translation: raw.translation == null ? "" : String(raw.translation),
+    type,
+    block_type: type,
+    speaker: raw.speaker == null ? "" : String(raw.speaker),
+    skip: Boolean(raw.skip),
+    manual: Boolean(raw.manual),
+    edited: Boolean(raw.edited),
+    overflow: Boolean(raw.overflow),
+    translation_locked: Boolean(raw.translation_locked),
+    style,
+  };
+}
+
+export function normalizeDocument(raw) {
+  const data = raw && typeof raw === "object" ? raw : {};
+  return {
+    version: Number(data.version) || 0,
+    regions: Array.isArray(data.regions) ? data.regions.map(normalizeRegion) : [],
+    strokes: Array.isArray(data.strokes)
+      ? data.strokes.map((stroke) => {
+        const mode = ["erase", "fill", "erase_fill", "flood", "erase_flood"].includes(stroke.mode)
+          ? stroke.mode
+          : "paint";
+        return {
+          mode,
+          radius: Math.max(1, Number(stroke.radius) || 1),
+          points: Array.isArray(stroke.points)
+            ? stroke.points.map((point) => [Number(point[0]) || 0, Number(point[1]) || 0])
+            : [],
+          tolerance: Math.max(0, Math.min(100, Number(stroke.tolerance) || 0)),
+        };
+      })
+      : [],
+    reading_direction: data.reading_direction || "ltr",
+    warnings: Array.isArray(data.warnings) ? data.warnings.map(String) : [],
+    timings: data.timings && typeof data.timings === "object" ? { ...data.timings } : {},
+    ocr_engine: data.ocr_engine || "",
+    translator_engine: data.translator_engine || "",
+  };
+}
+
+export function normalizePage(raw, index) {
+  const source = raw || {};
+  return {
+    id: String(source.id ?? ""),
+    name: source.name || source.filename || source.file || "page",
+    status: normalizeStatus(source.status),
+    progress: Number(source.progress) || 0,
+    stage: source.stage || source.step || "",
+    error: source.error || "",
+    chapter: source.chapter == null ? "" : String(source.chapter),
+    overflow: Boolean(source.overflow),
+    version: Number(source.version ?? source.document_version ?? source.document?.version ?? 0) || 0,
+    index,
+  };
+}
+
+function normalizePackage(info) {
+  const raw = info && typeof info === "object" ? info : {};
+  return {
+    path: raw.path ? String(raw.path) : null,
+    dirty: Boolean(raw.dirty),
+  };
+}
+
+function normalizePages(list) {
+  return (Array.isArray(list) ? list : []).map((item, index) => normalizePage(item, index)).filter((item) => item.id);
+}
+
+function normalizeLlm(raw) {
+  if (!raw || typeof raw !== "object") return { ok: null, models: [], vision: false, reason: "" };
+  let ok = null;
+  if (raw.ok === true || raw.ok === false) ok = raw.ok;
+  else if (typeof raw.available === "boolean") ok = raw.available;
+  return {
+    ok,
+    models: Array.isArray(raw.models) ? raw.models : [],
+    vision: Boolean(raw.vision),
+    reason: raw.reason || "",
+  };
+}
+
+function readWarning(data) {
+  const raw = data.settings_warning ?? data.settingsWarning ?? "";
+  if (Array.isArray(raw)) return raw.filter(Boolean).join(" ");
+  if (typeof raw === "string") return raw;
+  if (raw && typeof raw === "object") return raw.message || "";
+  return "";
+}
+
+function readDevice(value) {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "object") return value.name || value.kind || value.device || "";
+  return String(value);
+}
+
+function normalizeRecent(data, settings) {
+  const raw = data.recent || data.recent_projects || settings.recent_projects || [];
+  if (!Array.isArray(raw)) return [];
+  return raw.map((item) => {
+    if (typeof item === "string") return { id: item, name: item, path: "" };
+    return {
+      id: String(item.id || ""),
+      name: item.name || item.title || item.id || "",
+      path: item.path || item.folder || "",
+      when: item.when || item.opened || item.opened_at || "",
+    };
+  }).filter((item) => item.id);
+}
+
+function historyOf(pageId) {
+  if (!histories.has(pageId)) {
+    histories.set(pageId, { past: [], future: [], pastBytes: 0, futureBytes: 0 });
+  }
+  return histories.get(pageId);
+}
+
+function strokeKey(pageId, version) {
+  return `${pageId}|${version}`;
+}
+
+/** Число штрихов, уже входящих в маску версии (null — неизвестно). */
+export function strokeCountForVersion(pageId, version) {
+  const count = strokeCounts.get(strokeKey(String(pageId), Number(version)));
+  return count == null ? null : count;
+}
+
+function pushHistory(history, side, document, bytes) {
+  const list = side === "past" ? history.past : history.future;
+  const bytesKey = side === "past" ? "pastBytes" : "futureBytes";
+  list.push({ document, bytes });
+  history[bytesKey] += bytes;
+  while (list.length > HISTORY_LIMIT) {
+    history[bytesKey] -= list.shift().bytes;
+  }
+  trimHistoryBudget();
+}
+
+function popHistory(history, side) {
+  const list = side === "past" ? history.past : history.future;
+  const bytesKey = side === "past" ? "pastBytes" : "futureBytes";
+  const entry = list.pop();
+  history[bytesKey] -= entry.bytes;
+  return entry.document;
+}
+
+function totalHistoryBytes() {
+  let total = 0;
+  for (const history of histories.values()) {
+    total += history.pastBytes + history.futureBytes;
+  }
+  return total;
+}
+
+/** Бюджет общий: сначала режем активную страницу, затем старые истории. */
+function trimHistoryBudget() {
+  while (totalHistoryBytes() > HISTORY_MAX_BYTES) {
+    const active = histories.get(state.activePageId);
+    if (active && (active.past.length || active.future.length)) {
+      if (active.past.length) {
+        active.pastBytes -= active.past.shift().bytes;
+      } else {
+        active.futureBytes -= active.future.shift().bytes;
+      }
+      continue;
+    }
+    let oldestId = null;
+    for (const [pageId, history] of histories) {
+      if (history.past.length || history.future.length) {
+        oldestId = pageId;
+        break;
+      }
+    }
+    if (oldestId == null) break;
+    histories.delete(oldestId);
+  }
+}
+
+function syncHistoryFlags() {
+  const history = state.activePageId ? historyOf(state.activePageId) : { past: [], future: [] };
+  state = { ...state, undoCount: history.past.length, redoCount: history.future.length };
+}
+
+export function settingsForSave(settings) {
+  const copy = { ...settings };
+  delete copy.api_key;
+  delete copy.has_api_key;
+  return copy;
+}
+
+export function applyBootstrap(data) {
+  const incoming = data && typeof data === "object" ? data : {};
+  const settings = { ...DEFAULT_SETTINGS, ...(incoming.settings || {}) };
+  const pages = normalizePages(incoming.pages || incoming.project?.pages || []);
+  const project = incoming.project || null;
+  let active = state.activePageId;
+  if (!active || !pages.some((page) => page.id === active)) active = pages[0] ? pages[0].id : "";
+  state = {
+    ...state,
+    booted: true,
+    offline: false,
+    offlineMessage: "",
+    version: incoming.version || state.version || "",
+    capabilities: incoming.capabilities || {},
+    settings,
+    settingsWarning: readWarning(incoming),
+    project,
+    pages,
+    recent: normalizeRecent(incoming, settings),
+    llm: normalizeLlm(incoming.llm),
+    device: readDevice(incoming.device),
+    modelsReady: incoming.models_ready !== false,
+    busy: Boolean(incoming.busy),
+    activePageId: project ? active : "",
+    focusPageId: project ? active : "",
+    selectedPageIds: project && active ? [active] : [],
+    anchorPageId: project ? active : "",
+    paths: incoming.paths || null,
+    package: normalizePackage(incoming.package),
+    hasApiKey: Boolean(incoming.has_api_key || incoming.settings?.has_api_key || incoming.llm?.has_api_key),
+  };
+  syncHistoryFlags();
+  strokeCounts.clear();
+  emit();
+  if (state.activePageId) reloadDetail(state.activePageId);
+}
+
+export function setPackage(info) {
+  patch({ package: normalizePackage(info) });
+}
+
+export function setProject(project, pages, packageInfo, options = {}) {
+  const list = normalizePages(pages || project?.pages || []);
+  const prefer = String(options.activePageId || state.activePageId || "");
+  const active = list.some((page) => page.id === prefer) ? prefer : (list[0] ? list[0].id : "");
+  const selected = (state.selectedPageIds || [])
+    .map(String)
+    .filter((id) => list.some((page) => page.id === id));
+  const focusPrefer = String(options.focusPageId || state.focusPageId || active);
+  const focus = list.some((page) => page.id === focusPrefer) ? focusPrefer : active;
+  const next = {
+    ...state,
+    project: project || null,
+    pages: list,
+    activePageId: active,
+    focusPageId: focus,
+    selectedPageIds: selected.length ? selected : (active ? [active] : []),
+    anchorPageId: list.some((page) => page.id === state.anchorPageId) ? state.anchorPageId : active,
+    document: null,
+    selectedRegionId: null,
+    imageSize: { w: 0, h: 0 },
+  };
+  if (packageInfo !== undefined) next.package = normalizePackage(packageInfo);
+  state = next;
+  syncHistoryFlags();
+  strokeCounts.clear();
+  emit();
+  if (active) reloadDetail(active);
+}
+
+export function updatePage(pageId, partial) {
+  const pages = state.pages.map((page) => (page.id === String(pageId) ? { ...page, ...partial } : page));
+  patch({ pages });
+}
+
+export function selectPages(ids, activeId, focusId) {
+  const selected = ids.map(String);
+  const active = activeId ? String(activeId) : (selected[0] || "");
+  const focus = focusId ? String(focusId) : active;
+  const changed = active !== state.activePageId;
+  if (changed && state.deferredApply && state.activePageId) {
+    /* Уход без resolveDeferredOrAbort: не flush, черновик отбрасываем. */
+    pendingBody.delete(state.activePageId);
+    deferredBaselineKey = "";
+  }
+  if (changed && timerPage && timerPage !== active) {
+    const leaving = timerPage;
+    window.clearTimeout(saveTimer);
+    timerPage = "";
+    flush(leaving);
+  }
+  state = {
+    ...state,
+    selectedPageIds: selected,
+    activePageId: active,
+    focusPageId: focus,
+    anchorPageId: state.anchorPageId,
+    selectedRegionId: changed ? null : state.selectedRegionId,
+    document: changed ? null : state.document,
+    imageSize: changed ? { w: 0, h: 0 } : state.imageSize,
+    deferredApply: changed ? false : state.deferredApply,
+  };
+  syncHistoryFlags();
+  emit();
+  if (changed && active) reloadDetail(active);
+}
+
+export function setAnchor(pageId) {
+  state = { ...state, anchorPageId: String(pageId || "") };
+}
+
+export function moveFocus(pageId) {
+  patch({ focusPageId: String(pageId || "") });
+}
+
+export function reloadDetail(pageId) {
+  const token = ++loadToken;
+  const id = String(pageId);
+  getPage(id).then((data) => {
+    if (token !== loadToken || state.activePageId !== id) return;
+    applyDetail(id, data, false);
+  }).catch((error) => {
+    if (token !== loadToken) return;
+    setBanner("save", {
+      tone: "warning",
+      text: error.message || "Не удалось открыть страницу",
+    });
+  });
+}
+
+function unwrapDetail(data) {
+  const root = data || {};
+  const page = root.page || root;
+  const document = root.document || page.document || null;
+  return { page, document };
+}
+
+export function applyDetail(pageId, data, keepLocal, force = false) {
+  const id = String(pageId);
+  const unwrapped = unwrapDetail(data);
+  if (unwrapped.page && unwrapped.page.id) {
+    const normalized = normalizePage(unwrapped.page, state.pages.findIndex((item) => item.id === id));
+    state = {
+      ...state,
+      pages: state.pages.map((item) => (item.id === id ? { ...item, ...normalized, id } : item)),
+    };
+  }
+  if (!unwrapped.document) {
+    emit();
+    return;
+  }
+  const document = normalizeDocument(unwrapped.document);
+  acked.set(id, document.version);
+  strokeCounts.set(strokeKey(id, document.version), (document.strokes || []).length);
+  const overflow = document.regions.some((region) => region.overflow);
+  state = {
+    ...state,
+    pages: state.pages.map((item) => (item.id === id ? { ...item, overflow } : item)),
+  };
+    const dirty = isDirty(id) && state.activePageId === id && state.document;
+    if ((keepLocal || dirty) && !force) {
+      if (state.document) state = { ...state, document: { ...state.document, version: document.version } };
+      emit();
+      return;
+    }
+  if (state.activePageId === id) {
+    state = { ...state, document };
+    syncHistoryFlags();
+    showPipelineWarnings(document);
+  }
+  emit();
+}
+
+/** Баннер по предупреждениям пайплайна (фолбэки OCR/перевод/очистка). */
+function showPipelineWarnings(document) {
+  const warnings = Array.isArray(document?.warnings)
+    ? [...new Set(document.warnings.map(String).filter(Boolean))]
+    : [];
+  if (!warnings.length) {
+    setBanner("pipeline", null);
+    return;
+  }
+  setBanner("pipeline", {
+    tone: "warning",
+    text: warnings.join(" · "),
+  });
+}
+
+export function isDirty(pageId) {
+  const id = String(pageId || "");
+  return inflight === id || timerPage === id || queuedPage === id || pendingBody.has(id);
+}
+
+function contentKey(document) {
+  if (!document) return "";
+  const copy = clone(document);
+  delete copy.version;
+  return JSON.stringify(copy);
+}
+
+export function editDocument(mutator, options = {}) {
+  if (state.applying) return;
+  if (!state.activePageId || !state.document) return;
+  const pageId = state.activePageId;
+  const before = contentKey(state.document);
+  const next = clone(state.document);
+  mutator(next);
+  if (contentKey(next) === before) return;
+  const key = options.coalesce || "";
+  const history = historyOf(pageId);
+  if (shouldPushHistory(key, coalesceKey)) {
+    pushHistory(history, "past", clone(state.document), before.length);
+    history.future = [];
+    history.futureBytes = 0;
+    coalesceKey = key;
+  }
+  if (!key) coalesceKey = "";
+  bakeFailedPage = "";
+  const defer = shouldDeferEdit(options.deferApply, state.deferredApply);
+  if (defer) {
+    deferredBaselineKey = nextDeferredBaseline(deferredBaselineKey, before);
+    state = { ...state, document: next, deferredApply: true };
+    pendingBody.set(pageId, clone(next));
+    syncHistoryFlags();
+    emit();
+    return;
+  }
+  state = { ...state, document: next, deferredApply: false };
+  deferredBaselineKey = "";
+  pendingBody.set(pageId, clone(next));
+  syncHistoryFlags();
+  emit();
+  scheduleSave(pageId, options.debounce || 0);
+}
+
+/** Сохранить накопленные правки (кисть/ластик/стили) и запустить пересчёт. */
+export function commitDeferredEdits() {
+  if (!state.activePageId || !state.document) return;
+  if (!state.deferredApply && !pendingBody.has(state.activePageId)) return;
+  deferredBaselineKey = "";
+  state = { ...state, deferredApply: false };
+  emit();
+  scheduleSave(state.activePageId, 0);
+}
+
+/** Свежий snapshot выбранного региона перед Done: закрывает гонку с preview. */
+async function refreshDoneSnapshot(pageId) {
+  const regionId = state.selectedRegionId;
+  const region = findRegion(state.document, regionId);
+  if (!region) return true;
+  let data;
+  try {
+    data = await layoutSnapshot(
+      pageId,
+      regionId,
+      region,
+      state.document?.regions || [],
+    );
+  } catch (error) {
+    setBanner("save", {
+      tone: "warning",
+      text: error.message || "Не удалось подготовить раскладку",
+    });
+    return false;
+  }
+  if (state.activePageId !== pageId) return false;
+  const snapshot = data && data.layout_snapshot;
+  if (!snapshot) return true;
+  const current = findRegion(state.document, regionId) || region;
+  current.layout_snapshot = snapshot;
+  syncPendingSnapshot(pageId, regionId, snapshot);
+  return true;
+}
+
+/** Перенести производные snapshot из текущего документа в ожидающий PUT. */
+function syncSnapshots(body) {
+  if (!body || !Array.isArray(body.regions) || !state.document) return;
+  for (const item of body.regions) {
+    const current = findRegion(state.document, item && item.id);
+    if (!current) continue;
+    if (current.layout_snapshot) item.layout_snapshot = clone(current.layout_snapshot);
+    else delete item.layout_snapshot;
+  }
+}
+
+function syncPendingSnapshots(pageId) {
+  syncSnapshots(pendingBody.get(pageId));
+}
+
+function syncPendingSnapshot(pageId, regionId, snapshot) {
+  const body = pendingBody.get(pageId);
+  if (!body || !Array.isArray(body.regions)) return;
+  const item = body.regions.find((entry) => entry && sameId(entry.id, regionId));
+  if (item) item.layout_snapshot = clone(snapshot);
+}
+
+/**
+ * Применить черновик: сохранить, дождаться результата ревизии и загрузить PNG.
+ * Ошибка оставляет черновик и возможность повторить.
+ */
+export async function applyDeferredEdits() {
+  const pageId = state.activePageId;
+  if (!pageId || !state.document || applying) return false;
+  const hasDraft = state.deferredApply
+    || pendingBody.has(pageId)
+    || failedBodies.has(pageId)
+    || awaitingBakePage === pageId;
+  if (!hasDraft) return true;
+  applying = true;
+  saveFailedPage = "";
+  lastSavePlan = "";
+  state = { ...state, applying: true };
+  emit();
+  try {
+    if (!(await refreshDoneSnapshot(pageId))) return false;
+    if (state.activePageId !== pageId) return false;
+    syncPendingSnapshots(pageId);
+    const retryBody = pendingBody.get(pageId) || failedBodies.get(pageId) || null;
+    syncSnapshots(retryBody);
+    if (bakeFailedPage === pageId && !retryBody) {
+      bakeFailedPage = "";
+      try {
+        await rebakePage(pageId);
+      } catch (error) {
+        bakeFailedPage = pageId;
+        setBanner("save", {
+          tone: "warning",
+          text: error.message || "Не удалось повторить сборку результата",
+        });
+        return false;
+      }
+    }
+    if (retryBody) {
+      failedBodies.delete(pageId);
+      pendingBody.set(pageId, retryBody);
+      state = { ...state, deferredApply: true };
+      commitDeferredEdits();
+      await whenSaved(pageId);
+      if (saveFailedPage === pageId) {
+        pendingBody.set(pageId, retryBody);
+        state = { ...state, deferredApply: true };
+        setBanner("save", {
+          tone: "warning",
+          text: "Не удалось сохранить правки; черновик сохранён для повтора",
+        });
+        return false;
+      }
+    }
+    if (isDirty(pageId)) await whenSaved(pageId);
+    if (retryBody && lastSavePlan !== "typeset" && lastSavePlan !== "clean") {
+      let detail;
+      try {
+        detail = await getPage(pageId);
+      } catch (error) {
+        pendingBody.set(pageId, retryBody);
+        state = { ...state, deferredApply: true };
+        setBanner("save", {
+          tone: "warning",
+          text: error.message || "Не удалось перечитать страницу",
+        });
+        return false;
+      }
+      if (state.activePageId !== pageId) return false;
+      applyDetail(pageId, detail, false, true);
+      deferredBaselineKey = "";
+      awaitingBakePage = "";
+      bakeFailedPage = "";
+      state = { ...state, deferredApply: false };
+      emit();
+      return true;
+    }
+    const savedVersion = acked.get(pageId) || 0;
+    const deadline = Date.now() + 30000;
+    while (Date.now() < deadline) {
+      if (state.activePageId !== pageId) return false;
+      let detail;
+      try {
+        detail = await getPage(pageId);
+      } catch (error) {
+        awaitingBakePage = pageId;
+        state = { ...state, deferredApply: true };
+        setBanner("save", {
+          tone: "warning",
+          text: error.message || "Результат не успел собраться",
+        });
+        return false;
+      }
+      if (state.activePageId !== pageId) return false;
+      if (String(detail.status || "") === "error") {
+        awaitingBakePage = pageId;
+        bakeFailedPage = pageId;
+        state = { ...state, deferredApply: true };
+        setBanner("save", {
+          tone: "warning",
+          text: String(detail.error || "Не удалось собрать результат"),
+        });
+        return false;
+      }
+      const renderVersion = Number(detail.render_version) || 0;
+      if (renderVersion >= savedVersion) {
+        const document = detail.document || null;
+        const version = document && document.version != null
+          ? Number(document.version)
+          : savedVersion;
+        const decoded = await preloadImage(imageUrl(pageId, "result", version));
+        if (!decoded) {
+          awaitingBakePage = pageId;
+          state = { ...state, deferredApply: true };
+          setBanner("save", {
+            tone: "warning",
+            text: "Результат собран, но картинка не загрузилась",
+          });
+          return false;
+        }
+        if (state.activePageId !== pageId) return false;
+        applyDetail(pageId, detail, false, true);
+        deferredBaselineKey = "";
+        awaitingBakePage = "";
+        bakeFailedPage = "";
+        saveFailedPage = "";
+        state = { ...state, deferredApply: false };
+        emit();
+        return true;
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 150));
+    }
+    awaitingBakePage = pageId;
+    state = { ...state, deferredApply: true };
+    setBanner("save", { tone: "warning", text: "Результат не успел собраться" });
+    return false;
+  } finally {
+    applying = false;
+    state = { ...state, applying: false };
+    emit();
+  }
+}
+
+function preloadImage(url) {
+  return new Promise((resolve) => {
+    const image = new Image();
+    image.onload = () => resolve(true);
+    image.onerror = () => resolve(false);
+    image.src = url;
+  });
+}
+
+/** Сбросить неподтверждённые правки и перезагрузить документ с сервера. */
+export function discardDeferredEdits() {  const pageId = state.activePageId;
+  if (!pageId) return Promise.resolve();
+  pendingBody.delete(pageId);
+  if (timerPage === pageId) {
+    window.clearTimeout(saveTimer);
+    saveTimer = 0;
+    timerPage = "";
+  }
+  coalesceKey = "";
+  deferredBaselineKey = "";
+  bakeFailedPage = "";
+  state = { ...state, deferredApply: false };
+  clearHistory(pageId);
+  emit();
+  const token = ++loadToken;
+  return getPage(pageId).then((data) => {
+    if (token !== loadToken || state.activePageId !== pageId) return;
+    applyDetail(pageId, data, false, true);
+  }).catch((error) => {
+    if (token !== loadToken) return;
+    setBanner("save", {
+      tone: "warning",
+      text: error.message || "Не удалось открыть страницу",
+    });
+  });
+}
+
+function restoreHistoryDocument(document) {
+  const pageId = state.activePageId;
+  coalesceKey = "";
+  const key = contentKey(document);
+  const hadBaseline = Boolean(deferredBaselineKey);
+  const pending = isDeferredPending(key, deferredBaselineKey);
+  state = { ...state, document, deferredApply: pending };
+  if (pending) {
+    pendingBody.set(pageId, clone(document));
+    syncHistoryFlags();
+    emit();
+    return;
+  }
+  deferredBaselineKey = "";
+  if (hadBaseline) {
+    /* Откат к applied baseline — черновик сброшен, save не нужен. */
+    pendingBody.delete(pageId);
+    syncHistoryFlags();
+    emit();
+    return;
+  }
+  pendingBody.set(pageId, clone(document));
+  syncHistoryFlags();
+  emit();
+  scheduleSave(pageId, 0);
+}
+
+export function undo() {
+  if (state.applying) return;
+  if (!state.activePageId || !state.document) return;
+  const history = historyOf(state.activePageId);
+  if (!history.past.length) return;
+  pushHistory(history, "future", clone(state.document), contentKey(state.document).length);
+  restoreHistoryDocument(popHistory(history, "past"));
+}
+
+export function redo() {
+  if (state.applying) return;
+  if (!state.activePageId || !state.document) return;
+  const history = historyOf(state.activePageId);
+  if (!history.future.length) return;
+  pushHistory(history, "past", clone(state.document), contentKey(state.document).length);
+  restoreHistoryDocument(popHistory(history, "future"));
+}
+
+export function clearHistory(pageId) {
+  histories.set(String(pageId), { past: [], future: [], pastBytes: 0, futureBytes: 0 });
+  coalesceKey = "";
+  if (state.activePageId === String(pageId)) syncHistoryFlags();
+  emit();
+}
+
+export function whenSaved(pageId) {
+  const id = String(pageId || state.activePageId || "");
+  if (timerPage === id) {
+    window.clearTimeout(saveTimer);
+    saveTimer = 0;
+    timerPage = "";
+    flush(id);
+  }
+  if (!id || !isDirty(id) || saveFailedPage === id) return Promise.resolve();
+  return new Promise((resolve) => {
+    const check = () => {
+      if (!isDirty(id) || saveFailedPage === id) resolve();
+      else window.setTimeout(check, 20);
+    };
+    check();
+  });
+}
+
+function scheduleSave(pageId, delay) {
+  if (state.activePageId === pageId && state.document) pendingBody.set(pageId, clone(state.document));
+  timerPage = pageId;
+  window.clearTimeout(saveTimer);
+  saveTimer = window.setTimeout(() => {
+    if (timerPage === pageId) timerPage = "";
+    flush(pageId);
+  }, delay);
+}
+
+async function flush(pageId) {
+  if (!pendingBody.has(pageId)) return;
+  if (inflight) {
+    queuedPage = pageId;
+    return;
+  }
+  const body = pendingBody.get(pageId);
+  pendingBody.delete(pageId);
+  inflight = pageId;
+  if (queuedPage === pageId) queuedPage = "";
+  const base = acked.has(pageId) ? acked.get(pageId) : Number(body.version) || 0;
+  body.version = base;
+  let sent = body;
+  try {
+    let response;
+    try {
+      response = await putDocument(pageId, base, body);
+    } catch (error) {
+      if (error.status !== 409) throw error;
+      const serverVersion = await conflictVersion(pageId, error);
+      if (serverVersion == null) throw error;
+      acked.set(pageId, serverVersion);
+      const latest = pendingBody.get(pageId) || body;
+      pendingBody.delete(pageId);
+      latest.version = serverVersion;
+      sent = latest;
+      response = await putDocument(pageId, serverVersion, latest);
+    }
+    acceptSave(pageId, response, base, (sent.strokes || []).length);
+  } catch (error) {
+    coalesceKey = "";
+    pendingBody.delete(pageId);
+    queuedPage = "";
+    failedBodies.set(pageId, clone(sent));
+    saveFailedPage = pageId;
+    if (error.status === 409) {
+      setBanner("conflict", {
+        tone: "warning",
+        text: "Страница изменилась, правка не сохранена",
+      });
+      if (state.activePageId === pageId) {
+        const token = ++loadToken;
+        try {
+          const fresh = await getPage(pageId);
+          if (token === loadToken && state.activePageId === pageId) {
+            clearHistory(pageId);
+            applyDetail(pageId, fresh, false, true);
+          }
+        } catch (loadError) {
+          setBanner("save", { tone: "warning", text: loadError.message || "Не удалось перечитать страницу" });
+        }
+      }
+    } else {
+      setBanner("save", { tone: "warning", text: error.message || "Не удалось сохранить правку" });
+    }
+  } finally {
+    const next = queuedPage;
+    inflight = "";
+    queuedPage = "";
+    if (next) flush(next);
+    else emit();
+  }
+}
+
+function acceptSave(pageId, response, fallback, strokeCount) {
+  const version = readVersion(response, fallback);
+  lastSavePlan = String((response && response.plan) || "");
+  failedBodies.delete(pageId);
+  if (saveFailedPage === pageId) saveFailedPage = "";
+  acked.set(pageId, version);
+  strokeCounts.set(strokeKey(pageId, version), strokeCount);
+  if (state.activePageId === pageId && state.document && !pendingBody.has(pageId)) {
+    if (response && response.document) {
+      const normalized = normalizeDocument(response.document);
+      normalized.version = version;
+      state = { ...state, document: normalized };
+    } else {
+      state = { ...state, document: { ...state.document, version } };
+    }
+  }
+  state = {
+    ...state,
+    pages: state.pages.map((page) => (page.id === pageId ? { ...page, version } : page)),
+  };
+  if (state.activePageId === pageId) coalesceKey = "";
+}
+
+async function conflictVersion(pageId, error) {
+  const fromBody = readVersion(error && error.body, null);
+  if (fromBody != null) return fromBody;
+  try {
+    const fresh = await getPage(pageId);
+    return readVersion(fresh, null);
+  } catch (loadError) {
+    return null;
+  }
+}
+
+function readVersion(response, fallback) {
+  if (!response) return fallback;
+  if (response.document && response.document.version != null) return Number(response.document.version);
+  if (response.version != null && !response.regions) return Number(response.version);
+  if (response.version != null) return Number(response.version);
+  if (response.page && response.page.version != null) return Number(response.page.version);
+  return fallback;
+}
+
+export function setBanner(id, banner) {
+  const banners = state.banners.filter((item) => item.id !== id);
+  if (banner) {
+    banners.push({ id, tone: banner.tone || "warning", text: banner.text, actions: banner.actions || [] });
+    // Новая полоса снова показывается, даже если раньше её закрыли крестиком.
+    const dismissedBanners = (state.dismissedBanners || []).filter((item) => item !== id);
+    patch({ banners, dismissedBanners });
+    return;
+  }
+  patch({ banners });
+}
+
+export function dismissBanner(id) {
+  if (!id) return;
+  const banners = state.banners.filter((item) => item.id !== id);
+  const dismissed = new Set(state.dismissedBanners || []);
+  dismissed.add(id);
+  patch({ banners, dismissedBanners: [...dismissed] });
+}
+
+export function isBannerDismissed(id) {
+  return (state.dismissedBanners || []).includes(id);
+}
+
+/** Снять dismiss у системных полос, когда исходная причина уже неактуальна. */
+export function healDismissedBanners(snapshot = state) {
+  const dismissed = snapshot.dismissedBanners || [];
+  if (!dismissed.length) return;
+  const keep = dismissed.filter((id) => {
+    if (id === "models") return snapshot.modelsReady === false;
+    if (id === "llm") return snapshot.llm?.ok === false;
+    if (id === "settings-warning") return Boolean(snapshot.settingsWarning);
+    return true;
+  });
+  if (keep.length === dismissed.length) return;
+  patch({ dismissedBanners: keep });
+}
+
+export function selectRegion(regionId) {
+  patch({ selectedRegionId: regionId == null ? null : regionId });
+}
+
+export function findRegion(document, regionId) {
+  if (!document) return null;
+  return document.regions.find((region) => sameId(region.id, regionId)) || null;
+}
+
+export function nextRegionId(document) {
+  const ids = (document?.regions || []).map((region) => Number(region.id)).filter((id) => Number.isFinite(id));
+  return (ids.length ? Math.max(...ids) : 0) + 1;
+}
+
+export function clampBox(box, width, height) {
+  let [x, y, boxW, boxH] = box.map((value) => Math.round(Number(value) || 0));
+  boxW = Math.max(4, boxW);
+  boxH = Math.max(4, boxH);
+  if (width > 0) {
+    boxW = Math.min(boxW, width);
+    x = Math.min(Math.max(0, x), Math.max(0, width - boxW));
+  } else {
+    x = Math.max(0, x);
+  }
+  if (height > 0) {
+    boxH = Math.min(boxH, height);
+    y = Math.min(Math.max(0, y), Math.max(0, height - boxH));
+  } else {
+    y = Math.max(0, y);
+  }
+  return [x, y, boxW, boxH];
+}
+
+/** Сдвиг или (с Alt) изменение размера bbox выбранного региона. */
+export function nudgeSelectedRegion(key, mods = {}) {
+  const id = state.selectedRegionId;
+  if (id == null) return;
+  const step = mods.shift ? 10 : 1;
+  editDocument((document) => {
+    const region = findRegion(document, id);
+    if (!region) return;
+    let [x, y, width, height] = region.bbox;
+    if (mods.alt) {
+      if (key === "ArrowRight") width += step;
+      if (key === "ArrowLeft") width -= step;
+      if (key === "ArrowDown") height += step;
+      if (key === "ArrowUp") height -= step;
+    } else {
+      if (key === "ArrowRight") x += step;
+      if (key === "ArrowLeft") x -= step;
+      if (key === "ArrowDown") y += step;
+      if (key === "ArrowUp") y -= step;
+    }
+    const size = state.imageSize || { w: 0, h: 0 };
+    region.bbox = clampBox([x, y, width, height], size.w, size.h);
+    region.edited = true;
+  });
+}
+
+export function blankRegion(id, bbox) {
+  return {
+    id,
+    bbox,
+    class_name: "text_free",
+    confidence: 1,
+    text: "",
+    translation: "",
+    type: "dialogue",
+    block_type: "dialogue",
+    speaker: "",
+    speaker_gender: "",
+    bubble_bbox: null,
+    order: 0,
+    skip: false,
+    manual: true,
+    edited: true,
+    overflow: false,
+    translation_locked: false,
+    style: {
+      fill_rgb: [0, 0, 0],
+      stroke_rgb: null,
+      font_size: 16,
+      alignment: "center",
+      uppercase: false,
+      line_height: 18,
+      font_size_override: 0,
+    },
+  };
+}
+
+export function liveText(current) {
+  if (current.offline) return "Нет связи с программой";
+  if (current.busy) {
+    const stage = stageLabel(current.job.stage) || "Обработка";
+    const total = current.job.total || current.pages.length;
+    const index = current.job.index || pageNumber(current, current.job.pageId || current.activePageId);
+    if (total) return `${stage} · страница ${index} из ${total}`;
+    return stage;
+  }
+  if (!current.project) return "Нет открытого проекта";
+  return `${readyCount(current.pages)} из ${current.pages.length} готово`;
+}
+
+export function visualStatus(current) {
+  if (current.offline) return "Нет связи с программой";
+  if (current.busy) return liveText(current);
+  if (!current.project) return "Нет открытого проекта";
+  const page = current.pages.find((item) => item.id === current.activePageId);
+  if (!page) return `${readyCount(current.pages)} из ${current.pages.length} готово`;
+  const status = normalizeStatus(page.status);
+  if (status === "running") return liveText({ ...current, busy: true });
+  return `${statusText(page)} · страница ${pageNumber(current, page.id)}`;
+}
+
+export function pageNumber(current, pageId) {
+  const index = current.pages.findIndex((page) => page.id === String(pageId));
+  return index >= 0 ? index + 1 : 1;
+}
+
+export function deviceLabel(value) {
+  const text = String(value || "").trim();
+  const low = text.toLowerCase();
+  if (!low) return "—";
+  if (low.includes("cpu")) return "CPU";
+  if (low.includes("gpu") || low.includes("cuda") || low.includes("directml")) return "GPU";
+  return text;
+}

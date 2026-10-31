@@ -1,0 +1,25 @@
+[Unit]
+Description=Image Localization Tool LAN service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=ilt
+Group=ilt
+WorkingDirectory=@ILT_ROOT@/current
+Environment=ILT_INSTALL_ROOT=@ILT_ROOT@/current
+Environment=ILT_DATA_DIR=@ILT_ROOT@/shared/data
+Environment=ILT_COMPONENT_ROOT=@ILT_ROOT@/shared
+ExecStart=@ILT_ROOT@/current/ImageLocalizationTool --headless --remote
+Restart=on-failure
+RestartSec=3
+TimeoutStartSec=75
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=@ILT_ROOT@/shared
+
+[Install]
+WantedBy=multi-user.target

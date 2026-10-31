@@ -1,0 +1,452 @@
+/* Запросы к локальному API. Токен в хранилище страницы не пишется. */
+
+export class ApiError extends Error {
+  constructor(message, status, body) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.body = body;
+  }
+}
+
+async function request(method, url, body) {
+  const options = {
+    method,
+    credentials: "same-origin",
+    headers: { Accept: "application/json" },
+  };
+  if (body !== undefined) {
+    options.headers["Content-Type"] = "application/json";
+    options.body = JSON.stringify(body);
+  }
+  let response;
+  try {
+    response = await fetch(url, options);
+  } catch (error) {
+    throw new ApiError("Нет связи с программой", 0, null);
+  }
+  const text = await response.text();
+  let data = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch (error) {
+      data = { raw: text };
+    }
+  }
+  if (!response.ok) {
+    const message = (data && (data.error || data.message)) || response.statusText || "Ошибка запроса";
+    throw new ApiError(String(message), response.status, data);
+  }
+  return data;
+}
+
+export function session(token) {
+  return request("POST", "/api/session", { token });
+}
+
+export function accountSession(username, password) {
+  return request("POST", "/api/session", { username, password });
+}
+
+export function browserAccess() {
+  return request("GET", "/api/browser/access");
+}
+
+export function saveBrowserAccess(body) {
+  return request("PUT", "/api/browser/access", body);
+}
+
+export function logoutBrowser() {
+  return request("POST", "/api/browser/logout", {});
+}
+
+export function bootstrap() {
+  return request("GET", "/api/bootstrap");
+}
+
+export function putSettings(settings) {
+  return request("PUT", "/api/settings", settings);
+}
+
+export function putSecret(apiKey) {
+  return request("POST", "/api/settings/secret", { api_key: apiKey });
+}
+
+export function llmCheck() {
+  return request("POST", "/api/llm/check", {});
+}
+
+export function models() {
+  return request("GET", "/api/models");
+}
+
+export function preparationPlan(selection) {
+  return request("POST", "/api/preparation/plan", selection || {});
+}
+
+export function preparationCurrent() {
+  return request("GET", "/api/preparation");
+}
+
+export function startPreparation(selection) {
+  return request("POST", "/api/preparation/start", selection || {});
+}
+
+export function verifyPreparation(selection) {
+  return request("POST", "/api/preparation/verify", selection || {});
+}
+
+export function pausePreparation() {
+  return request("POST", "/api/preparation/pause", {});
+}
+
+export function resumePreparation() {
+  return request("POST", "/api/preparation/resume", {});
+}
+
+export function downloadModel(kind) {
+  return request("POST", "/api/models/download", { kind });
+}
+
+export function dialogFiles() {
+  return request("POST", "/api/dialog/files", {});
+}
+
+export function dialogFolder() {
+  return request("POST", "/api/dialog/folder", {});
+}
+
+export function dialogDirectory() {
+  return request("POST", "/api/dialog/directory", {});
+}
+
+export function dialogLog() {
+  return request("POST", "/api/dialog/log", {});
+}
+
+export function dialogReveal(body) {
+  return request("POST", "/api/dialog/reveal", body || {});
+}
+
+export function dropPaths(paths) {
+  return request("POST", "/api/drop", { paths });
+}
+
+export function getPage(id) {
+  return request("GET", `/api/pages/${encodeURIComponent(id)}`);
+}
+
+export function putDocument(id, baseVersion, document) {
+  return request("PUT", `/api/pages/${encodeURIComponent(id)}/document`, {
+    base_version: baseVersion,
+    document,
+  });
+}
+
+export function layoutSnapshot(id, regionId, draft, drafts = null) {
+  const body = { region_id: regionId, draft };
+  if (Array.isArray(drafts)) body.drafts = drafts;
+  return request("POST", `/api/pages/${encodeURIComponent(id)}/layout-snapshot`, body);
+}
+
+export function rebakePage(id) {
+  return request("POST", `/api/pages/${encodeURIComponent(id)}/rebake`, {});
+}
+
+export function resetPage(id) {
+  return request("POST", `/api/pages/${encodeURIComponent(id)}/reset`, {});
+}
+
+export function pageAction(id, action, regionId, baseVersion = null) {
+  return request("POST", `/api/pages/${encodeURIComponent(id)}/action`, {
+    action,
+    region_id: regionId,
+    ...(Number.isInteger(baseVersion) ? { base_version: baseVersion } : {}),
+  });
+}
+
+export function translate(scope, pageId, extra) {
+  const body = { scope };
+  if (scope === "page") body.page_id = pageId;
+  if (extra && extra.skip_ready) body.skip_ready = true;
+  return request("POST", "/api/jobs/translate", body);
+}
+
+export function cancelJobs() {
+  return request("POST", "/api/jobs/cancel", {});
+}
+
+export function exportPages(body) {
+  return request("POST", "/api/jobs/export", body);
+}
+
+export function removePages(pageIds) {
+  return request("POST", "/api/project/remove-pages", { page_ids: pageIds });
+}
+
+export function openRecent(id) {
+  return request("POST", "/api/project/open-recent", { id });
+}
+
+export function reorderPages(pageIds) {
+  return request("POST", "/api/project/reorder", { page_ids: pageIds });
+}
+
+export function packageStatus() {
+  return request("GET", "/api/project/package/status");
+}
+
+export function packageSave(path, editor) {
+  const body = {};
+  if (path) body.path = path;
+  if (editor && typeof editor === "object") body.editor = editor;
+  return request("POST", "/api/project/package/save", body);
+}
+
+export function packageLoad(path) {
+  return request("POST", "/api/project/package/load", { path });
+}
+
+export function closeProject(force) {
+  return request("POST", "/api/project/close", { force: Boolean(force) });
+}
+
+export function dialogOpenPackage() {
+  return request("POST", "/api/dialog/project-package/open", {});
+}
+
+export function dialogSavePackage(defaultName, editor) {
+  const body = {};
+  if (defaultName) body.default_name = defaultName;
+  if (editor && typeof editor === "object") body.editor = editor;
+  return request("POST", "/api/dialog/project-package/save", body);
+}
+
+export function jobs() {
+  return request("GET", "/api/jobs");
+}
+
+export function pauseJobs() {
+  return request("POST", "/api/jobs/pause", {});
+}
+
+export function resumeJobs() {
+  return request("POST", "/api/jobs/resume", {});
+}
+
+export function retryErrors() {
+  return request("POST", "/api/jobs/retry-errors", {});
+}
+
+export function importSources(body) {
+  return request("POST", "/api/import", body || {});
+}
+
+export function pickFolder() {
+  return request("POST", "/api/dialog/folder", { pick: true });
+}
+
+export function fontList() {
+  return request("GET", "/api/fonts");
+}
+
+/** URL файла шрифта для ``@font-face``. */
+export function fontFileUrl(fontId) {
+  return `/api/fonts/${encodeURIComponent(String(fontId || ""))}/file`;
+}
+
+export function projectStyles() {
+  return request("GET", "/api/project/styles");
+}
+
+export function putProjectStyles(styles) {
+  return request("PUT", "/api/project/styles", { styles });
+}
+
+export function glossary() {
+  return request("GET", "/api/project/glossary");
+}
+
+export function putGlossary(rows) {
+  return request("PUT", "/api/project/glossary", { glossary: rows });
+}
+
+export function remoteStatus() {
+  return request("GET", "/api/remote/status");
+}
+
+export function remotePair() {
+  return request("POST", "/api/remote/pair-code", {});
+}
+
+export function remoteRevoke(id) {
+  return request("POST", "/api/remote/revoke", { id });
+}
+
+export function sfxRestyle(pageId, regionId) {
+  return request(
+    "POST",
+    `/api/pages/${encodeURIComponent(pageId)}/regions/${encodeURIComponent(regionId)}/sfx-style`,
+    {},
+  );
+}
+
+export async function fillPreview(pageId, x, y, tolerance, mode) {
+  let response;
+  try {
+    response = await fetch(`/api/pages/${encodeURIComponent(pageId)}/fill-preview`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", Accept: "image/png" },
+      body: JSON.stringify({ x, y, tolerance, mode }),
+    });
+  } catch (error) {
+    throw new ApiError("Нет связи с программой", 0, null);
+  }
+  if (!response.ok) {
+    let data = null;
+    const text = await response.text();
+    if (text) {
+      try {
+        data = JSON.parse(text);
+      } catch (error) {
+        data = null;
+      }
+    }
+    const message = (data && (data.error || data.message)) || "Не удалось посчитать заливку";
+    throw new ApiError(String(message), response.status, data);
+  }
+  const blob = await response.blob();
+  return {
+    url: URL.createObjectURL(blob),
+    x: Number(response.headers.get("X-Fill-X")) || 0,
+    y: Number(response.headers.get("X-Fill-Y")) || 0,
+  };
+}
+
+export async function previewRegion(pageId, regionId, draft = null, revision = 0, mode = "exact", extra = null) {
+  let response;
+  try {
+    response = await fetch(`/api/pages/${encodeURIComponent(pageId)}/preview-region`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", Accept: "image/png" },
+      body: JSON.stringify({ region_id: regionId, revision, mode, ...(draft ? { draft } : {}), ...(extra || {}) }),
+    });
+  } catch (error) {
+    throw new ApiError("Нет связи с программой", 0, null);
+  }
+  if (!response.ok) {
+    let data = null;
+    const text = await response.text();
+    if (text) {
+      try {
+        data = JSON.parse(text);
+      } catch (error) {
+        data = null;
+      }
+    }
+    const message = (data && (data.error || data.message)) || "Не удалось обновить предпросмотр";
+    throw new ApiError(String(message), response.status, data);
+  }
+  const blob = await response.blob();
+  return {
+    url: URL.createObjectURL(blob),
+    x: Number(response.headers.get("X-Offset-X")) || 0,
+    y: Number(response.headers.get("X-Offset-Y")) || 0,
+    width: 0,
+    height: 0,
+    revision: Number(response.headers.get("X-Preview-Revision")) || 0,
+    mode,
+    layoutSnapshot: response.headers.get("X-Layout-Snapshot") || "",
+    anchorX: Number(response.headers.get("X-Layer-Anchor-X")),
+    anchorY: Number(response.headers.get("X-Layer-Anchor-Y")),
+  };
+}
+
+export function imageUrl(pageId, kind, version) {
+  const value = version == null ? "" : String(version);
+  return `/api/pages/${encodeURIComponent(pageId)}/image/${encodeURIComponent(kind)}?v=${encodeURIComponent(value)}`;
+}
+
+const EVENT_NAMES = [
+  "job.started",
+  "job.progress",
+  "page.updated",
+  "job.finished",
+  "job.failed",
+  "job.cancelled",
+  "llm.status",
+  "worker.failed",
+  "worker.restarting",
+  "model.progress",
+];
+
+export function connectEvents(onEvent) {
+  let source = null;
+  let timer = 0;
+  let delay = 1000;
+  let stopped = false;
+
+  function listen(name) {
+    source.addEventListener(name, (event) => {
+      deliver(name, event.data);
+    });
+  }
+
+  function deliver(fallbackType, raw) {
+    let data = {};
+    if (raw) {
+      try {
+        data = JSON.parse(raw);
+      } catch (error) {
+        data = {};
+      }
+    }
+    let type = fallbackType;
+    let payload = data;
+    if (data && typeof data === "object" && typeof data.type === "string" && data.payload && typeof data.payload === "object") {
+      type = data.type;
+      payload = data.payload;
+    }
+    onEvent(type, payload || {});
+  }
+
+  function open() {
+    if (stopped) return;
+    source = new EventSource("/api/events");
+    source.onopen = () => {
+      delay = 1000;
+    };
+    source.onmessage = (event) => {
+      deliver(event.type || "message", event.data);
+    };
+    EVENT_NAMES.forEach(listen);
+    source.onerror = async () => {
+      if (stopped) return;
+      source.close();
+      window.clearTimeout(timer);
+      try {
+        await request("GET", "/api/browser/access");
+      } catch (error) {
+        if (stopped) return;
+        if (error.status === 401) {
+          stopped = true;
+          onEvent("session.required", {});
+          return;
+        }
+      }
+      if (stopped) return;
+      timer = window.setTimeout(open, delay);
+      delay = Math.min(delay * 2, 8000);
+    };
+  }
+
+  open();
+  return () => {
+    stopped = true;
+    window.clearTimeout(timer);
+    if (source) source.close();
+  };
+}

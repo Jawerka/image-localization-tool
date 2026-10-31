@@ -1,0 +1,193 @@
+"""Статус моделей и докачка через подмену urlopen. Сеть не используется."""
+
+import json
+import hashlib
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+from scripts.setup_models import FONT_URL as SETUP_FONT_URL
+from scripts.setup_models import LAMA_URL as SETUP_LAMA_URL
+
+from src.app.model_manager import (
+    FONT_FILENAME,
+    FONT_URL,
+    LAMA_FILENAME,
+    LAMA_URL,
+    check_llm,
+    dest_dir,
+    download,
+    status,
+    verify_llm,
+)
+
+
+def test_font_goes_beside_program_and_models_follow_override(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.app.model_manager.components_root", lambda: tmp_path)
+    monkeypatch.setattr("src.app.model_manager.models_dir", lambda override=None: Path(override) if override else tmp_path / "models")
+    assert dest_dir("font") == tmp_path / "fonts"
+    custom = tmp_path / "custom"
+    assert dest_dir("lama", str(custom)) == custom
+    assert dest_dir("detector", "  ") == tmp_path / "models"
+
+
+def test_urls_match_setup_script():
+    assert LAMA_URL == SETUP_LAMA_URL
+    assert FONT_URL == SETUP_FONT_URL
+
+
+def test_status_on_temp_dir(tmp_path, monkeypatch):
+    from src.app import component_catalog, downloads
+    payloads = {"ogkalu-detector-v4-s_int8.onnx": b"onnx", LAMA_FILENAME: b"pt", FONT_FILENAME: b"otf"}
+    components = [component_catalog.Component(str(i), str(i), "model", (downloads.Artifact(name,
+        ("https://example.org/" + name,), hashlib.sha256(body).hexdigest(), len(body)),))
+        for i, (name, body) in enumerate(payloads.items())]
+    monkeypatch.setattr(component_catalog, "load", lambda: components)
+    def fake_model(name, override=None):
+        root = Path(override) if override else tmp_path
+        return root / name
+
+    def fake_font(name):
+        return tmp_path / name
+
+    monkeypatch.setattr("src.app.model_manager.resolve_model", fake_model)
+    monkeypatch.setattr("src.app.model_manager.resolve_font", fake_font)
+
+    report = status(str(tmp_path))
+    assert report["detector"]["present"] is False
+    assert report["lama"]["present"] is False
+    assert report["font"]["present"] is False
+
+    (tmp_path / "ogkalu-detector-v4-s_int8.onnx").write_bytes(b"onnx")
+    (tmp_path / LAMA_FILENAME).write_bytes(b"pt")
+    (tmp_path / FONT_FILENAME).write_bytes(b"otf")
+    report = status(str(tmp_path))
+    assert report["detector"]["present"] is True
+    assert report["detector"]["path"].endswith("ogkalu-detector-v4-s_int8.onnx")
+    assert report["lama"]["present"] is True
+    assert Path(report["lama"]["path"]).parent == tmp_path
+    assert report["font"]["present"] is True
+
+    (tmp_path / LAMA_FILENAME).write_bytes(b"")
+    assert status(str(tmp_path))["lama"]["present"] is False
+    (tmp_path / FONT_FILENAME).write_bytes(b"bad")
+    assert status(str(tmp_path))["font"]["present"] is False
+
+
+class _Response:
+    def __init__(self, data: bytes, headers=None):
+        self._data = data
+        self._done = False
+        self.headers = headers or {"Content-Length": str(len(data))}
+
+    def read(self, _size=-1):
+        if self._done:
+            return b""
+        self._done = True
+        return self._data
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+
+def test_download_uses_urlopen_and_skips_existing(tmp_path, monkeypatch):
+    from src.app import component_catalog, downloads
+
+    monkeypatch.setenv("ILT_COMPONENT_ROOT", str(tmp_path / "components"))
+    def fake_component(kind):
+        names = {"lama": LAMA_FILENAME, "font": FONT_FILENAME, "detector": "ogkalu-detector-v4-s_int8.onnx"}
+        urls = {"lama": LAMA_URL, "font": FONT_URL, "detector": "https://example.org/detector"}
+        file = downloads.Artifact(names[kind], (urls[kind],), hashlib.sha256(b"model").hexdigest(), 5)
+        return component_catalog.Component(kind, kind, "model", (file,))
+    monkeypatch.setattr(component_catalog, "by_id", fake_component)
+    seen = {}
+    progress_calls = []
+
+    def fake_urlopen(request, timeout=120):
+        seen["url"] = request.full_url
+        seen["timeout"] = timeout
+        return _Response(b"model")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    path = download("lama", tmp_path, progress=lambda done, total: progress_calls.append((done, total)))
+    assert path.name == LAMA_FILENAME
+    assert path.read_bytes() == b"model"
+    assert seen["url"] == LAMA_URL
+    assert (len(b"model"), len(b"model")) in progress_calls
+
+    def boom(*_args, **_kwargs):
+        raise AssertionError("сеть")
+
+    monkeypatch.setattr(urllib.request, "urlopen", boom)
+    again = download("lama", tmp_path)
+    assert again.read_bytes() == b"model"
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    font = download("font", tmp_path)
+    assert font.name == FONT_FILENAME
+    detector = download("detector", tmp_path / "models")
+    assert detector.name == "ogkalu-detector-v4-s_int8.onnx"
+
+
+def test_check_llm_without_network(monkeypatch):
+    empty = check_llm("  ")
+    assert empty["ok"] is False
+    assert empty["reason"] == "empty"
+    assert empty["models"] == []
+
+    seen = {}
+
+    def fake_urlopen(request, timeout=10):
+        seen["url"] = request.full_url
+        seen["timeout"] = timeout
+        seen["auth"] = request.get_header("Authorization")
+        body = json.dumps({"data": [{"id": "qwen"}]}).encode("utf-8")
+        return _Response(body)
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    result = check_llm("http://example/v1", api_key="secret")
+    assert result == {"ok": True, "models": ["qwen"]}
+    assert seen["url"] == "http://example/v1/models"
+    assert seen["timeout"] == 10
+    assert seen["auth"] == "Bearer secret"
+
+    def fail(*_args, **_kwargs):
+        raise OSError("down")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fail)
+    failed = check_llm("http://example/v1")
+    assert failed["ok"] is False
+    assert failed["models"] == []
+
+
+def test_verify_llm_probes_chat_with_key(monkeypatch):
+    assert verify_llm("http://example/v1", "") == {"ok": True, "reason": ""}
+
+    seen = {}
+
+    def fake_urlopen(request, timeout=0):
+        seen["url"] = request.full_url
+        seen["auth"] = request.get_header("Authorization")
+        seen["body"] = json.loads(request.data.decode("utf-8"))
+        seen["timeout"] = timeout
+        return _Response(b'{"choices": []}')
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    result = verify_llm("http://example/v1", "secret", "demo-model")
+    assert result == {"ok": True, "reason": ""}
+    assert seen["url"] == "http://example/v1/chat/completions"
+    assert seen["auth"] == "Bearer secret"
+    assert seen["timeout"] == 15
+    assert seen["body"]["model"] == "demo-model"
+    assert seen["body"]["max_tokens"] == 1
+
+    def reject(request, timeout=0):
+        raise urllib.error.HTTPError(request.full_url, 401, "Invalid API Key", {}, None)
+
+    monkeypatch.setattr(urllib.request, "urlopen", reject)
+    bad = verify_llm("http://example/v1", "bad-key", "demo-model")
+    assert bad["ok"] is False
+    assert "HTTP 401" in bad["reason"]

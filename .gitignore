@@ -1,0 +1,79 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Flutter host source (apps/desktop/lib) is not a Python lib artifact
+!apps/desktop/lib/
+
+# Virtual environment
+venv/
+venv-release/
+ENV/
+env/
+.venv
+
+# IDE / local agent notes
+.idea/
+.vscode/
+.cursor/*
+!.cursor/skills/
+!.cursor/skills/**
+.ruff_cache/
+AGENTS.md
+.agents/
+tasks/
+docs/PROBLEMS.md
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+# Локальный архив устаревших файлов; в git не входит.
+legacy/
+config.json
+*.log
+output/
+output.jpg
+temp/
+.cache/
+models/
+.vendor/
+benchmark_results/
+.pytest_cache/
+.coverage
+htmlcov/
+*.exe
+test-img/
+docs/examples/sources/
+docs/examples/translated/
+docs/examples/comparisons/*-full.jpg
+data/
+session.token
+.downloads/
+.resources/
+runtime/
+preparation.json
+.installer.lock
+.builtin/

@@ -1,0 +1,69 @@
+{
+  "generated_at": "2026-10-25T08:02:44.367338+00:00",
+  "code": {
+    "commit": "c498ba2271a2e9470bf2db92774ee2b8719bfbf7",
+    "tracked_code_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tracked_code_dirty": false,
+    "generator_sha256": "e0072c584e4dd3b5f63827fc1c22430a10d0c5f54af36db4acb136bb4c2ce310"
+  },
+  "python": "3.10.11",
+  "platform": "Windows",
+  "model": "qwen36-27b-mtp-q6k-2x5060ti",
+  "source_lang": "ko",
+  "target_lang": "ru",
+  "input_sha256": "da765bfdd2c10ebf99dca64bc92bcefd4dbc6921547436f898e589454913e6c1",
+  "crop": [
+    0,
+    0,
+    2000,
+    7400
+  ],
+  "prepared_input_sha256": "3313ec078cab6936d2a2e7c97726f0c957b8a3edb2d951dc4df8a9a78bf7ca0d",
+  "settings": {
+    "ocr_backend": "vlm",
+    "translator_backend": "llm",
+    "inpainter_backend": "lama",
+    "sfx_mode": "replace",
+    "translate_sfx": true,
+    "adaptive_text": true,
+    "discover_missing_text": true,
+    "auto_stylized_fonts": true,
+    "layout_long_side": 2000,
+    "vlm_max_side": 1536,
+    "llm_thinking": false,
+    "ort_intra_op_threads": 4
+  },
+  "seconds": 49.89,
+  "ocr_engine": "vlm",
+  "translator_engine": "llm",
+  "regions": 3,
+  "warnings": [],
+  "stages_completed": [
+    "load",
+    "detect",
+    "ocr",
+    "translate",
+    "segment",
+    "inpaint",
+    "typeset"
+  ],
+  "timings": {
+    "load": 0.125,
+    "detect": 0.474,
+    "ocr": 25.803,
+    "translate": 10.194,
+    "segment": 1.011,
+    "inpaint": 1.171,
+    "typeset": 8.017
+  },
+  "fonts": [
+    "Heroika-Regular"
+  ],
+  "manual_edits": false,
+  "artifacts": {
+    "translated/korean.png": "f0a87b4aee476728c69ea0d965c412f22eb246cde8dde06e7479da45ae7ec6ba",
+    "regions/korean.json": "cb6f156d387017a0b55bd0c0ae26c6f6e53429aa37a2eed7423547a3d0521a1f",
+    "comparisons/korean.jpg": "0d256af0a01af74b016c23f98fd65cb9bf0afef8e7bfb0cdb026890582078b1b",
+    "comparisons/korean-full.jpg": "d163585d9e13b7d8521508e60b2cb964929543ab40fdce3106057c6c50c96d23"
+  }
+}

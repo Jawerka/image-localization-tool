@@ -1,0 +1,3040 @@
+"""Локальный HTTP API настольного приложения.
+
+Слушает только ``127.0.0.1``. Страница открывается с ``/?k=<token>``:
+в ответ ставится cookie ``ilt_session``, без редиректа. Дальше ``/api/*``
+принимает только эту cookie. ``POST /api/session`` — тот же обмен по токену
+из тела, без cookie.
+
+Пути к файлам из JSON не читаются, кроме ``POST /api/drop`` и ``POST /api/import``.
+Папку экспорта задаёт диалог, а не поле ``dest``.
+"""
+
+from __future__ import annotations
+
+import base64
+import hmac
+import json
+import logging
+import os
+import queue
+import re
+import secrets
+import shutil
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path, PurePosixPath
+from urllib.parse import parse_qs, unquote, urlparse
+
+from src.app import __version__, model_manager, runtime
+from src.app.dialogs import DialogBridge
+from src.app.document import PageDocument, diff_plan, typeset_changed_region_ids
+from src.app.events import LLM_STATUS, WorkerEvent
+from src.app.ingest import NoImagesError, archive_images, is_archive
+from src.app.jobs import BATCH_KINDS, REGION_KINDS, JobQueue
+from src.app.settings import AppSettings, get_api_key
+from src.app.portable_project import (
+    PortableProjectError,
+    pack_project,
+    resolve_archive_open_kind,
+    unpack_project,
+)
+from src.app.store import ProjectStore, VersionConflict
+from src.app.worker import (
+    demote_restored_running,
+    queue_has_unfinished,
+    restore_region_status,
+)
+from src.utils.paths import components_root, install_root
+
+logger = logging.getLogger("ilt.app.server")
+
+_MAX_BODY = 8 * 1024 * 1024
+_COOKIE = "ilt_session"
+_SSE_KEEPALIVE_SEC = 15
+_IMAGE_KINDS = frozenset({"original", "result", "clean", "mask", "thumb"})
+_REGION_ACTIONS = frozenset({"recognize", "retranslate", "shorten"})
+_PAGE_ID = re.compile(r"^/api/pages/([^/]+)$")
+_PAGE_DOCUMENT = re.compile(r"^/api/pages/([^/]+)/document$")
+_PAGE_RESET = re.compile(r"^/api/pages/([^/]+)/reset$")
+_PAGE_ACTION = re.compile(r"^/api/pages/([^/]+)/action$")
+_PAGE_IMAGE = re.compile(r"^/api/pages/([^/]+)/image/([^/]+)$")
+_PAGE_PREVIEW = re.compile(r"^/api/pages/([^/]+)/preview-region$")
+_PAGE_LAYOUT_SNAPSHOT = re.compile(r"^/api/pages/([^/]+)/layout-snapshot$")
+_PAGE_REBAKE = re.compile(r"^/api/pages/([^/]+)/rebake$")
+_PAGE_FILL_PREVIEW = re.compile(r"^/api/pages/([^/]+)/fill-preview$")
+_PAGE_SFX = re.compile(r"^/api/pages/([^/]+)/regions/([^/]+)/sfx-style$")
+_FONT_PREVIEW = re.compile(r"^/api/fonts/([^/]+)/preview$")
+_FONT_FILE = re.compile(r"^/api/fonts/([^/]+)/file$")
+
+_CONTENT_TYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".bmp": "image/bmp",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".tif": "image/tiff",
+    ".tiff": "image/tiff",
+    ".json": "application/json; charset=utf-8",
+    ".txt": "text/plain; charset=utf-8",
+    ".ico": "image/x-icon",
+}
+
+
+class _HttpError(Exception):
+    """Ответ с кодом и JSON ``{"error": ...}``."""
+
+    def __init__(self, status: int, message: str, **extra):
+        super().__init__(message)
+        self.status = status
+        self.payload = {"error": message, **extra}
+
+
+class _Result:
+    def __init__(
+        self,
+        payload: dict | None = None,
+        *,
+        status: int = 200,
+        body: bytes | None = None,
+        content_type: str | None = None,
+        cookie: str | None = None,
+        headers: dict | None = None,
+        file: Path | None = None,
+    ):
+        self.payload = payload
+        self.status = status
+        self.body = body
+        self.content_type = content_type
+        self.cookie = cookie
+        self.headers = dict(headers or {})
+        self.file = file
+
+
+def _same_token(got: str, expected: str) -> bool:
+    if not got or not expected:
+        return False
+    left = got.encode("utf-8")
+    right = expected.encode("utf-8")
+    if len(left) != len(right):
+        return False
+    return hmac.compare_digest(left, right)
+
+
+def _cookie_header(token: str, name: str = _COOKIE) -> str:
+    return f"{name}={token}; HttpOnly; SameSite=Strict; Path=/"
+
+
+def _cookie_value(header: str, cookie_name: str = _COOKIE) -> str:
+    for part in header.split(";"):
+        name, separator, value = part.strip().partition("=")
+        if separator and name == cookie_name:
+            return value
+    return ""
+
+
+def _same_path(left: Path, right: Path) -> bool:
+    try:
+        a = os.path.normcase(str(Path(left).resolve()))
+        b = os.path.normcase(str(Path(right).resolve()))
+    except (OSError, ValueError):
+        return False
+    return a == b
+
+
+def _default_web_root() -> Path:
+    """Каталог ``web`` рядом с программой.
+
+    В сборке это папка exe (spec кладёт ``web`` туда, не в ``_internal``).
+    Из исходников ``install_root()`` — корень репозитория, тот же путь, что и раньше.
+    """
+    bundled = install_root() / "web"
+    if (bundled / "index.html").is_file():
+        return bundled
+    return Path(__file__).resolve().parents[2] / "web"
+
+
+class AppState:
+    """Состояние одного локального сервера и текущего проекта."""
+
+    def __init__(
+        self,
+        settings: AppSettings,
+        settings_path: Path,
+        store: ProjectStore,
+        queue: JobQueue,
+        dialogs: DialogBridge | None = None,
+        web_root: Path | None = None,
+        settings_warnings: list[str] | None = None,
+        project_id: str | None = None,
+        token: str | None = None,
+    ):
+        self.settings = settings
+        if settings.components_dir:
+            os.environ["ILT_COMPONENT_ROOT"] = settings.components_dir
+        if settings.components_previous_dir:
+            os.environ["ILT_COMPONENT_PREVIOUS_ROOT"] = settings.components_previous_dir
+        self.settings_path = Path(settings_path)
+        self.settings_warnings = list(settings_warnings or [])
+        self.store = store
+        self.queue = queue
+        self.dialogs = dialogs if dialogs is not None else DialogBridge()
+        self.project_id = project_id
+        self.web_root = Path(web_root) if web_root is not None else _default_web_root()
+        self.token = token or secrets.token_urlsafe(32)
+        self.subscribers: list[queue.Queue] = []
+        self.export_dir: Path | None = None
+        self.reveal_path: Path | None = None
+        self.package_path: str | None = None
+        self.package_dirty = False
+        self.llm_status = {"ok": None, "models": []}
+        self.port = 0
+        self.browser_origins: tuple[str, ...] = ()
+        self.web_access = None
+        self._browser_files_lock = threading.RLock()
+        self._lock = threading.Lock()
+        self._sub_lock = threading.Lock()
+        self._drain_lock = threading.Lock()
+        # Серверные read-modify-write одного page.json (reset, sfx).
+        self._page_edit_lock = threading.RLock()
+        # Атомарная проверка активной задачи и постановка rebake.
+        self._rebake_lock = threading.Lock()
+        self._stop = threading.Event()
+        self._closed = False
+        self._pump: threading.Thread | None = None
+        self.queue_pending = False
+        self._queue_restored = False
+        self._runtime_manager: runtime.Manager | None = None
+        self._models_lock = threading.Lock()
+        self._models_inflight: set[str] = set()
+        self._preparation_manager = None
+        self._component_gate = threading.RLock()
+        self._render_cache = None
+        self._render_cache_limit = None
+
+    def preparation_manager(self):
+        """Полный снимок доступен после SSE-reconnect и перезапуска приложения."""
+        from src.app.preparation import Manager
+
+        with self._component_gate:
+            if self._preparation_manager is None:
+                self._preparation_manager = Manager(self.fanout, self.store.root / "preparation.json",
+                    can_install=lambda: not self.queue.busy() and not self._models_inflight
+                        and not (self._runtime_manager is not None and self._runtime_manager.busy()))
+            return self._preparation_manager
+
+    def runtime_manager(self) -> runtime.Manager:
+        """Фоновая установка компонентов рантайма (лениво — тестам сервера не мешает)."""
+        with self._component_gate:
+            if self._runtime_manager is None:
+                self._runtime_manager = runtime.Manager(self.fanout)
+            return self._runtime_manager
+
+    def queue_path(self) -> Path:
+        """JSON очереди рядом с проектами."""
+        return self.store.root / "queue.json"
+
+    def start(self) -> None:
+        """Фоновая раздача событий очереди подписчикам SSE."""
+        if self._pump is not None and self._pump.is_alive():
+            return
+        if not self._queue_restored:
+            self._queue_restored = True
+            self._restore_saved_queue()
+        self._stop.clear()
+        self._pump = threading.Thread(target=self._pump_loop, name="ilt-events", daemon=True)
+        self._pump.start()
+        self._start_llm_probe()
+
+    def _start_llm_probe(self) -> None:
+        """Проверить LLM в фоне. Пустой адрес — сразу «нет», без баннера до ответа."""
+        url = str(self.settings.llm_base_url or "").strip()
+        if not url:
+            self.llm_status = {"ok": False, "models": [], "reason": "empty"}
+            return
+        self.llm_status = {"ok": None, "models": []}
+        threading.Thread(target=self._probe_llm, name="ilt-llm", daemon=True).start()
+
+    def _probe_llm(self) -> None:
+        from src.app.settings import get_api_key
+
+        url = str(self.settings.llm_base_url or "").strip()
+        result = model_manager.check_llm(url, get_api_key())
+        if not result.get("ok") and url:
+            if self._stop.wait(2):
+                return
+            result = model_manager.check_llm(url, get_api_key())
+        models = [str(item) for item in result.get("models") or []]
+        self.llm_status = {
+            "ok": bool(result.get("ok")),
+            "models": models,
+            "reason": str(result.get("reason") or ""),
+        }
+        self.fanout(WorkerEvent(LLM_STATUS, {
+            "ok": bool(result.get("ok")),
+            "models": models,
+            "reason": str(result.get("reason") or ""),
+        }))
+
+    def close(self) -> None:
+        """Остановить раздачу и разбудить висящие SSE."""
+        with self._sub_lock:
+            if self._closed:
+                return
+            self._closed = True
+            boxes = list(self.subscribers)
+        self._stop.set()
+        for box in boxes:
+            box.put(None)
+        _save_queue(self)
+        pump = self._pump
+        if pump is not None and pump.is_alive() and threading.current_thread() is not pump:
+            pump.join(timeout=1)
+
+    def subscribe(self) -> queue.Queue:
+        box: queue.Queue = queue.Queue()
+        with self._sub_lock:
+            self.subscribers.append(box)
+        return box
+
+    def unsubscribe(self, box: queue.Queue) -> None:
+        with self._sub_lock:
+            try:
+                self.subscribers.remove(box)
+            except ValueError:
+                return
+
+    def fanout(self, event: WorkerEvent) -> None:
+        payload = event.to_dict()
+        with self._sub_lock:
+            boxes = list(self.subscribers)
+        for box in boxes:
+            box.put(payload)
+
+    def broadcast_pending(self) -> None:
+        """Забрать события воркера и отдать каждому подписчику."""
+        with self._drain_lock:
+            events = list(self.queue.drain_events())
+        for event in events:
+            payload = getattr(event, "payload", {}) or {}
+            if self.browser_origins and getattr(event, "type", "") in ("job.finished", "job.failed", "job.cancelled"):
+                from src.app.web_server import note_export
+
+                note_export(self, str(getattr(event, "job_id", "") or payload.get("job_id") or ""))
+            if (
+                getattr(event, "type", "") == "page.updated"
+                and str(payload.get("project_id") or "") == str(self.project_id or "")
+            ):
+                self.package_dirty = True
+            self.fanout(event)
+
+    def _pump_loop(self) -> None:
+        while not self._stop.is_set():
+            self.broadcast_pending()
+            self._stop.wait(0.05)
+        self.broadcast_pending()
+
+    def _restore_saved_queue(self) -> None:
+        """Поднять очередь с диска. Незаконченное не стартует само: пауза."""
+        path = self.queue_path()
+        pending = queue_has_unfinished(path)
+        try:
+            self.queue.load(path)
+        except (OSError, json.JSONDecodeError, UnicodeError, ValueError):
+            logger.exception("Не удалось прочитать очередь")
+            self.queue_pending = False
+            return
+        self.queue_pending = pending
+        if pending and not self.queue.paused:
+            self.queue.pause()
+        snap = self.queue.snapshot()
+        demote_restored_running(
+            self.store,
+            list(snap.get("batch") or [])
+            + list(snap.get("edits") or [])
+            + list(snap.get("exports") or []),
+        )
+
+
+class _AppServer(ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+    def shutdown(self) -> None:
+        app_state = getattr(self, "app_state", None)
+        if app_state is not None:
+            app_state.close()
+        super().shutdown()
+
+    def server_close(self) -> None:
+        app_state = getattr(self, "app_state", None)
+        if app_state is not None:
+            app_state.close()
+        super().server_close()
+
+
+def serve(
+    state: AppState,
+    host: str = "127.0.0.1",
+    port: int = 0,
+    origins: tuple[str, ...] = (),
+) -> tuple[ThreadingHTTPServer, int]:
+    """Поднять сервер на ``127.0.0.1`` и случайном порте. Цикл — у вызывающего."""
+    if host not in ("127.0.0.1", "localhost") and not origins:
+        raise ValueError("Сервер слушает только 127.0.0.1")
+    if origins:
+        from src.app.web_server import validate_origins
+
+        state.browser_origins = validate_origins(origins)
+        from src.app.web_access import WebAccess
+
+        state.web_access = WebAccess(state.settings_path.parent)
+    server = _AppServer((host, int(port)), _make_handler(state))
+    server.app_state = state
+    bound = int(server.server_address[1])
+    state.port = bound
+    state.start()
+    return server, bound
+
+
+def _make_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, fmt: str, *args) -> None:
+            # Пишем в общий лог приложения: у модульного логгера нет файла.
+            logging.getLogger("image_localization").debug(
+                "%s %s", self.address_string(), fmt % args
+            )
+
+        def do_GET(self) -> None:  # noqa: N802
+            self._dispatch()
+
+        def do_POST(self) -> None:  # noqa: N802
+            self._dispatch()
+
+        def do_PUT(self) -> None:  # noqa: N802
+            self._dispatch()
+
+        def _dispatch(self) -> None:
+            self.close_connection = True
+            try:
+                self._route()
+            except _HttpError as exc:
+                _send_json(self, exc.payload, exc.status)
+            except VersionConflict as exc:
+                _send_json(
+                    self,
+                    {"error": "Конфликт версии", "document": exc.document.to_dict()},
+                    409,
+                )
+            except FileNotFoundError:
+                _send_json(self, {"error": "Не найдено"}, 404)
+            except json.JSONDecodeError:
+                _send_json(self, {"error": "Некорректный JSON"}, 400)
+            except ValueError as exc:
+                _send_json(self, {"error": str(exc) or "Некорректный запрос"}, 400)
+            except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
+                return
+            except Exception:
+                logger.exception("Ошибка HTTP %s %s", self.command, self.path)
+                try:
+                    _send_json(self, {"error": "Внутренняя ошибка"}, 500)
+                except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError, OSError):
+                    return
+            finally:
+                if self.command != "GET" or urlparse(self.path).path != "/api/events":
+                    state.broadcast_pending()
+
+    def _route_impl(handler: Handler) -> None:
+        port = int(handler.server.server_address[1])
+        if state.browser_origins:
+            from src.app.web_server import request_allowed
+
+            allowed = request_allowed(handler, state.browser_origins)
+        else:
+            allowed = _host_allowed(handler.headers.get("Host"), port) and _origin_allowed(handler.headers.get("Origin"), port)
+        if not allowed:
+            _send_json(handler, {"error": "Запрос отклонён"}, 403)
+            return
+
+        parsed = urlparse(handler.path)
+        path = unquote(parsed.path or "/")
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        method = handler.command
+
+        if state.browser_origins and path == "/healthz" and method == "GET":
+            _send_json(handler, {"alive": True})
+            return
+
+        if method == "GET" and path == "/api/events":
+            if not _cookie_ok(handler, state):
+                _send_json(handler, {"error": "Не авторизован"}, 401)
+                return
+            _stream_events(handler, state)
+            return
+
+        if method == "POST" and path == "/api/session":
+            body = _read_json(handler)
+            _handle_session(handler, state, body)
+            return
+
+        if path.startswith("/api/"):
+            if not _cookie_ok(handler, state):
+                _send_json(handler, {"error": "Не авторизован"}, 401)
+                return
+            if state.browser_origins and path.startswith("/api/browser/"):
+                from src.app.web_server import browser_route
+
+                browser_route(handler, state, method, path, query)
+                return
+            # Чтение сети выполняется до блокировки состояния.
+            if method == "PUT" and path == "/api/project/glossary":
+                body = _glossary_put_body(handler)
+            elif method in ("POST", "PUT"):
+                body = _read_json(handler)
+            else:
+                body = {}
+            with state._browser_files_lock:
+                if not _cookie_ok(handler, state):
+                    raise _HttpError(401, "Не авторизован")
+                result = _api(state, method, path, body, query)
+            _send_result(handler, result)
+            return
+
+        if method != "GET":
+            _send_json(handler, {"error": "Метод не поддерживается"}, 405)
+            return
+        _send_result(handler, _static(state, path, query))
+
+    Handler._route = _route_impl  # type: ignore[attr-defined]
+    return Handler
+
+
+def _host_allowed(value: str | None, port: int) -> bool:
+    if not value:
+        return False
+    text = value.strip().lower()
+    return text in {f"127.0.0.1:{port}", f"localhost:{port}"}
+
+
+def _origin_allowed(value: str | None, port: int) -> bool:
+    if value is None:
+        return True
+    text = value.strip()
+    if text == "":
+        return True
+    allowed = {f"http://127.0.0.1:{port}", f"http://localhost:{port}"}
+    return text in allowed or text.lower() in allowed
+
+
+def _cookie_ok(handler: BaseHTTPRequestHandler, state: AppState) -> bool:
+    if state.browser_origins:
+        return state.web_access.authorized(_cookie_value(handler.headers.get("Cookie") or "", "ilt_browser_session"))
+    return _same_token(_cookie_value(handler.headers.get("Cookie") or ""), state.token)
+
+
+def _read_body(handler: BaseHTTPRequestHandler) -> object:
+    length_raw = handler.headers.get("Content-Length")
+    if length_raw is None or length_raw == "":
+        return {}
+    try:
+        length = int(length_raw)
+    except ValueError as exc:
+        raise ValueError("Некорректный Content-Length") from exc
+    if length < 0 or length > _MAX_BODY:
+        raise ValueError("Слишком большой запрос")
+    previous_timeout = handler.connection.gettimeout()
+    try:
+        handler.connection.settimeout(15)
+        raw = handler.rfile.read(length) if length else b""
+    finally:
+        handler.connection.settimeout(previous_timeout)
+    handler._ilt_body_read = True  # type: ignore[attr-defined]
+    if not raw:
+        return {}
+    return json.loads(raw.decode("utf-8"))
+
+
+def _read_json(handler: BaseHTTPRequestHandler) -> dict:
+    data = _read_body(handler)
+    if data == {}:
+        return {}
+    if not isinstance(data, dict):
+        raise ValueError("Ожидался JSON-объект")
+    return data
+
+
+def _glossary_put_body(handler: BaseHTTPRequestHandler) -> dict:
+    """Тело PUT: JSON-список или объект с полем ``glossary``."""
+    data = _read_body(handler)
+    if isinstance(data, list):
+        return {"glossary": data}
+    if isinstance(data, dict):
+        raw = data.get("glossary", data.get("entries"))
+        if isinstance(raw, list):
+            return {"glossary": raw}
+    raise ValueError("Нужен список глоссария")
+
+
+def _handle_session(handler: BaseHTTPRequestHandler, state: AppState, body: dict) -> None:
+    if state.browser_origins:
+        from src.app.web_access import AccessDenied, AccessLimited
+
+        try:
+            token = state.web_access.login(body.get("username"), body.get("password"))
+        except (AccessDenied, AccessLimited) as exc:
+            _send_json(handler, {"error": str(exc)}, 429 if isinstance(exc, AccessLimited) else 401)
+            return
+        _send_json(handler, {"ok": True}, cookie=token)
+        return
+    token = body.get("token")
+    if not isinstance(token, str) or not _same_token(token, state.token):
+        _send_json(handler, {"error": "Не авторизован"}, 401)
+        return
+    _send_json(handler, {"ok": True}, cookie=state.token)
+
+
+def _api(state: AppState, method: str, path: str, body: dict, query: dict | None = None) -> _Result:
+    if state.browser_origins:
+        from src.app.web_server import guard_api
+
+        guard_api(method, path, body)
+        with state._browser_files_lock:
+            return _api_impl(state, method, path, body, query)
+    return _api_impl(state, method, path, body, query)
+
+
+def _api_impl(state: AppState, method: str, path: str, body: dict, query: dict | None = None) -> _Result:
+    if path == "/api/bootstrap":
+        _need_method(method, "GET")
+        return _Result(_bootstrap(state))
+    if path == "/api/pages":
+        raise _HttpError(404, "Не найдено")
+
+    matched = _PAGE_DOCUMENT.fullmatch(path)
+    if matched:
+        _need_method(method, "PUT")
+        return _Result(_put_document(state, _page_id(matched.group(1)), body))
+    matched = _PAGE_RESET.fullmatch(path)
+    if matched:
+        _need_method(method, "POST")
+        return _Result(_reset_page(state, _page_id(matched.group(1))))
+    matched = _PAGE_ACTION.fullmatch(path)
+    if matched:
+        _need_method(method, "POST")
+        return _Result(_page_action(state, _page_id(matched.group(1)), body))
+    matched = _PAGE_IMAGE.fullmatch(path)
+    if matched:
+        _need_method(method, "GET")
+        return _image(state, _page_id(matched.group(1)), matched.group(2))
+    matched = _PAGE_ID.fullmatch(path)
+    if matched:
+        _need_method(method, "GET")
+        return _Result(_page_detail(state, _page_id(matched.group(1))))
+
+    if path == "/api/jobs":
+        _need_method(method, "GET")
+        return _Result(_jobs_view(state))
+    if path == "/api/jobs/status":
+        _need_method(method, "GET")
+        job_id = str((query or {}).get("job_id", [""])[0]).strip()
+        if not job_id:
+            raise ValueError("Нужен job_id")
+        status = state.queue.job_status(job_id)
+        if not status:
+            raise _HttpError(404, "Задание не найдено")
+        return _Result({
+            "job_id": job_id,
+            "status": status,
+            "result": state.queue.job_result(job_id),
+        })
+    if path == "/api/jobs/translate":
+        _need_method(method, "POST")
+        return _Result(_translate(state, body))
+    if path == "/api/jobs/cancel":
+        _need_method(method, "POST")
+        return _Result(_cancel(state, body))
+    if path == "/api/jobs/pause":
+        _need_method(method, "POST")
+        return _Result(_pause_jobs(state))
+    if path == "/api/jobs/resume":
+        _need_method(method, "POST")
+        return _Result(_resume_jobs(state))
+    if path == "/api/jobs/retry-errors":
+        _need_method(method, "POST")
+        return _Result(_retry_errors(state))
+    if path == "/api/jobs/export":
+        _need_method(method, "POST")
+        return _Result(_export(state, body))
+    if path == "/api/import":
+        _need_method(method, "POST")
+        return _Result(_import_sources(state, body))
+    if path == "/api/dialog/directory":
+        _need_method(method, "POST")
+        return _Result(_dialog_directory(state, body))
+    if path == "/api/dialog/files":
+        _need_method(method, "POST")
+        return _Result(_dialog_files(state))
+    if path == "/api/dialog/folder":
+        _need_method(method, "POST")
+        return _Result(_dialog_folder(state, body))
+    if path == "/api/dialog/log":
+        _need_method(method, "POST")
+        state.dialogs.open_log()
+        return _Result({"ok": True})
+    if path == "/api/dialog/reveal":
+        _need_method(method, "POST")
+        return _Result(_reveal(state, body))
+    if path == "/api/settings":
+        _need_method(method, "PUT")
+        return _Result({"settings": _update_settings(state, body)})
+    if path == "/api/settings/secret":
+        _need_method(method, "POST")
+        return _Result(_set_secret(state, body))
+    if path == "/api/llm/check":
+        _need_method(method, "POST")
+        return _Result(_check_llm(state))
+    if path == "/api/models":
+        _need_method(method, "GET")
+        return _Result(model_manager.status(state.settings.models_dir))
+    if path.startswith("/api/preparation"):
+        from src.app import downloads, preparation
+
+        manager = state.preparation_manager()
+        if path == "/api/preparation":
+            _need_method(method, "GET")
+            return _Result(manager.current())
+        if path == "/api/preparation/diagnostics":
+            _need_method(method, "GET")
+            snapshot = manager.current()
+            return _Result({"version": __version__, "platform": runtime.platform_tag(),
+                "python": runtime.python_tag(), "preparation": {key: snapshot.get(key) for key in (
+                    "state", "selection", "catalog_sha", "items", "done", "total", "current", "error",
+                    "error_kind", "verified_at")}})
+        _need_method(method, "POST")
+        selection = state.settings.to_dict()
+        selection.update({k: v for k, v in body.items() if k in (
+            "source_lang", "target_lang", "translator_backend", "inpainter_backend", "device", "models_dir")})
+        try:
+            if path == "/api/preparation/plan":
+                return _Result(preparation.plan(selection))
+            if path == "/api/preparation/start":
+                with state._component_gate:
+                    result = manager.start(selection)
+                    _update_settings(state, result["selection"])
+                    return _Result(result, status=202)
+            if path == "/api/preparation/verify":
+                with state._component_gate:
+                    result = manager.start(selection, verify=True)
+                    _update_settings(state, result["selection"])
+                    return _Result(result, status=202)
+            if path == "/api/preparation/pause":
+                return _Result(manager.pause())
+            if path == "/api/preparation/resume":
+                with state._component_gate:
+                    return _Result(manager.resume(), status=202)
+            if path == "/api/preparation/location":
+                from src.utils.paths import components_root
+
+                with state._component_gate:
+                    if manager.busy() or state.queue.busy() or state.runtime_manager().busy():
+                        raise downloads.BusyError("Сначала приостановите подготовку и дождитесь завершения обработки")
+                    folder = Path(str(body.get("path") or ""))
+                    if not folder.is_absolute() or not folder.is_dir():
+                        raise ValueError("Выберите существующую папку")
+                    downloads.ensure_space(folder, 0)
+                    import tempfile
+                    with tempfile.TemporaryFile(dir=folder) as probe:
+                        probe.write(b"ilt")
+                        probe.flush()
+                    old = str(components_root())
+                    state.settings.components_previous_dir = old
+                    state.settings.components_dir = str(folder)
+                    state.settings.save(state.settings_path)
+                    os.environ["ILT_COMPONENT_PREVIOUS_ROOT"] = old
+                    os.environ["ILT_COMPONENT_ROOT"] = str(folder)
+                    return _Result({"path": str(folder), "previous": old})
+            if path == "/api/preparation/cache/clear":
+                if manager.busy():
+                    raise downloads.BusyError("Дождитесь завершения подготовки")
+                return _Result({"removed_bytes": downloads.clear_cache()})
+        except downloads.BusyError as exc:
+            raise _HttpError(409, str(exc)) from exc
+        raise _HttpError(404, "Неизвестное действие подготовки")
+    if path == "/api/models/download":
+        _need_method(method, "POST")
+        _download_model(state, body)
+        return _Result({"ok": True}, status=202)
+    if path == "/api/runtime":
+        _need_method(method, "GET")
+        payload = runtime.status(state.settings.device)
+        payload["download"] = state.runtime_manager().current()
+        return _Result(payload)
+    if path == "/api/runtime/download":
+        _need_method(method, "POST")
+        result = _runtime_download(state, body)
+        return _Result(result, status=200 if result.get("installed") else 202)
+    if path == "/api/runtime/remove":
+        _need_method(method, "POST")
+        return _Result(_runtime_remove(state, body))
+    if path == "/api/drop":
+        _need_method(method, "POST")
+        return _Result(_drop(state, body))
+    if path == "/api/project/glossary":
+        if method == "GET":
+            return _Result(_get_glossary(state))
+        if method == "PUT":
+            return _Result(_put_glossary(state, body))
+        raise _HttpError(405, "Метод не поддерживается")
+    if path == "/api/project/styles":
+        if method == "GET":
+            return _Result(_get_styles(state))
+        if method == "PUT":
+            return _Result(_put_styles(state, body))
+        raise _HttpError(405, "Метод не поддерживается")
+    if path == "/api/fonts":
+        _need_method(method, "GET")
+        return _Result(_font_list())
+    matched = _FONT_PREVIEW.fullmatch(path)
+    if matched:
+        _need_method(method, "GET")
+        return _font_preview(unquote(matched.group(1)), query or {})
+    matched = _FONT_FILE.fullmatch(path)
+    if matched:
+        _need_method(method, "GET")
+        return _font_file(unquote(matched.group(1)))
+    matched = _PAGE_PREVIEW.fullmatch(path)
+    if matched:
+        _need_method(method, "POST")
+        return _preview_region(state, _page_id(matched.group(1)), body)
+    matched = _PAGE_LAYOUT_SNAPSHOT.fullmatch(path)
+    if matched:
+        _need_method(method, "POST")
+        return _Result(_layout_snapshot(state, _page_id(matched.group(1)), body))
+    matched = _PAGE_REBAKE.fullmatch(path)
+    if matched:
+        _need_method(method, "POST")
+        return _Result(_rebake_page(state, _page_id(matched.group(1))))
+    matched = _PAGE_FILL_PREVIEW.fullmatch(path)
+    if matched:
+        _need_method(method, "POST")
+        return _fill_preview(state, _page_id(matched.group(1)), body)
+    matched = _PAGE_SFX.fullmatch(path)
+    if matched:
+        _need_method(method, "POST")
+        return _Result(_apply_sfx_style(state, _page_id(matched.group(1)), unquote(matched.group(2))))
+    if path == "/api/remote/status":
+        _need_method(method, "GET")
+        return _Result(_remote_status(state))
+    if path == "/api/remote/pair-code":
+        _need_method(method, "POST")
+        return _Result(_remote_pair(state))
+    if path == "/api/remote/revoke":
+        _need_method(method, "POST")
+        return _Result(_remote_revoke(state, body))
+    if path == "/api/project/remove-pages":
+        _need_method(method, "POST")
+        return _Result(_remove_pages(state, body))
+    if path == "/api/project/open-recent":
+        _need_method(method, "POST")
+        return _Result(_open_recent(state, body))
+    if path == "/api/project/reorder":
+        _need_method(method, "POST")
+        return _Result(_reorder_pages(state, body))
+    if path == "/api/project/package/status":
+        _need_method(method, "GET")
+        return _Result(_package_status(state))
+    if path == "/api/project/package/save":
+        _need_method(method, "POST")
+        return _Result(_package_save(state, body))
+    if path == "/api/project/package/load":
+        _need_method(method, "POST")
+        return _Result(_package_load(state, body))
+    if path == "/api/project/close":
+        _need_method(method, "POST")
+        return _Result(_close_project(state, body))
+    if path == "/api/dialog/project-package/open":
+        _need_method(method, "POST")
+        return _Result(_dialog_open_package(state))
+    if path == "/api/dialog/project-package/save":
+        _need_method(method, "POST")
+        return _Result(_dialog_save_package(state, body))
+    raise _HttpError(404, "Не найдено")
+
+
+def _need_method(method: str, expected: str) -> None:
+    if method != expected:
+        raise _HttpError(405, "Метод не поддерживается")
+
+
+def _page_id(raw: str) -> str:
+    return unquote(raw)
+
+
+def _bootstrap(state: AppState) -> dict:
+    project, pages = _project_and_pages(state)
+    warning = ""
+    if state.settings_warnings:
+        warning = str(state.settings_warnings[0] or "")
+    llm = state.llm_status
+    if llm.get("ok") is None:
+        llm_view = {"ok": None, "models": []}
+    elif not llm.get("ok"):
+        llm_view = {"ok": False, "models": []}
+    else:
+        llm_view = {"ok": True, "models": [str(item) for item in llm.get("models") or []]}
+    info = model_manager.status(state.settings.models_dir)
+    required = ["detector", "font"] + ([] if state.settings.inpainter_backend == "opencv" else ["lama"])
+    ready = all(bool((info.get(name) or {}).get("present")) for name in required)
+    return {
+        "version": __version__,
+        **({"capabilities": {"browser_files": True, "managed_runtime": True}} if state.browser_origins else {}),
+        "settings": state.settings.to_dict(),
+        "settings_warning": warning,
+        "project": project,
+        "pages": pages,
+        "llm": llm_view,
+        "device": state.settings.device,
+        "models_ready": ready,
+        "runtime": runtime.summary(state.settings.device),
+        "preparation": state.preparation_manager().current(),
+        "busy": any(page["status"] in ("queued", "running") for page in pages),
+        "recent": _recent_view(state),
+        "has_api_key": bool(get_api_key()),
+        "paths": {
+            "settings": str(state.settings_path),
+            "data": str(state.store.root),
+            "components": str(components_root()),
+        },
+        "package": _package_status(state),
+    }
+
+
+def _project_and_pages(state: AppState) -> tuple[dict | None, list[dict]]:
+    if not state.project_id:
+        return None, []
+    try:
+        project = state.store.open_project(state.project_id)
+    except FileNotFoundError:
+        return None, []
+    pages = []
+    for record in project.get("pages") or []:
+        pages.append(_page_row(state, record))
+    return project, pages
+
+
+def _collection(state: AppState) -> dict:
+    project, pages = _project_and_pages(state)
+    return {"project": project, "pages": pages, "package": _package_status(state)}
+
+
+def _page_row(state: AppState, record: dict) -> dict:
+    page_id = str(record.get("id") or "")
+    status = state.store.page_status(state.project_id or "", page_id)
+    try:
+        provenance = state.store.read_result_provenance(
+            state.project_id or "", page_id
+        )
+    except (FileNotFoundError, OSError, ValueError):
+        provenance = None
+    return {
+        "id": page_id,
+        "name": str(record.get("name") or ""),
+        "source_path": str(record.get("source_path") or ""),
+        "chapter": str(record.get("chapter") or ""),
+        "status": status["status"],
+        "progress": status["progress"],
+        "stage": status["stage"],
+        "error": status["error"],
+        "warnings": status["warnings"],
+        "render_version": int(provenance["document_version"]) if provenance else 0,
+    }
+
+
+def _require_page(state: AppState, page_id: str) -> dict:
+    if not state.project_id:
+        raise FileNotFoundError(page_id)
+    project = state.store.open_project(state.project_id)
+    for record in project.get("pages") or []:
+        if str(record.get("id") or "") == page_id:
+            return record
+    raise FileNotFoundError(page_id)
+
+
+def _page_detail(state: AppState, page_id: str) -> dict:
+    record = _require_page(state, page_id)
+    row = _page_row(state, record)
+    row["document"] = state.store.read_document(state.project_id or "", page_id).to_dict()
+    return row
+
+
+def _put_document(state: AppState, page_id: str, body: dict) -> dict:
+    if "base_version" not in body:
+        raise ValueError("Нужна base_version")
+    base_version = body.get("base_version")
+    if isinstance(base_version, bool) or not isinstance(base_version, int):
+        raise ValueError("Некорректная base_version")
+    raw = body.get("document")
+    if not isinstance(raw, dict):
+        raise ValueError("Нужен документ")
+    _require_page(state, page_id)
+    project_id = state.project_id or ""
+    previous = state.store.read_document(project_id, page_id)
+    previous_status = state.store.page_status(project_id, page_id)
+    updated = PageDocument.from_dict(raw)
+    plan = diff_plan(previous, updated)
+    changed_region_ids = typeset_changed_region_ids(previous, updated)
+    can_incrementally_compose = (
+        plan == "typeset"
+        and previous_status.get("status") in ("done", "offline")
+        and state.store.result_provenance_is_current(
+            project_id,
+            page_id,
+            previous.version,
+        )
+    )
+    try:
+        saved = state.store.write_document(
+            project_id,
+            page_id,
+            updated,
+            base_version=base_version,
+        )
+    except VersionConflict as exc:
+        raise _HttpError(409, "Конфликт версии", document=exc.document.to_dict()) from exc
+    if plan in ("typeset", "clean"):
+        state.store.mark_visual_version(project_id, page_id, saved.version)
+        state.store.update_status(project_id, page_id, status="edited")
+        _submit(
+            state,
+            "apply_document",
+            page_id,
+            {
+                "plan": plan,
+                "document": saved.to_dict(),
+                "base_version": int(saved.version),
+                **({
+                    "previous_document": previous.to_dict(),
+                    "changed_region_ids": changed_region_ids,
+                } if can_incrementally_compose else {}),
+            },
+        )
+    _mark_package_dirty(state)
+    return {"document": saved.to_dict(), "plan": plan}
+
+
+def _reset_page(state: AppState, page_id: str) -> dict:
+    _require_page(state, page_id)
+    project_id = state.project_id or ""
+    with state._page_edit_lock:
+        snapshot = state.store.read_auto(project_id, page_id)
+        current = state.store.read_document(project_id, page_id)
+        try:
+            saved = state.store.write_document(
+                project_id, page_id, snapshot, base_version=current.version,
+            )
+        except VersionConflict as exc:
+            raise _HttpError(409, "Конфликт версии", document=exc.document.to_dict()) from exc
+    state.store.mark_visual_version(project_id, page_id, saved.version)
+    state.store.update_status(project_id, page_id, status="edited")
+    _mark_package_dirty(state)
+    _submit(
+        state,
+        "apply_document",
+        page_id,
+        {
+            "plan": "clean",
+            "document": saved.to_dict(),
+            "base_version": int(saved.version),
+        },
+    )
+    return {"document": saved.to_dict(), "plan": "clean"}
+
+
+def _rebake_page(state: AppState, page_id: str) -> dict:
+    """Повторить вёрстку текущей версии документа без нового PUT."""
+    with state._rebake_lock:
+        _require_page(state, page_id)
+        project_id = state.project_id or ""
+        document = state.store.read_document(project_id, page_id)
+        existing = state.queue.active_job("apply_document", page_id, project_id)
+        if existing is not None:
+            return {
+                "job_id": existing.id,
+                "status": state.queue.job_status(existing.id),
+                "reused": True,
+            }
+        if state.store.result_provenance_is_current(
+            project_id, page_id, document.version
+        ):
+            # Результат уже собран из этой версии: снимаем только устаревшую ошибку.
+            if state.store.page_status(project_id, page_id).get("status") == "error":
+                state.store.update_status(
+                    project_id, page_id,
+                    status="done", progress=100, stage="typeset", error="",
+                )
+            return {"job_id": "", "status": "done", "reused": True}
+        previous_status = state.store.page_status(project_id, page_id)["status"]
+        failed = state.queue.failed_job("apply_document", page_id, project_id)
+        plan = str((failed.payload or {}).get("plan") or "") if failed else ""
+        if plan not in ("clean", "typeset"):
+            plan = "typeset"
+        _mark_queued(state, [page_id])
+        try:
+            job = _submit(
+                state,
+                "apply_document",
+                page_id,
+                {"plan": plan, "base_version": int(document.version)},
+            )
+        except Exception:
+            try:
+                state.store.update_status(
+                    project_id, page_id, status=previous_status, error=""
+                )
+            except (FileNotFoundError, OSError, ValueError):
+                pass
+            raise
+        return {"job_id": job.id, "status": "queued", "reused": False}
+
+
+def _page_action(state: AppState, page_id: str, body: dict) -> dict:
+    action = str(body.get("action") or "")
+    if action not in _REGION_ACTIONS:
+        raise ValueError("Неизвестное действие")
+    region_id = _region_id(body.get("region_id"))
+    _require_page(state, page_id)
+    project_id = state.project_id or ""
+    previous_status = state.store.page_status(project_id, page_id)["status"]
+    payload = {"region_id": region_id, "previous_status": previous_status}
+    if "base_version" in body:
+        base_version = body["base_version"]
+        if isinstance(base_version, bool) or not isinstance(base_version, int) or base_version < 0:
+            raise ValueError("Некорректная base_version")
+        payload["base_version"] = base_version
+    # Регион-задание меняет картинку после ответа LLM; экспорт не должен
+    # принять старый result, пока страница снова не станет готовой.
+    _mark_queued(state, [page_id])
+    try:
+        job = _submit(state, action, page_id, payload)
+    except Exception:
+        try:
+            state.store.update_status(project_id, page_id, status=previous_status)
+        except (FileNotFoundError, OSError, ValueError):
+            pass
+        raise
+    _mark_package_dirty(state)
+    return {"job_id": job.id}
+
+
+def _region_id(value) -> int:
+    if isinstance(value, bool):
+        raise ValueError("Нужен region_id")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    raise ValueError("Нужен region_id")
+
+
+def _translate(state: AppState, body: dict) -> dict:
+    if not state.project_id:
+        raise ValueError("Нет открытого проекта")
+    scope = str(body.get("scope") or "")
+    skip = bool(body.get("skip_ready"))
+    project = state.store.open_project(state.project_id)
+    pages = list(project.get("pages") or [])
+    if scope == "page":
+        page_id = str(body.get("page_id") or "")
+        if not any(str(page.get("id") or "") == page_id for page in pages):
+            raise _HttpError(404, "Не найдено")
+        _require_prepared_worker(state)
+        if not _page_has_result(state, page_id, skip):
+            _mark_queued(state, [page_id])
+        job = _submit(state, "translate_page", page_id, {"page_id": page_id, "skip_ready": skip})
+        _mark_package_dirty(state)
+        return {"job_id": job.id}
+    if scope == "all":
+        if not pages:
+            raise ValueError("В проекте нет страниц")
+        _require_prepared_worker(state)
+        ids = [str(page.get("id") or "") for page in pages]
+        queued = [page_id for page_id in ids if not _page_has_result(state, page_id, skip)]
+        if queued:
+            _mark_queued(state, queued)
+        payload = {
+            "skip_ready": skip,
+            "pages": [
+                {
+                    "page_id": str(page.get("id") or ""),
+                    "source_path": str(page.get("source_path") or ""),
+                }
+                for page in pages
+            ],
+        }
+        job = _submit(state, "translate_all", "", payload)
+        _mark_package_dirty(state)
+        return {"job_id": job.id}
+    raise ValueError("Неизвестная область перевода")
+
+
+def _require_prepared_worker(state: AppState) -> None:
+    """Не менять статусы страниц, пока production worker не готов к переводу."""
+    from src.app.worker import ProcessWorker
+
+    if not isinstance(state.queue.worker, ProcessWorker):
+        return
+    manager = state.preparation_manager()
+    if manager.busy():
+        raise _HttpError(409, "Идёт проверка или подготовка компонентов. Дождитесь завершения и повторите перевод.")
+    from src.app.preparation import missing
+
+    try:
+        titles = missing(state.settings.to_dict())
+    except ValueError as exc:
+        raise _HttpError(409, str(exc)) from exc
+    if titles:
+        raise _HttpError(409, "Не хватает компонентов: " + ", ".join(titles)
+                         + ". Откройте «Настройки → Компоненты» и установите их.")
+
+
+def _page_has_result(state: AppState, page_id: str, skip_ready: bool) -> bool:
+    """Страница уже с переводом и её просят не трогать."""
+    if not skip_ready or not state.project_id or not page_id:
+        return False
+    try:
+        return state.store.image_path(state.project_id, page_id, "result").is_file()
+    except (ValueError, OSError):
+        return False
+
+
+def _mark_queued(state: AppState, page_ids: list[str]) -> None:
+    project_id = state.project_id or ""
+    for page_id in page_ids:
+        state.store.update_status(project_id, page_id, status="queued")
+
+
+def _cancel(state: AppState, body: dict | None = None) -> dict:
+    """Стоп всей очереди или одного задания.
+
+    ``job_id`` в теле отменяет только его. Страницы этого задания получают
+    прежний статус, если их не держит другое активное задание.
+    """
+    body = body or {}
+    if "job_id" in body:
+        raw = body.get("job_id")
+        if not isinstance(raw, str) or not raw.strip():
+            raise ValueError("Нужен непустой job_id")
+        job_id = raw.strip()
+    else:
+        job_id = ""
+    job = state.queue.job(job_id) if job_id else None
+    removed = state.queue.cancel(job_id or None)
+    if job_id:
+        _restore_cancelled_pages(state, job)
+        _save_queue(state)
+        return {"ok": True, **_jobs_view(state)}
+    state.queue_pending = False
+    # «Стоп» снимает задания всех проектов: статусы чиним по каждому
+    # снятому заданию, а не только по открытому проекту.
+    for item in removed:
+        _restore_cancelled_pages(state, item)
+    _save_queue(state)
+    return {"ok": True, **_jobs_view(state)}
+
+
+def _restore_cancelled_pages(state: AppState, job) -> None:
+    """Вернуть статус страниц снятого задания.
+
+    Регион возвращает ``previous_status`` из payload (или готовность по
+    provenance), пакет — готовность по result/provenance, вёрстка — ``edited``.
+    Экспорт страницы не меняет. Страницы, которые держит другое активное
+    задание, остаются как есть.
+    """
+    if job is None or job.kind not in REGION_KINDS | BATCH_KINDS | {"apply_document"}:
+        return
+    project_id = str(job.project_id or "")
+    if not project_id:
+        return
+    page_ids = [str(job.page_id)] if job.page_id else []
+    for item in job.payload.get("pages") or []:
+        if not isinstance(item, dict):
+            continue
+        page_id = str(item.get("page_id") or "")
+        if page_id and page_id not in page_ids:
+            page_ids.append(page_id)
+    if not page_ids:
+        return
+    busy = state.queue.active_page_ids(exclude=job.id, project_id=project_id)
+    for page_id in page_ids:
+        if page_id in busy:
+            continue
+        try:
+            current = state.store.page_status(project_id, page_id)
+        except (FileNotFoundError, OSError, ValueError):
+            continue
+        if current.get("status") not in ("queued", "running"):
+            continue
+        if job.kind in REGION_KINDS or job.kind in BATCH_KINDS:
+            try:
+                document = state.store.read_document(project_id, page_id)
+            except (FileNotFoundError, OSError, ValueError):
+                continue
+            previous = (
+                str(job.payload.get("previous_status") or "")
+                if job.kind in REGION_KINDS
+                else ""
+            )
+            restore_region_status(
+                state.store,
+                project_id,
+                page_id,
+                previous,
+                document,
+            )
+            continue
+        try:
+            state.store.update_status(
+                project_id,
+                page_id,
+                status="edited",
+                progress=0,
+                stage="",
+                error="",
+            )
+        except (FileNotFoundError, OSError, ValueError):
+            continue
+
+
+def _dialog_directory(state: AppState, body: dict | None = None) -> dict:
+    """Папка экспорта: системный диалог или явный путь от хоста.
+
+    В ``--api`` режиме мост диалогов пуст, поэтому Flutter-хост выбирает
+    папку сам и присылает её в ``path``; сервер только запоминает её как
+    ``export_dir`` (как после системного диалога).
+    """
+    body = body or {}
+    explicit = str(body.get("path") or "").strip()
+    if explicit:
+        folder = Path(explicit)
+        if not folder.is_dir():
+            raise ValueError("Папка не найдена")
+        state.export_dir = folder
+        return {"path": str(folder), "cancelled": False}
+    chosen = state.dialogs.pick_directory()
+    if chosen is None:
+        return {"path": None, "cancelled": True}
+    path = Path(chosen)
+    state.export_dir = path
+    return {"path": str(path)}
+
+
+def _export(state: AppState, body: dict) -> dict:
+    """Папка только из диалога. Чужой ``dest`` в JSON не подставляется."""
+    if not state.project_id:
+        raise ValueError("Нет открытого проекта")
+    picked = state.export_dir
+    if picked is None:
+        raise ValueError("Сначала выберите папку экспорта")
+    raw = body.get("dest")
+    if isinstance(raw, str) and raw.strip() and _same_path(Path(raw), picked):
+        dest = Path(picked)
+    else:
+        dest = Path(picked)
+    dest = dest.resolve()
+    page_ids = body.get("page_ids")
+    if page_ids is None:
+        project = state.store.open_project(state.project_id)
+        page_ids = [str(page.get("id") or "") for page in project.get("pages") or []]
+    if not isinstance(page_ids, list):
+        raise ValueError("page_ids должен быть списком")
+    fmt = str(body.get("format") or state.settings.export_format).lower()
+    if fmt == "jpeg":
+        fmt = "jpg"
+    if fmt not in ("png", "jpg"):
+        raise ValueError("Неизвестный формат экспорта")
+    quality = body.get("jpeg_quality")
+    if quality is None:
+        quality = state.settings.export_jpeg_quality
+    if isinstance(quality, bool) or not isinstance(quality, (int, float)):
+        raise ValueError("Некорректное качество JPEG")
+    quality = max(1, min(100, int(quality)))
+    conflict = str(body.get("conflict") or state.settings.export_conflict)
+    if conflict not in ("rename", "overwrite", "skip"):
+        raise ValueError("Неизвестный конфликт экспорта")
+    content = str(body.get("content") or "result").lower()
+    if content not in ("result", "clean", "both"):
+        raise ValueError("Неизвестное содержимое экспорта")
+    archive = str(body.get("archive") or "folder").lower()
+    if archive not in ("folder", "zip", "cbz"):
+        raise ValueError("Неизвестный вид архива")
+    template = body.get("name_template")
+    if template is None or template == "":
+        template = "{chapter}/{index:03}_{stem}"
+    if not isinstance(template, str):
+        raise ValueError("Некорректный шаблон имени")
+    only_ready = bool(body.get("only_ready"))
+    if archive == "folder":
+        target = dest
+    else:
+        target = dest / f"export.{archive}"
+    pages = list(state.store.open_project(state.project_id).get("pages") or [])
+    page_ids = [str(item) for item in page_ids]
+    versions: dict[str, int] = {}
+    known = {str(page.get("id") or "") for page in pages}
+    for page_id in page_ids:
+        if page_id not in known:
+            continue
+        try:
+            # Невизуальные правки двигают версию документа, но не картинку.
+            versions[page_id] = state.store.visual_version(state.project_id, page_id)
+        except (FileNotFoundError, OSError, ValueError):
+            continue
+    state.reveal_path = target
+    job = _submit(
+        state,
+        "export",
+        "",
+        {
+            "dest": str(target),
+            "page_ids": page_ids,
+            "required_document_versions": versions,
+            "format": fmt,
+            "jpeg_quality": quality,
+            "conflict": conflict,
+            "content": content,
+            "archive": archive,
+            "name_template": template,
+            "only_ready": only_ready,
+        },
+    )
+    return {"job_id": job.id}
+
+
+def _reveal(state: AppState, body: dict | None = None) -> dict:
+    body = body or {}
+    kind = str(body.get("kind") or "")
+    target = state.reveal_path
+    if kind == "models":
+        from src.utils.paths import models_dir
+
+        target = models_dir(state.settings.models_dir or None)
+    elif kind == "components":
+        from src.utils.paths import components_root
+
+        target = components_root()
+    elif kind:
+        raise ValueError("Неизвестный раздел")
+    if target is None and state.project_id:
+        target = state.store.project_dir(state.project_id)
+    if target is None:
+        raise ValueError("Нечего показать")
+    state.dialogs.reveal(Path(target))
+    return {"ok": True}
+
+
+def _update_settings(state: AppState, patch: dict) -> dict:
+    current = state.settings.to_dict()
+    for key, value in patch.items():
+        if key in ("api_key", "schema"):
+            continue
+        if key in current:
+            current[key] = value
+    state.settings = AppSettings.from_dict(current)
+    state.settings.save(state.settings_path)
+    return state.settings.to_dict()
+
+
+def _set_secret(state: AppState, body: dict) -> dict:
+    if "api_key" not in body:
+        raise ValueError("Нужен api_key")
+    value = body.get("api_key")
+    if not isinstance(value, str):
+        raise ValueError("Нужен api_key")
+    if value == "":
+        return {"ok": True}
+    saved = state.settings.set_api_key(value)
+    return {"ok": bool(saved)}
+
+
+def _check_llm(state: AppState) -> dict:
+    url = str(state.settings.llm_base_url or "").strip()
+    key = get_api_key()
+    result = model_manager.check_llm(url, key)
+    if result.get("ok") and key:
+        models = [str(item) for item in result.get("models") or []]
+        model = str(state.settings.llm_model or "").strip() or (models[0] if models else "")
+        if model:
+            probe = model_manager.verify_llm(url, key, model)
+            if not probe.get("ok"):
+                result = {
+                    "ok": False,
+                    "models": models,
+                    "reason": str(probe.get("reason") or "Ключ API не принят"),
+                }
+    if result.get("ok"):
+        state.llm_status = {
+            "ok": True,
+            "models": [str(item) for item in result.get("models") or []],
+        }
+    else:
+        state.llm_status = {"ok": False, "models": []}
+    payload = dict(result)
+    payload["vision"] = False
+    return payload
+
+
+def _download_model(state: AppState, body: dict) -> None:
+    kind = str(body.get("kind") or "")
+    if kind not in ("detector", "lama", "font"):
+        raise ValueError("Неизвестный файл для скачивания")
+    with state._component_gate:
+        if state.queue.busy() or (state._preparation_manager is not None and state._preparation_manager.busy()):
+            raise _HttpError(409, "Дождитесь завершения обработки или подготовки")
+        with state._models_lock:
+            if kind in state._models_inflight:
+                raise _HttpError(409, "Эта модель уже скачивается")
+            state._models_inflight.add(kind)
+    dest = model_manager.dest_dir(kind, state.settings.models_dir)
+
+    def progress(done, total) -> None:
+        state.fanout(WorkerEvent("model.progress", {
+            "kind": kind,
+            "done": done,
+            "total": total,
+            "done_bytes": done,
+            "total_bytes": total,
+        }))
+
+    try:
+        model_manager.download(kind, dest, progress)
+    finally:
+        with state._models_lock:
+            state._models_inflight.discard(kind)
+
+
+def _runtime_download(state: AppState, body: dict) -> dict:
+    with state._component_gate:
+        return _runtime_download_locked(state, body)
+
+
+def _runtime_download_locked(state: AppState, body: dict) -> dict:
+    """Поставить установку пака в фон. Прогресс идёт событиями runtime.progress."""
+    if state._preparation_manager is not None and state._preparation_manager.busy():
+        raise _HttpError(409, "Подготовка уже идёт")
+    if state.queue.busy():
+        raise _HttpError(409, "Дождитесь завершения обработки")
+    pack_id = str(body.get("id") or "").strip()
+    if not pack_id:
+        raise ValueError("Нужен id компонента")
+    manager = state.runtime_manager()
+    if manager.busy():
+        raise _HttpError(409, "Другая загрузка уже идёт")
+    try:
+        pack = runtime.pack_by_id(pack_id)
+    except KeyError as exc:
+        raise _HttpError(400, "Неизвестный компонент") from exc
+    if runtime.ready(pack) and (pack.kind != "torch" or runtime.selected_torch_id() == pack.id):
+        return {"ok": True, "id": pack.id, "installed": True}
+    result = manager.start(pack.id)
+    return {"ok": True, "id": pack.id, "state": result.get("state", "")}
+
+
+def _runtime_remove(state: AppState, body: dict) -> dict:
+    """Удалить установленный пак. Во время загрузки удаление запрещено."""
+    if state.queue.busy() or (state._preparation_manager is not None and state._preparation_manager.busy()):
+        raise _HttpError(409, "Дождитесь завершения обработки или подготовки")
+    pack_id = str(body.get("id") or "").strip()
+    if not pack_id:
+        raise ValueError("Нужен id компонента")
+    manager = state.runtime_manager()
+    current = manager.current()
+    if manager.busy() and str(current.get("id") or "") == pack_id:
+        raise _HttpError(409, "Компонент ещё скачивается")
+    try:
+        runtime.remove(pack_id)
+    except ValueError as exc:
+        raise _HttpError(400, "Неизвестный компонент") from exc
+    return {"ok": True, "id": pack_id}
+
+
+def _dialog_files(state: AppState) -> dict:
+    chosen = [Path(path) for path in (state.dialogs.open_files() or [])]
+    existing = [path for path in chosen if path.exists()]
+    if not existing:
+        payload = _collection(state)
+        payload["cancelled"] = True
+        return payload
+    return _add_paths(state, existing, strict=False)
+
+
+def _dialog_folder(state: AppState, body: dict | None = None) -> dict:
+    """Папка через системный диалог.
+
+    ``pick: true`` только возвращает путь. Иначе страницы верхнего уровня
+    добавляются как раньше, а путь всё равно есть в ответе.
+    """
+    body = body or {}
+    chosen = state.dialogs.open_folder()
+    if chosen is None or not Path(chosen).exists():
+        payload = _collection(state)
+        payload["cancelled"] = True
+        return payload
+    folder = Path(chosen)
+    if body.get("pick"):
+        return {"path": str(folder), "cancelled": False}
+    payload = _add_paths(state, [folder], strict=False)
+    payload["path"] = str(folder)
+    return payload
+
+
+def _drop(state: AppState, body: dict) -> dict:
+    raw = body.get("paths")
+    if not isinstance(raw, list) or not raw:
+        raise ValueError("Нужен список paths")
+    paths: list[Path] = []
+    for item in raw:
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError("Путь должен быть строкой")
+        paths.append(Path(item))
+    return _add_paths(state, paths, strict=True)
+
+
+def _add_paths(state: AppState, paths: list[Path], *, strict: bool, chapter: str = "") -> dict:
+    if strict:
+        missing = [path for path in paths if not path.exists()]
+        if missing:
+            raise ValueError("Путь не найден")
+        prepared = list(paths)
+    else:
+        prepared = [path for path in paths if path.exists()]
+    portable: list[Path] = []
+    chapter_archives: list[Path] = []
+    for path in prepared:
+        if not (path.is_file() and is_archive(path)):
+            continue
+        if resolve_archive_open_kind(path) == "portable":
+            portable.append(path)
+        else:
+            chapter_archives.append(path)
+    rest = [
+        path
+        for path in prepared
+        if path not in portable and path not in chapter_archives
+    ]
+    warnings: list[str] = []
+    if portable:
+        payload = _apply_portable_load(state, portable[0])
+        if len(portable) > 1:
+            warnings.append(
+                f"Загружен только первый пакет: {portable[0].name}"
+            )
+        extra = chapter_archives + rest
+        if extra:
+            with state._lock:
+                ingest_warnings = _append_sources_to_project(state, extra, chapter=chapter)
+                warnings.extend(ingest_warnings)
+                _mark_package_dirty(state)
+                payload = _collection(state)
+            payload["package"] = _package_status(state)
+        if warnings:
+            existing = payload.get("warnings") or []
+            payload["warnings"] = [*existing, *warnings]
+        return payload
+
+    usable, warnings = _usable_archives(chapter_archives)
+    if not usable and not rest and warnings:
+        raise NoImagesError(" ".join(warnings))
+    with state._lock:
+        if usable or rest:
+            if state.project_id is None:
+                created = state.store.create_project(
+                    _project_title(prepared),
+                    "auto",
+                    state.settings.target_lang,
+                )
+                state.project_id = str(created["id"])
+            ingest_warnings = _append_sources_to_project(state, usable + rest, chapter=chapter)
+            warnings.extend(ingest_warnings)
+            _remember_project(state, state.project_id)
+            _mark_package_dirty(state)
+        payload = _collection(state)
+    if warnings:
+        payload["warnings"] = warnings
+    return payload
+
+
+def _append_sources_to_project(state: AppState, paths: list[Path], *, chapter: str = "") -> list[str]:
+    """Добавить файлы/архивы в текущий project_id. Проект должен уже существовать."""
+    if not paths or state.project_id is None:
+        return []
+    usable, warnings = _usable_archives(
+        [path for path in paths if path.is_file() and is_archive(path)]
+    )
+    usable_keys = {_path_key(path) for path in usable}
+    for path in paths:
+        if _path_key(path) in usable_keys:
+            state.store.import_path(
+                state.project_id,
+                path,
+                chapter_mode="subdir",
+                archive_namespace=path.parent.name if state.browser_origins else "",
+            )
+        elif path.is_file() and is_archive(path):
+            continue
+        else:
+            state.store.add_sources(state.project_id, [path], chapter=chapter)
+    return warnings
+
+
+def _usable_archives(archives: list[Path]) -> tuple[list[Path], list[str]]:
+    """Архивы с картинками и тексты про пустые.
+
+    Проверка до создания проекта: пустой архив не оставляет пустой проект,
+    если кроме него ничего нет.
+    """
+    usable: list[Path] = []
+    warnings: list[str] = []
+    for archive in archives:
+        try:
+            archive_images(archive)
+        except NoImagesError as exc:
+            warnings.append(str(exc))
+            continue
+        usable.append(archive)
+    return usable, warnings
+
+
+def _path_key(path: Path) -> str:
+    return os.path.normcase(str(path))
+
+
+def _project_title(paths: list[Path]) -> str:
+    for path in paths:
+        if path.is_dir():
+            name = path.name.strip()
+            return name or "Проект"
+        if is_archive(path):
+            name = path.stem.strip()
+            return name or "Проект"
+    return "Проект"
+
+
+def _remember_project(state: AppState, project_id: str) -> None:
+    items = [project_id]
+    for item in state.settings.recent_projects:
+        if item != project_id and item not in items:
+            items.append(item)
+    state.settings.recent_projects = items[:10]
+    state.settings.save(state.settings_path)
+
+
+def _remove_pages(state: AppState, body: dict) -> dict:
+    if not state.project_id:
+        raise ValueError("Нет открытого проекта")
+    raw = body.get("page_ids")
+    if not isinstance(raw, list):
+        raise ValueError("Нужен список page_ids")
+    state.store.remove_pages(state.project_id, [str(item) for item in raw])
+    _mark_package_dirty(state)
+    return _collection(state)
+
+
+def _reorder_pages(state: AppState, body: dict) -> dict:
+    if not state.project_id:
+        raise ValueError("Нет открытого проекта")
+    raw = body.get("page_ids")
+    if not isinstance(raw, list) or not raw:
+        raise ValueError("Нужен список page_ids")
+    state.store.reorder_pages(state.project_id, [str(item) for item in raw])
+    _mark_package_dirty(state)
+    payload = _collection(state)
+    payload["package"] = _package_status(state)
+    return payload
+
+
+def _package_status(state: AppState) -> dict:
+    return {
+        "path": state.package_path,
+        "dirty": bool(state.package_dirty),
+    }
+
+
+def _mark_package_dirty(state: AppState) -> None:
+    state.package_dirty = True
+
+
+def _clear_package_link(state: AppState) -> None:
+    state.package_path = None
+    state.package_dirty = False
+
+
+def _package_save(state: AppState, body: dict | None = None) -> dict:
+    body = body or {}
+    if not state.project_id:
+        raise ValueError("Нет открытого проекта")
+    if state.queue.busy() or (
+        state._preparation_manager is not None and state._preparation_manager.busy()
+    ) or (state._runtime_manager is not None and state._runtime_manager.busy()):
+        raise _HttpError(409, "Дождитесь завершения обработки, чтобы сохранить пакет")
+    project, pages = _project_and_pages(state)
+    if not pages:
+        raise ValueError("Нет страниц для сохранения")
+    path_text = str(body.get("path") or "").strip()
+    if not path_text:
+        path_text = str(state.package_path or "").strip()
+    if not path_text:
+        raise ValueError("Нужен путь для сохранения проекта")
+    dest = Path(path_text)
+    editor = body.get("editor") if isinstance(body.get("editor"), dict) else None
+    try:
+        packed = pack_project(state.store, state.project_id, dest, editor=editor)
+    except PortableProjectError as exc:
+        raise ValueError(str(exc)) from exc
+    with state._lock:
+        state.package_path = str(packed.path)
+        state.package_dirty = False
+    payload = _collection(state)
+    payload["package"] = _package_status(state)
+    payload["path"] = str(packed.path)
+    if editor is not None:
+        from src.app.portable_project import normalize_editor
+
+        normalized = normalize_editor(editor)
+        if normalized is not None:
+            payload["editor"] = normalized
+    if packed.warnings:
+        payload["warnings"] = packed.warnings
+    return payload
+
+
+def _apply_portable_load(state: AppState, package: Path) -> dict:
+    try:
+        loaded = unpack_project(state.store, package)
+    except PortableProjectError as exc:
+        raise ValueError(str(exc)) from exc
+    with state._lock:
+        state.project_id = str(loaded.project.get("id") or "")
+        state.package_path = str(package.resolve())
+        state.package_dirty = False
+        _remember_project(state, state.project_id)
+        payload = _collection(state)
+    payload["package"] = _package_status(state)
+    payload["path"] = str(package)
+    if loaded.editor:
+        payload["editor"] = loaded.editor
+    if loaded.warnings:
+        payload["warnings"] = loaded.warnings
+    return payload
+
+
+def _package_load(state: AppState, body: dict | None = None) -> dict:
+    body = body or {}
+    path_text = str(body.get("path") or "").strip()
+    if not path_text:
+        raise ValueError("Нужен путь к пакету")
+    return _apply_portable_load(state, Path(path_text))
+
+
+def _close_project(state: AppState, body: dict | None = None) -> dict:
+    body = body or {}
+    force = bool(body.get("force"))
+    if not state.project_id:
+        return {"project": None, "pages": [], "package": _package_status(state)}
+    if state.package_dirty and not force:
+        raise _HttpError(409, "Есть несохранённые изменения", dirty=True)
+    with state._lock:
+        state.project_id = None
+        _clear_package_link(state)
+    return {"project": None, "pages": [], "package": _package_status(state)}
+
+
+def _dialog_open_package(state: AppState) -> dict:
+    chosen = state.dialogs.open_project_package()
+    if chosen is None or not Path(chosen).exists():
+        return {"cancelled": True, "package": _package_status(state)}
+    return _package_load(state, {"path": str(chosen)})
+
+
+def _dialog_save_package(state: AppState, body: dict | None = None) -> dict:
+    body = body or {}
+    if not state.project_id:
+        raise ValueError("Нет открытого проекта")
+    project, pages = _project_and_pages(state)
+    if not pages:
+        raise ValueError("Нет страниц для сохранения")
+    default_name = str(body.get("default_name") or "").strip()
+    if not default_name:
+        name = str((project or {}).get("name") or "project").strip() or "project"
+        default_name = f"{name}.ilt.zip"
+    chosen = state.dialogs.save_project_package(default_name)
+    if chosen is None:
+        payload = _collection(state)
+        payload["cancelled"] = True
+        payload["package"] = _package_status(state)
+        return payload
+    save_body: dict = {"path": str(chosen)}
+    if isinstance(body.get("editor"), dict):
+        save_body["editor"] = body["editor"]
+    return _package_save(state, save_body)
+
+
+def _open_recent(state: AppState, body: dict) -> dict:
+    project_id = str(body.get("id") or "").strip()
+    if not project_id:
+        raise ValueError("Нужен id")
+    project = state.store.open_project(project_id)
+    with state._lock:
+        state.project_id = str(project.get("id") or project_id)
+        _clear_package_link(state)
+        state.package_dirty = True
+        _remember_project(state, state.project_id)
+        payload = _collection(state)
+    payload["package"] = _package_status(state)
+    return payload
+
+
+def _recent_view(state: AppState) -> list[dict]:
+    items = []
+    for project_id in state.settings.recent_projects:
+        try:
+            project = state.store.open_project(project_id)
+        except (FileNotFoundError, ValueError, OSError):
+            items.append({"id": project_id, "name": "", "path": ""})
+            continue
+        path = ""
+        for page in project.get("pages") or []:
+            source = str(page.get("source_path") or "")
+            if source:
+                path = str(Path(source).parent)
+                break
+        items.append({
+            "id": str(project.get("id") or project_id),
+            "name": str(project.get("name") or ""),
+            "path": path,
+        })
+    return items
+
+
+def _submit(state: AppState, kind: str, page_id: str, payload: dict | None = None):
+    with state._component_gate:
+        return _submit_locked(state, kind, page_id, payload)
+
+
+def _submit_locked(state: AppState, kind: str, page_id: str, payload: dict | None = None):
+    if state._models_inflight or (state._runtime_manager is not None and state._runtime_manager.busy()):
+        raise _HttpError(409, "Дождитесь завершения установки компонентов")
+    if state._preparation_manager is not None and state._preparation_manager.busy():
+        raise _HttpError(409, "Дождитесь завершения подготовки компонентов")
+    if not state.project_id:
+        raise ValueError("Нет открытого проекта")
+    data = dict(payload or {})
+    data["store_root"] = str(state.store.root)
+    job = state.queue.submit(
+        kind,
+        state.project_id,
+        page_id=page_id,
+        settings=state.settings,
+        payload=data,
+    )
+    _save_queue(state)
+    return job
+
+
+def _save_queue(state: AppState) -> None:
+    try:
+        state.queue.save(state.queue_path())
+    except OSError:
+        logger.exception("Не удалось сохранить очередь")
+
+
+def _jobs_view(state: AppState) -> dict:
+    """Пауза, незаконченные задания и факт восстановления при старте."""
+    snap = state.queue.snapshot()
+    statuses = snap.get("statuses") or {}
+    unfinished = bool(snap.get("batch") or snap.get("edits") or snap.get("exports")) or any(
+        status in ("queued", "running") for status in statuses.values()
+    )
+    return {
+        "paused": bool(state.queue.paused),
+        "unfinished": unfinished,
+        "restored": bool(state.queue_pending),
+    }
+
+
+def _pause_jobs(state: AppState) -> dict:
+    state.queue.pause()
+    _save_queue(state)
+    return {"ok": True, **_jobs_view(state)}
+
+
+def _resume_jobs(state: AppState) -> dict:
+    state.queue.resume()
+    _save_queue(state)
+    return {"ok": True, **_jobs_view(state)}
+
+
+def _retry_errors(state: AppState) -> dict:
+    """Снова поставить задания со статусом error через очередь."""
+    # Пауза на время правки статусов: иначе быстрый воркер успеет закончить
+    # страницу, а мы вернём её в queued уже после завершения.
+    was_paused = state.queue.paused
+    if not was_paused:
+        state.queue.pause()
+    try:
+        jobs = state.queue.retry_failed()
+        if state.project_id:
+            project_id = state.project_id
+            for job in jobs:
+                if job.project_id != project_id or job.kind == "export":
+                    continue
+                page_ids: list[str] = []
+                if job.page_id:
+                    page_ids.append(job.page_id)
+                raw_pages = job.payload.get("pages")
+                if isinstance(raw_pages, list):
+                    for item in raw_pages:
+                        if isinstance(item, dict) and item.get("page_id"):
+                            page_ids.append(str(item["page_id"]))
+                raw_ids = job.payload.get("page_ids")
+                if isinstance(raw_ids, list):
+                    for item in raw_ids:
+                        if not isinstance(item, (dict, list)):
+                            page_ids.append(str(item or ""))
+                busy = state.queue.active_page_ids(exclude=job.id, project_id=project_id)
+                skip_ready = bool(job.payload.get("skip_ready"))
+                for page_id in page_ids:
+                    if not page_id or page_id in busy:
+                        continue
+                    if skip_ready:
+                        try:
+                            ready = state.store.image_path(
+                                project_id, page_id, "result",
+                            ).is_file()
+                        except (FileNotFoundError, ValueError, OSError):
+                            ready = False
+                        if ready:
+                            # Воркер пропустит страницу; вернуть готовый статус,
+                            # иначе она навсегда останется queued.
+                            try:
+                                document = state.store.read_document(project_id, page_id)
+                            except (FileNotFoundError, OSError, ValueError):
+                                continue
+                            restore_region_status(
+                                state.store, project_id, page_id, "", document,
+                            )
+                            continue
+                    try:
+                        state.store.update_status(
+                            project_id,
+                            page_id,
+                            status="queued",
+                            error="",
+                        )
+                    except (FileNotFoundError, ValueError, OSError):
+                        continue
+    finally:
+        if not was_paused:
+            state.queue.resume()
+    _save_queue(state)
+    return {"ok": True, "job_ids": [job.id for job in jobs], **_jobs_view(state)}
+
+
+def _import_sources(state: AppState, body: dict) -> dict:
+    raw = body.get("path")
+    if not isinstance(raw, str) or not raw.strip():
+        raise ValueError("Нужен path")
+    path = Path(raw.strip())
+    if not path.exists():
+        raise ValueError("Путь не найден")
+    if path.is_file() and is_archive(path):
+        if resolve_archive_open_kind(path) == "portable":
+            return _apply_portable_load(state, path)
+        archive_images(path)
+    mode = str(body.get("chapter_mode") or "subdir")
+    if mode not in ("subdir", "flat"):
+        raise ValueError("Неизвестный режим глав")
+    recursive = bool(body.get("recursive"))
+    with state._lock:
+        if state.project_id is None:
+            created = state.store.create_project(
+                _project_title([path]),
+                "auto",
+                state.settings.target_lang,
+            )
+            state.project_id = str(created["id"])
+        added = state.store.import_path(
+            state.project_id,
+            path,
+            recursive=recursive,
+            chapter_mode=mode,
+        )
+        _remember_project(state, state.project_id)
+        _mark_package_dirty(state)
+        payload = _collection(state)
+    payload["added"] = [str(item.get("id") or "") for item in added]
+    return payload
+
+
+def _get_glossary(state: AppState) -> dict:
+    if not state.project_id:
+        raise ValueError("Нет открытого проекта")
+    return {"glossary": state.store.glossary_view(state.project_id)}
+
+
+def _put_glossary(state: AppState, body: dict) -> dict:
+    if not state.project_id:
+        raise ValueError("Нет открытого проекта")
+    raw = body.get("glossary")
+    if not isinstance(raw, list):
+        raise ValueError("Нужен список глоссария")
+    state.store.write_glossary(state.project_id, raw)
+    _mark_package_dirty(state)
+    return {"glossary": state.store.glossary_view(state.project_id)}
+
+
+def _get_styles(state: AppState) -> dict:
+    if not state.project_id:
+        raise ValueError("Нет открытого проекта")
+    return {"styles": state.store.read_styles(state.project_id)}
+
+
+def _put_styles(state: AppState, body: dict) -> dict:
+    if not state.project_id:
+        raise ValueError("Нет открытого проекта")
+    raw = body.get("styles")
+    if not isinstance(raw, list):
+        raise ValueError("Нужен список стилей")
+    styles = state.store.write_styles(state.project_id, raw)
+    _mark_package_dirty(state)
+    return {"styles": styles}
+
+
+_font_faces: list | None = None
+_font_lock = threading.Lock()
+
+
+def _font_faces_cached() -> list:
+    """Один обход каталога на процесс. Ошибка чтения даёт пустой список."""
+    global _font_faces
+    with _font_lock:
+        if _font_faces is None:
+            try:
+                from src.components.font_catalog import scan_fonts
+
+                _font_faces = scan_fonts()
+            except Exception:
+                logger.exception("Каталог шрифтов")
+                _font_faces = []
+        return list(_font_faces)
+
+
+def _font_list() -> dict:
+    from src.components.font_catalog import FontFace
+
+    fonts = []
+    for face in _font_faces_cached():
+        if not isinstance(face, FontFace):
+            continue
+        fonts.append(
+            {
+                "id": face.id,
+                "family": face.family,
+                "category": face.category,
+                "cyrillic": bool(face.cyrillic),
+            }
+        )
+    return {"fonts": fonts}
+
+
+def _preview_text(query: dict) -> str:
+    raw = ""
+    values = query.get("text") if query else None
+    if values:
+        raw = values[0]
+    text = str(raw or "").replace("\r", " ").replace("\n", " ").strip()
+    if not text:
+        text = "Привет"
+    return text[:40]
+
+
+def _font_preview(font_id: str, query: dict) -> _Result:
+    from src.components.font_catalog import find_font
+
+    face = find_font(font_id, _font_faces_cached())
+    if face is None:
+        raise _HttpError(404, "Шрифт не найден")
+    try:
+        png = _render_font_png(face.path, _preview_text(query))
+    except _HttpError:
+        raise
+    except Exception as exc:
+        logger.exception("Образец шрифта")
+        raise _HttpError(400, "Не удалось нарисовать образец") from exc
+    return _Result(body=png, content_type="image/png")
+
+
+def _font_file(font_id: str) -> _Result:
+    """Отдать файл шрифта для ``@font-face`` в инспекторе."""
+    from pathlib import Path
+
+    from src.components.font_catalog import find_font
+
+    face = find_font(font_id, _font_faces_cached())
+    if face is None:
+        raise _HttpError(404, "Шрифт не найден")
+    path = Path(str(face.path))
+    if not path.is_file():
+        raise _HttpError(404, "Файл шрифта не найден")
+    suffix = path.suffix.lower()
+    types = {
+        ".ttf": "font/ttf",
+        ".otf": "font/otf",
+        ".woff": "font/woff",
+        ".woff2": "font/woff2",
+    }
+    try:
+        body = path.read_bytes()
+    except OSError as exc:
+        raise _HttpError(400, "Не удалось прочитать шрифт") from exc
+    return _Result(body=body, content_type=types.get(suffix, "application/octet-stream"))
+
+
+def _render_font_png(path: str, text: str) -> bytes:
+    from io import BytesIO
+
+    from PIL import Image, ImageDraw, ImageFont
+
+    font = ImageFont.truetype(path, 48)
+    probe = Image.new("RGB", (8, 8), "white")
+    draw = ImageDraw.Draw(probe)
+    box = draw.textbbox((0, 0), text, font=font)
+    width = max(1, min(800, box[2] - box[0] + 24))
+    height = max(1, min(400, box[3] - box[1] + 24))
+    image = Image.new("RGB", (width, height), (255, 255, 255))
+    ImageDraw.Draw(image).text((12 - box[0], 12 - box[1]), text, font=font, fill=(0, 0, 0))
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def _preview_region_inputs(state: AppState, page_id: str, body: dict):
+    """Страница и регион с наложенным черновиком — общая логика preview."""
+    region_id = _region_id(body.get("region_id"))
+    record = _require_page(state, page_id)
+    document = state.store.read_document(state.project_id or "", page_id)
+    region = next((item for item in document.regions if item.id == region_id), None)
+    if region is None:
+        # Новый регион ещё не в документе: берём его из полного снимка drafts.
+        raw_drafts = body.get("drafts")
+        if isinstance(raw_drafts, list):
+            from src.models import TextRegion
+
+            for item in raw_drafts:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    if int(item.get("id", -1)) == region_id:
+                        region = TextRegion.from_dict(item)
+                        break
+                except (TypeError, ValueError, KeyError, OverflowError, AttributeError):
+                    continue
+    if region is None:
+        raise _HttpError(400, "Регион не найден")
+    # Черновик используется только для образца: документ проекта не меняется.
+    if "draft" in body:
+        from src.models import TextRegion
+
+        draft = body["draft"]
+        if not isinstance(draft, dict):
+            raise _HttpError(400, "Некорректный черновик региона")
+        try:
+            values = region.to_dict()
+            for key in (
+                "text", "translation", "bbox", "style", "text_position",
+                "layout_snapshot",
+            ):
+                if key in draft:
+                    values[key] = draft[key]
+            region = TextRegion.from_dict(values)
+            if len(region.bbox) != 4:
+                raise ValueError("bbox")
+            if region.bbox[2] <= 0 or region.bbox[3] <= 0:
+                raise ValueError("bbox")
+        except (TypeError, ValueError, KeyError, OverflowError, AttributeError) as exc:
+            raise _HttpError(400, "Некорректный черновик региона") from exc
+    return record, document, region
+
+
+def _preview_region(state: AppState, page_id: str, body: dict) -> _Result:
+    started = time.perf_counter()
+    record, document, region = _preview_region_inputs(state, page_id, body)
+    drafts_regions = []
+    drafts_complete = body.get("drafts_complete") is True
+    raw_drafts = body.get("drafts")
+    if raw_drafts is not None:
+        from src.models import TextRegion
+
+        if not isinstance(raw_drafts, list):
+            raise _HttpError(400, "Черновики регионов должны быть списком")
+        try:
+            for item in raw_drafts:
+                if not isinstance(item, dict):
+                    raise ValueError("draft")
+                candidate = TextRegion.from_dict(item)
+                if len(candidate.bbox) != 4:
+                    raise ValueError("bbox")
+                if candidate.bbox[2] <= 0 or candidate.bbox[3] <= 0:
+                    raise ValueError("bbox")
+                drafts_regions.append(candidate)
+        except (TypeError, ValueError, KeyError, OverflowError, AttributeError) as exc:
+            raise _HttpError(400, "Некорректный черновик региона") from exc
+    mode = str(body.get("mode") or "exact").strip().lower()
+    if mode not in {"exact", "base-layer", "base-page", "base-overlay"}:
+        raise _HttpError(400, "Неизвестный режим предпросмотра")
+    apply_rotation = body.get("apply_rotation") is True
+    source_path, source_fingerprint = _page_image_fingerprint(state, page_id, record)
+    settings = state.settings
+    from src.app.render_cache import cache_key
+
+    preview_key = cache_key({
+        "kind": "preview-v2",
+        "page_id": page_id,
+        "page_version": document.version,
+        "source": source_fingerprint,
+        "mode": mode,
+        "apply_rotation": apply_rotation,
+        "region": region.to_dict(),
+        "drafts": [item.to_dict() for item in drafts_regions],
+        "renderer": {
+            "min_font_size": settings.min_font_size,
+            "max_font_size": settings.max_font_size,
+            "target_lang": settings.target_lang,
+            "text_stroke_ratio": settings.text_stroke_ratio,
+            "text_margin": settings.text_margin,
+        },
+    })
+    cache = _render_cache(state)
+    cached = cache.get(preview_key)
+    cached_body = cached if isinstance(cached, tuple) and cached[0] == "preview" else None
+
+    try:
+        if cached_body is not None:
+            _kind, png, origin_x, origin_y, meta = cached_body
+        else:
+            if mode == "base-layer":
+                png, origin_x, origin_y, meta = _typeset_base_layer(
+                    state, page_id, record, region, apply_rotation
+                )
+            elif mode == "base-page":
+                png, origin_x, origin_y, meta = _typeset_base_page(
+                    state, page_id, record, region, drafts_regions, drafts_complete
+                )
+            elif mode == "base-overlay":
+                png, origin_x, origin_y, meta = _typeset_base_overlay(
+                    state, page_id, record, region, drafts_regions, drafts_complete
+                )
+            else:
+                png, origin_x, origin_y, meta = _typeset_crop(state, page_id, record, region)
+            cache.put(preview_key, ("preview", png, origin_x, origin_y, meta), len(png))
+    except _HttpError:
+        raise
+    except Exception as exc:
+        logger.exception("Не удалось построить предпросмотр")
+        raise _HttpError(400, "Не удалось построить предпросмотр региона") from exc
+    revision = body.get("revision", 0)
+    try:
+        revision = max(0, min(2_147_483_647, int(revision)))
+    except (TypeError, ValueError, OverflowError):
+        revision = 0
+    headers = {
+        "X-Offset-X": str(origin_x),
+        "X-Offset-Y": str(origin_y),
+        "X-Preview-Revision": str(revision),
+        "X-Preview-Mode": mode,
+        "X-Preview-Duration-Ms": str(max(0, round((time.perf_counter() - started) * 1000))),
+    }
+    if isinstance(meta, dict):
+        for key, value in meta.items():
+            headers[f"X-{key.replace('_', '-').title()}"] = str(value)
+    return _Result(body=png, content_type="image/png", headers=headers)
+
+
+def _fill_preview(state: AppState, page_id: str, body: dict) -> _Result:
+    """Полупрозрачный PNG заливки по цвету исходной страницы.
+
+    shortcut: превью считается на исходнике без layout_long_side; на мелких
+    страницах край заливки может отличаться от финального clean на пару px.
+    """
+    record = _require_page(state, page_id)
+    source = Path(str(record.get("source_path") or ""))
+    if not source.is_file():
+        raise _HttpError(400, "Нет исходного изображения")
+    try:
+        x = int(body.get("x"))
+        y = int(body.get("y"))
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise _HttpError(400, "Нужны координаты заливки") from exc
+    try:
+        tolerance = max(0, min(100, int(body.get("tolerance", 20))))
+    except (TypeError, ValueError, OverflowError):
+        tolerance = 20
+    mode = str(body.get("mode") or "flood").strip().lower()
+    if mode not in {"flood", "erase_flood", "erase"}:
+        raise _HttpError(400, "Неизвестный режим заливки")
+    if mode == "erase":
+        mode = "erase_flood"
+    from src.components.flood_fill import fill_preview_png
+
+    try:
+        from PIL import Image
+
+        with Image.open(source) as opened:
+            opened.load()
+            png, origin_x, origin_y = fill_preview_png(
+                opened.convert("RGB"), (x, y), tolerance, mode
+            )
+    except _HttpError:
+        raise
+    except Exception as exc:
+        logger.exception("Предпросмотр заливки")
+        raise _HttpError(400, "Не удалось посчитать заливку") from exc
+    if not png:
+        raise _HttpError(400, "Пустая область заливки")
+    return _Result(
+        body=png,
+        content_type="image/png",
+        headers={"X-Fill-X": str(origin_x), "X-Fill-Y": str(origin_y)},
+    )
+
+
+def _open_page_rgb(state: AppState, page_id: str, record: dict):
+    """Чистая страница, если она уже есть, иначе оригинал."""
+    from PIL import Image
+
+    path, fingerprint = _page_image_fingerprint(state, page_id, record)
+    from src.app.render_cache import cache_key
+
+    key = cache_key({"kind": "page-rgb-v1", "page_id": page_id, "source": fingerprint})
+    cache = _render_cache(state)
+    cached = cache.get(key)
+    if cached is not None and getattr(cached, "mode", None) == "RGB":
+        return cached.copy()
+    try:
+        with Image.open(path) as image:
+            image.load()
+            rgb = image.convert("RGB")
+            cache.put(key, rgb.copy(), rgb.width * rgb.height * 3)
+            return rgb
+    except _HttpError:
+        raise
+    except Exception as exc:
+        raise _HttpError(400, "Не удалось открыть изображение") from exc
+
+
+def _render_cache(state: AppState):
+    """Вернуть кэш текущего лимита; изменение настройки сбрасывает прежний пул."""
+    from src.app.render_cache import ByteLRU
+
+    limit = max(0, int(getattr(state.settings, "render_cache_limit_mb", 256) or 0)) * 1024 * 1024
+    with state._component_gate:
+        if state._render_cache is None or state._render_cache_limit != limit:
+            state._render_cache = ByteLRU(limit)
+            state._render_cache_limit = limit
+        return state._render_cache
+
+
+def _page_image_fingerprint(state: AppState, page_id: str, record: dict) -> tuple[Path, dict]:
+    """Разрешить чистую/исходную страницу и fingerprint для кэш-инвалидации."""
+    project_id = state.project_id or ""
+    clean = state.store.image_path(project_id, page_id, "clean")
+    path = clean if clean.is_file() else Path(str(record.get("source_path") or ""))
+    if not path.is_file():
+        raise _HttpError(400, "Нет изображения страницы")
+    try:
+        stat = path.stat()
+        resolved = str(path.resolve())
+        fingerprint = {"path": resolved, "size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
+    except OSError as exc:
+        raise _HttpError(400, "Не удалось прочитать изображение") from exc
+    return path, fingerprint
+
+
+def _preview_typesetter(state: AppState):
+    from src.components.typesetter import Typesetter
+
+    settings = state.settings
+    return Typesetter(
+        min_font_size=int(getattr(settings, "min_font_size", 10) or 10),
+        max_font_size=int(getattr(settings, "max_font_size", 128) or 128),
+        lang=str(getattr(settings, "target_lang", "ru") or "ru"),
+        stroke_ratio=float(getattr(settings, "text_stroke_ratio", 0) or 0),
+        margin_ratio=float(getattr(settings, "text_margin", 0) or 0),
+    )
+
+
+def _preview_region_copy(region):
+    from copy import deepcopy
+
+    region_copy = deepcopy(region)
+    if not str(region_copy.translation or "").strip():
+        region_copy.translation = str(region_copy.text or "").strip() or " "
+    return region_copy
+
+
+def _layout_snapshot_meta(layouts: dict, region) -> dict:
+    """Снимок раскладки для клиента: base64 JSON в заголовке ответа."""
+    snapshot = layouts.get(int(region.id)) if isinstance(layouts, dict) else None
+    if not isinstance(snapshot, dict) or not snapshot:
+        return {}
+    payload = json.dumps(snapshot, ensure_ascii=False, separators=(",", ":"))
+    try:
+        encoded = base64.b64encode(payload.encode("utf-8")).decode("ascii")
+    except (UnicodeEncodeError, ValueError):
+        return {}
+    return {"layout_snapshot": encoded}
+
+
+def _typeset_crop(state: AppState, page_id: str, record: dict, region) -> tuple[bytes, int, int, dict]:
+    from io import BytesIO
+
+    image = _open_page_rgb(state, page_id, record)
+    region_copy = _preview_region_copy(region)
+    setter = _preview_typesetter(state)
+    layer, layer_origin, _overflow = setter.render_layer(image, [region_copy], force=True)
+    x, y, width, height = (int(value) for value in region.bbox)
+    x = min(x, layer_origin[0])
+    y = min(y, layer_origin[1])
+    right = max(region.bbox[0] + region.bbox[2], layer_origin[0] + layer.width)
+    bottom = max(region.bbox[1] + region.bbox[3], layer_origin[1] + layer.height)
+    width = right - x
+    height = bottom - y
+    page_w, page_h = image.size
+    x0 = max(0, min(page_w - 1, x))
+    y0 = max(0, min(page_h - 1, y))
+    x1 = max(x0 + 1, min(page_w, x + max(width, 1)))
+    y1 = max(y0 + 1, min(page_h, y + max(height, 1)))
+    crop = image.crop((x0, y0, x1, y1)).convert("RGBA")
+    crop.alpha_composite(layer, dest=(layer_origin[0] - x0, layer_origin[1] - y0))
+    crop = crop.convert("RGB")
+    buffer = BytesIO()
+    crop.save(buffer, format="PNG")
+    return buffer.getvalue(), x0, y0, _layout_snapshot_meta(setter._last_layouts, region)
+
+
+def _layout_snapshot(state: AppState, page_id: str, body: dict) -> dict:
+    """Свежая раскладка текущего черновика без PNG: для Done после preview."""
+    record, _document, region = _preview_region_inputs(state, page_id, body)
+    region_copy = _preview_region_copy(region)
+    try:
+        setter = _preview_typesetter(state)
+        setter.render_layer(
+            _open_page_rgb(state, page_id, record),
+            [region_copy],
+            force=True,
+            apply_geometry=False,
+            trim=False,
+        )
+    except _HttpError:
+        raise
+    except Exception as exc:
+        logger.exception("Не удалось построить раскладку региона")
+        raise _HttpError(400, "Не удалось построить раскладку региона") from exc
+    snapshot = setter._last_layouts.get(int(region_copy.id))
+    if not isinstance(snapshot, dict) or not snapshot:
+        # Пустой регион: раскладки ещё нет, но это не сбой запроса.
+        return {"region_id": int(region_copy.id), "layout_snapshot": None}
+    return {"region_id": int(region_copy.id), "layout_snapshot": snapshot}
+
+
+def _typeset_base_layer(
+    state: AppState,
+    page_id: str,
+    record: dict,
+    region,
+    apply_rotation: bool = False,
+) -> tuple[bytes, int, int, dict]:
+    """Прозрачный слой надписи с замороженной раскладкой.
+
+    Без ``apply_rotation`` поворот и warp не применяются: это база для
+    локального preview. С ``apply_rotation`` слой заранее повёрнут, а warp
+    остаётся клиенту — так работают комбинации rotation + arc/wave/flag/ring.
+    """
+    from io import BytesIO
+
+    image = _open_page_rgb(state, page_id, record)
+    region_copy = _preview_region_copy(region)
+    if apply_rotation:
+        warp = dict(region_copy.style.warp or {})
+        warp["kind"] = "none"
+        region_copy.style.warp = warp
+        region_copy.text_position = None
+    setter = _preview_typesetter(state)
+    layer, (origin_x, origin_y), _overflow = setter.render_layer(
+        image,
+        [region_copy],
+        force=True,
+        apply_geometry=apply_rotation,
+        trim=False,
+        capture=apply_rotation,
+        stable_pad=abs(float(region_copy.style.skew_x or 0.0)) < 1e-6,
+    )
+    anchor = setter._last_anchors.get(int(region_copy.id), (0.0, 0.0))
+    # Pillow/шрифты разных платформ оставляют RGB в полностью прозрачных пикселях.
+    layer.paste((0, 0, 0, 0), mask=layer.getchannel("A").point(lambda alpha: 255 if alpha == 0 else 0))
+    buffer = BytesIO()
+    layer.save(buffer, format="PNG", optimize=True)
+    return (
+        buffer.getvalue(),
+        int(origin_x),
+        int(origin_y),
+        {
+            "layer_anchor_x": round(float(anchor[0]), 3),
+            "layer_anchor_y": round(float(anchor[1]), 3),
+            "renderer_version": 2,
+            **_layout_snapshot_meta(setter._last_layouts, region_copy),
+        },
+    )
+
+
+def _preview_order(
+    state: AppState,
+    page_id: str,
+    region,
+    drafts=None,
+    complete: bool = False,
+) -> tuple[list, list]:
+    """Регионы до и после выбранного в порядке документа.
+
+    ``complete`` — drafts является полным снимком (поддерживает удаление).
+    Иначе drafts только заменяют совпавшие ID и добавляют новые.
+    """
+    document = state.store.read_document(state.project_id or "", page_id)
+    saved = list(document.regions)
+    if not drafts:
+        ordered = saved
+    elif complete:
+        ordered = list(drafts)
+    else:
+        by_id = {int(item.id): item for item in drafts}
+        ordered = [by_id.get(int(item.id), item) for item in saved]
+        known = {int(item.id) for item in saved}
+        ordered.extend(item for item in drafts if int(item.id) not in known)
+    index = next(
+        (position for position, item in enumerate(ordered) if int(item.id) == int(region.id)),
+        -1,
+    )
+    if index < 0:
+        return ordered, []
+    return ordered[:index], ordered[index + 1:]
+
+
+def _typeset_base_page(
+    state: AppState,
+    page_id: str,
+    record: dict,
+    region,
+    drafts=None,
+    complete: bool = False,
+) -> tuple[bytes, int, int, dict]:
+    """Страница без выбранного региона и всего, что рисуется выше него."""
+    from io import BytesIO
+
+    image = _open_page_rgb(state, page_id, record)
+    before, _after = _preview_order(state, page_id, region, drafts, complete)
+    setter = _preview_typesetter(state)
+    rendered, _overflow = setter.render(image, before, force=True)
+    buffer = BytesIO()
+    rendered.convert("RGB").save(buffer, format="PNG", optimize=True)
+    return buffer.getvalue(), 0, 0, {"renderer_version": 2}
+
+
+def _typeset_base_overlay(
+    state: AppState,
+    page_id: str,
+    record: dict,
+    region,
+    drafts=None,
+    complete: bool = False,
+) -> tuple[bytes, int, int, dict]:
+    """Прозрачный слой надписей, которые по порядку лежат выше выбранной."""
+    from io import BytesIO
+
+    image = _open_page_rgb(state, page_id, record)
+    _before, after = _preview_order(state, page_id, region, drafts, complete)
+    setter = _preview_typesetter(state)
+    layer, (origin_x, origin_y), _overflow = setter.render_layer(
+        image, after, force=True
+    )
+    buffer = BytesIO()
+    layer.save(buffer, format="PNG", optimize=True)
+    return (
+        buffer.getvalue(),
+        int(origin_x),
+        int(origin_y),
+        {"renderer_version": 2},
+    )
+
+
+def _apply_sfx_style(state: AppState, page_id: str, region_raw: str) -> dict:
+    try:
+        from src.components.sfx_style import estimate_style
+    except ImportError as exc:
+        raise _HttpError(503, "Подбор стиля звука недоступен") from exc
+    region_id = _region_id(region_raw)
+    record = _require_page(state, page_id)
+    project_id = state.project_id or ""
+    document = state.store.read_document(project_id, page_id)
+    region = next((item for item in document.regions if item.id == region_id), None)
+    if region is None:
+        raise _HttpError(400, "Регион не найден")
+    try:
+        image = _original_rgb(record)
+        mask = _region_mask(state, page_id, image, region)
+        estimated = estimate_style(image, mask)
+    except _HttpError:
+        raise
+    except Exception as exc:
+        logger.exception("Подбор стиля звука")
+        raise _HttpError(400, "Не удалось подобрать стиль") from exc
+    if not isinstance(estimated, dict):
+        raise _HttpError(400, "Не удалось подобрать стиль")
+    from src.models import TextStyle
+
+    saved = None
+    # Сериализовать read-modify-write в процессе сервера. Межпроцессный
+    # конфликт с воркером всё ещё ловит версия документа.
+    with state._page_edit_lock:
+        for _attempt in range(2):
+            document = state.store.read_document(project_id, page_id)
+            region = next((item for item in document.regions if item.id == region_id), None)
+            if region is None:
+                raise _HttpError(400, "Регион не найден")
+            region.style = TextStyle.from_dict(_merge_style(region.style.to_dict(), estimated))
+            try:
+                saved = state.store.write_document(
+                    project_id, page_id, document, base_version=int(document.version),
+                )
+                break
+            except VersionConflict:
+                saved = None
+    if saved is None:
+        raise _HttpError(409, "Конфликт версии")
+    state.store.mark_visual_version(project_id, page_id, saved.version)
+    _mark_package_dirty(state)
+    try:
+        state.store.update_status(project_id, page_id, status="edited")
+    except (FileNotFoundError, ValueError, OSError):
+        logger.exception("Статус страницы после стиля звука")
+    found = next((item for item in saved.regions if item.id == region_id), None)
+    if found is None:
+        raise _HttpError(400, "Регион не найден")
+    return found.to_dict()
+
+
+def _original_rgb(record: dict):
+    from PIL import Image
+    import numpy as np
+
+    path = Path(str(record.get("source_path") or ""))
+    if not path.is_file():
+        raise _HttpError(400, "Нет изображения страницы")
+    try:
+        with Image.open(path) as image:
+            image.load()
+            return np.array(image.convert("RGB"))
+    except _HttpError:
+        raise
+    except Exception as exc:
+        raise _HttpError(400, "Не удалось открыть изображение") from exc
+
+
+def _region_mask(state: AppState, page_id: str, image_rgb, region):
+    """Маска букв из сохранённого кадра, иначе прямоугольник рамки."""
+    import numpy as np
+    from PIL import Image
+
+    height, width = image_rgb.shape[:2]
+    mask = np.zeros((height, width), dtype=np.uint8)
+    x, y, box_w, box_h = (int(value) for value in region.bbox)
+    x0, y0 = max(0, x), max(0, y)
+    x1, y1 = min(width, x + max(box_w, 0)), min(height, y + max(box_h, 0))
+    mask_path = state.store.image_path(state.project_id or "", page_id, "mask")
+    if mask_path.is_file() and x1 > x0 and y1 > y0:
+        try:
+            with Image.open(mask_path) as stored:
+                stored.load()
+                pixels = np.array(stored.convert("L"))
+            if pixels.shape[:2] == (height, width):
+                mask[y0:y1, x0:x1] = pixels[y0:y1, x0:x1]
+        except Exception:
+            logger.exception("Маска региона")
+    if not mask.any() and x1 > x0 and y1 > y0:
+        mask[y0:y1, x0:x1] = 255
+    return mask
+
+
+def _merge_style(current: dict, estimated: dict) -> dict:
+    """Цвет и обводка оценки поверх стиля. Угол и искривление не копируем."""
+    merged = dict(current)
+    for key, value in estimated.items():
+        if key in ("rotation", "warp") or value is None:
+            continue
+        merged[key] = value
+    return merged
+
+
+_REMOTE_EMPTY = {
+    "enabled": False,
+    "addresses": [],
+    "pairing_code": "",
+    "devices": [],
+    "recent": [],
+    "clients": 0,
+}
+
+
+def _remote_status(state: AppState) -> dict:
+    remote = getattr(state, "remote_api", None)
+    if remote is None:
+        return dict(_REMOTE_EMPTY)
+    try:
+        snapshot = remote.status_snapshot()
+    except AttributeError:
+        return {
+            "enabled": True,
+            "addresses": [],
+            "pairing_code": "",
+            "devices": [],
+            "recent": [],
+            "clients": 0,
+        }
+    if not isinstance(snapshot, dict):
+        return {
+            "enabled": True,
+            "addresses": [],
+            "pairing_code": "",
+            "devices": [],
+            "recent": [],
+            "clients": 0,
+        }
+    return snapshot
+
+
+def _remote_pair(state: AppState) -> dict:
+    remote = getattr(state, "remote_api", None)
+    if remote is None:
+        raise _HttpError(409, "Доступ по сети выключен")
+    pairing = getattr(remote, "pairing", None)
+    issue = getattr(pairing, "issue_code", None) if pairing is not None else None
+    if not callable(issue):
+        raise _HttpError(409, "Код подключения недоступен")
+    code = issue()
+    snapshot = _remote_status(state)
+    snapshot["pairing_code"] = code if isinstance(code, str) else str(code or "")
+    return snapshot
+
+
+def _remote_revoke(state: AppState, body: dict) -> dict:
+    remote = getattr(state, "remote_api", None)
+    if remote is None:
+        raise _HttpError(409, "Доступ по сети выключен")
+    device_id = body.get("id")
+    if not isinstance(device_id, str) or not device_id.strip():
+        raise ValueError("Нужен id")
+    revoke = getattr(remote, "revoke", None)
+    if not callable(revoke):
+        raise _HttpError(503, "Отзыв доступа недоступен")
+    revoke(device_id.strip())
+    return _remote_status(state)
+
+
+def _image(state: AppState, page_id: str, kind: str) -> _Result:
+    if kind not in _IMAGE_KINDS:
+        raise _HttpError(404, "Не найдено")
+    record = _require_page(state, page_id)
+    if kind == "original":
+        source = str(record.get("source_path") or "")
+        path = Path(source) if source else None
+    else:
+        path = state.store.image_path(state.project_id or "", page_id, kind)
+    if path is None or not path.is_file():
+        raise _HttpError(404, "Не найдено")
+    content_type = _CONTENT_TYPES.get(path.suffix.lower(), "application/octet-stream")
+    return _Result(body=path.read_bytes(), content_type=content_type)
+
+
+def _static(state: AppState, url_path: str, query: dict) -> _Result:
+    token = None
+    if "k" in query and query["k"]:
+        token = query["k"][0]
+    cookie = None
+    if token is not None and not state.browser_origins:
+        if not _same_token(str(token), state.token):
+            raise _HttpError(401, "Не авторизован")
+        cookie = state.token
+    target = _static_target(state.web_root, url_path)
+    if target is None:
+        raise _HttpError(404, "Не найдено")
+    content_type = _CONTENT_TYPES.get(target.suffix.lower(), "application/octet-stream")
+    return _Result(body=target.read_bytes(), content_type=content_type, cookie=cookie)
+
+
+def _static_target(web_root: Path, url_path: str) -> Path | None:
+    """Файл внутри ``web_root``. ``..`` и каталог ``mockups`` не отдаются."""
+    if not url_path.startswith("/") or "\\" in url_path or "\x00" in url_path:
+        return None
+    if url_path != "/" and url_path.endswith("/"):
+        return None
+    parts = [part for part in PurePosixPath(url_path).parts if part != "/"]
+    if any(part.casefold() == "mockups" for part in parts):
+        return None
+    root = web_root.resolve()
+    current = root
+    for part in parts or ["index.html"]:
+        if part in (".", "..") or part.casefold() == "mockups" or ":" in part:
+            return None
+        current = current / part
+    try:
+        candidate = current.resolve()
+        candidate.relative_to(root)
+    except (OSError, ValueError):
+        return None
+    relative = candidate.relative_to(root)
+    if any(part.casefold() == "mockups" for part in relative.parts):
+        return None
+    if not candidate.is_file():
+        return None
+    return candidate
+
+
+def _stream_events(handler: BaseHTTPRequestHandler, state: AppState) -> None:
+    box = state.subscribe()
+    access_generation = state.web_access.generation if state.web_access else None
+    last_keepalive = time.monotonic()
+    handler._ilt_sent = True  # type: ignore[attr-defined]
+    try:
+        handler.send_response(200)
+        handler.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        handler.send_header("Cache-Control", "no-store")
+        handler.send_header("Connection", "close")
+        handler.end_headers()
+        handler.wfile.flush()
+        while not state._stop.is_set():
+            if state.web_access and (state.web_access.generation != access_generation or not _cookie_ok(handler, state)):
+                break
+            state.broadcast_pending()
+            try:
+                item = box.get(timeout=min(1, _SSE_KEEPALIVE_SEC) if state.web_access else _SSE_KEEPALIVE_SEC)
+            except queue.Empty:
+                if state.web_access and (state.web_access.generation != access_generation or not _cookie_ok(handler, state)):
+                    break
+                if time.monotonic() - last_keepalive < _SSE_KEEPALIVE_SEC:
+                    continue
+                handler.wfile.write(b": keep-alive\n\n")
+                handler.wfile.flush()
+                last_keepalive = time.monotonic()
+                continue
+            if item is None:
+                break
+            if state.web_access and (state.web_access.generation != access_generation or not _cookie_ok(handler, state)):
+                break
+            event_type = str(item.get("type") or "message").replace("\r", "").replace("\n", "")
+            data = json.dumps(item, ensure_ascii=False, separators=(",", ":"))
+            handler.wfile.write(f"event: {event_type}\ndata: {data}\n\n".encode("utf-8"))
+            handler.wfile.flush()
+    except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError, OSError):
+        return
+    finally:
+        state.unsubscribe(box)
+
+
+def _send_result(handler: BaseHTTPRequestHandler, result: _Result) -> None:
+    if result.file is not None:
+        with result.file.open("rb") as source:
+            handler.send_response(result.status)
+            handler.send_header("Content-Type", result.content_type or "application/octet-stream")
+            handler.send_header("Content-Length", str(os.fstat(source.fileno()).st_size))
+            handler.send_header("Cache-Control", "no-store")
+            handler.send_header("X-Content-Type-Options", "nosniff")
+            for name, value in result.headers.items():
+                handler.send_header(name, str(value))
+            handler.end_headers()
+            shutil.copyfileobj(source, handler.wfile, length=1024 * 1024)
+        return
+    if result.body is not None and result.payload is None:
+        _send_bytes(
+            handler,
+            result.body,
+            result.status,
+            result.content_type or "application/octet-stream",
+            cookie=result.cookie,
+            extra_headers=result.headers,
+        )
+        return
+    _send_json(handler, result.payload or {}, result.status, cookie=result.cookie)
+
+
+def _send_json(
+    handler: BaseHTTPRequestHandler,
+    payload: dict,
+    status: int = 200,
+    *,
+    cookie: str | None = None,
+) -> None:
+    if status >= 400 and getattr(getattr(handler.server, "app_state", None), "browser_origins", ()):
+        _discard_rejected_body(handler)
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    _send_bytes(handler, body, status, "application/json; charset=utf-8", cookie=cookie)
+
+
+def _discard_rejected_body(handler: BaseHTTPRequestHandler) -> None:
+    """Малый отклонённый upload не должен сбрасывать TCP до доставки ответа Windows-клиенту."""
+    if getattr(handler, "_ilt_body_read", False):
+        return
+    raw = handler.headers.get("Content-Length", "")
+    if not raw.isdecimal() or int(raw) > 64 * 1024 or handler.headers.get("Transfer-Encoding"):
+        return
+    previous = handler.connection.gettimeout()
+    try:
+        handler.connection.settimeout(1)
+        handler.rfile.read(int(raw))
+        handler._ilt_body_read = True  # type: ignore[attr-defined]
+    except OSError:
+        pass
+    finally:
+        handler.connection.settimeout(previous)
+
+
+def _send_bytes(
+    handler: BaseHTTPRequestHandler,
+    body: bytes,
+    status: int,
+    content_type: str,
+    *,
+    cookie: str | None = None,
+    extra_headers: dict | None = None,
+) -> None:
+    if getattr(handler, "_ilt_sent", False):
+        return
+    handler._ilt_sent = True  # type: ignore[attr-defined]
+    handler.send_response(status)
+    handler.send_header("Content-Type", content_type)
+    handler.send_header("Content-Length", str(len(body)))
+    handler.send_header("Cache-Control", "no-store")
+    handler.send_header("Connection", "close")
+    for name, value in (extra_headers or {}).items():
+        handler.send_header(str(name), str(value))
+    if cookie:
+        browser = bool(getattr(getattr(handler.server, "app_state", None), "browser_origins", ()))
+        value = _cookie_header(cookie, "ilt_browser_session" if browser else _COOKIE)
+        handler.send_header("Set-Cookie", value + ("; Max-Age=43200" if browser else ""))
+    handler.end_headers()
+    handler.wfile.write(body)
+    handler.wfile.flush()

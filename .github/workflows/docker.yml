@@ -1,0 +1,120 @@
+name: Docker CPU full
+
+on:
+  push:
+    branches: [main]
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing draft release tag, e.g. v1.2.0"
+        required: true
+      source_ref:
+        description: "Exact release source commit"
+        required: true
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: docker-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  cpu-full:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.event.release.tag_name || github.sha }}
+      - name: Resolve and validate release source
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION=$(python -c 'from src.app import __version__; print(__version__)')
+          REVISION=$(git rev-parse HEAD)
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
+          if [ -n "$RELEASE_TAG" ] && [ "$RELEASE_TAG" != "v$VERSION" ]; then
+            echo 'Release tag and application version differ'; exit 1
+          fi
+          if [ "${{ github.event_name }}" = workflow_dispatch ]; then
+            test "$(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft')" = true
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "revision=$REVISION" >> "$GITHUB_OUTPUT"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - name: Load the exact accepted image for stable promotion
+        if: github.event_name == 'release'
+        env:
+          IMAGE: ${{ steps.meta.outputs.image }}
+          REVISION: ${{ steps.meta.outputs.revision }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release download "$RELEASE_TAG" -p GHCR-DIGEST.txt --dir /tmp/accepted-image
+          ACCEPTED=$(cat /tmp/accepted-image/GHCR-DIGEST.txt)
+          [[ "$ACCEPTED" =~ ^$IMAGE@sha256:[a-f0-9]{64}$ ]]
+          docker pull "$ACCEPTED"
+          test "$(docker inspect "$ACCEPTED" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$REVISION"
+          docker tag "$ACCEPTED" image-localization-tool:cpu-full
+      - name: Build prepared image from current code
+        if: github.event_name != 'release'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: image-localization-tool:cpu-full
+          build-args: |
+            SOURCE_REVISION=${{ steps.meta.outputs.revision }}
+            APP_VERSION=${{ steps.meta.outputs.version }}
+          cache-from: type=gha,scope=ilt-cpu-full
+          cache-to: type=gha,scope=ilt-cpu-full,mode=max
+      - name: Real offline CPU acceptance
+        run: |
+          docker run --rm --network none --entrypoint python image-localization-tool:cpu-full -m src.app.distribution functional
+      - name: Publish verified image
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE: ${{ steps.meta.outputs.image }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          if [ "${{ github.event_name }}" = release ]; then
+            TAG=cpu-full
+          elif [ -z "$RELEASE_TAG" ]; then
+            TAG=edge-cpu-full
+          else
+            TAG="$VERSION-cpu-full"
+          fi
+          docker tag image-localization-tool:cpu-full "$IMAGE:$TAG"
+          docker push "$IMAGE:$TAG"
+          docker buildx imagetools inspect "$IMAGE:$TAG" --format '{{json .Manifest}}' > /tmp/image-manifest.json
+          DIGEST=$(python -c 'import json; print(json.load(open("/tmp/image-manifest.json"))["digest"])')
+          mkdir -p dist
+          printf '%s@%s\n' "$IMAGE" "$DIGEST" > dist/GHCR-DIGEST.txt
+          # Стабильный указатель использует принятый digest, без пересборки версии.
+          docker logout ghcr.io
+      - name: Offline release bundle from the same verified image
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker tag image-localization-tool:cpu-full "image-localization-tool:$VERSION-cpu-full"
+          docker save image-localization-tool:cpu-full "image-localization-tool:$VERSION-cpu-full" | gzip -1 > "dist/ImageLocalizationTool-$VERSION-linux-amd64-cpu-full.tar.gz"
+          pip install PyYAML==6.0.3
+          python scripts/package-docker.py --image-archive "dist/ImageLocalizationTool-$VERSION-linux-amd64-cpu-full.tar.gz"
+          sha256sum "dist/ImageLocalizationTool-$VERSION-docker-cpu-full.zip" > dist/SHA256SUMS-docker.txt
+          test "$(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft')" = true
+          gh release upload "$RELEASE_TAG" "dist/ImageLocalizationTool-$VERSION-docker-cpu-full.zip" dist/GHCR-DIGEST.txt dist/SHA256SUMS-docker.txt --clobber

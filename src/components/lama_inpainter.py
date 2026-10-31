@@ -1,0 +1,478 @@
+"""Очистка текста: заливка ровного фона, иначе LaMa-manga, иначе OpenCV."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import cv2
+import numpy as np
+from PIL import Image
+
+from src.utils.logger import logger
+from src.utils.paths import resolve_model
+
+
+def resolve_device(preference: str = "auto") -> str:
+    """auto → cuda, если torch его видит, иначе cpu.
+
+    CUDA-пак ставится отдельным компонентом (cu128); после установки auto
+    выбирает GPU сам. Явный ``cuda``/``cpu`` в настройках главнее. При сбое
+    CUDA-инференса ``_lama_after_failure`` делает один retry на CPU.
+    """
+    if preference and preference != "auto":
+        return preference
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return "cuda"
+    except Exception:
+        pass
+    return "cpu"
+
+
+def _ceil_mod(value: int, modulo: int = 8) -> int:
+    if value % modulo == 0:
+        return value
+    return (value // modulo + 1) * modulo
+
+
+# Окно длиннее этого идёт кусками. Короткий штрих остаётся одним проходом.
+_LAMA_LIMIT = 1024
+_TILE = 768
+_TILE_OVERLAP = 192
+
+# Кольцо однородности без изменений порогов; дилатация маски LaMa уже уже (было 5).
+_RING_KERNEL = 7
+_HALO_KERNEL = 7
+_LAMA_MASK_DILATE = 3
+_EDGE_FEATHER_PX = 4
+_RING_INK_DISTANCE = 40.0
+_RING_INLIER_DISTANCE = 30.0
+_RING_INLIER_RATIO = 0.85
+_RING_MIN_PIXELS = 12
+# Отброшенные пиксели почти по всему кольцу — это текстура, а не соседняя буква.
+_TEXTURE_SECTORS = 5
+_TEXTURE_MIN_REJECTED = 8
+# Линейный уход яркости по кольцу: градиент, не плоская заливка.
+_GRADIENT_SPAN = 18.0
+
+
+def _window_bounds(
+    component: np.ndarray,
+    shape: tuple[int, int],
+    pad: int,
+) -> tuple[int, int, int, int] | None:
+    ys, xs = np.where(component > 0)
+    if ys.size == 0:
+        return None
+    height, width = shape
+    y0 = max(0, int(ys.min()) - pad)
+    x0 = max(0, int(xs.min()) - pad)
+    y1 = min(height, int(ys.max()) + pad + 1)
+    x1 = min(width, int(xs.max()) + pad + 1)
+    return y0, x0, y1, x1
+
+
+def _tile_starts(length: int, tile: int, step: int) -> list[int]:
+    """Начала кропов, последний дотягивается до края."""
+    if length <= tile:
+        return [0]
+    starts = list(range(0, length - tile + 1, step))
+    last = length - tile
+    if starts[-1] != last:
+        starts.append(last)
+    return starts
+
+
+def _feather(height: int, width: int, fade: int) -> np.ndarray:
+    """Вес кропа: к краю меньше, чтобы перекрытие не давало шва."""
+    fade = max(1, min(fade, height // 2, width // 2))
+    ramp = np.linspace(0.05, 1.0, fade, dtype=np.float32)
+    wy = np.ones(height, dtype=np.float32)
+    wx = np.ones(width, dtype=np.float32)
+    wy[:fade] = ramp
+    wy[-fade:] = ramp[::-1]
+    wx[:fade] = ramp
+    wx[-fade:] = ramp[::-1]
+    return wy[:, None] * wx[None, :]
+
+
+def _merge_holes(holes: list[tuple], gap: int) -> list[list[tuple]]:
+    """Слить компоненты, чьи расширенные рамки пересекаются, в общие окна."""
+    parent = list(range(len(holes)))
+
+    def find(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    boxes = [
+        (hole[0] - gap, hole[1] - gap, hole[2] + gap, hole[3] + gap)
+        for hole in holes
+    ]
+    for left in range(len(holes)):
+        y0, x0, y1, x1 = boxes[left]
+        for right in range(left + 1, len(holes)):
+            oy0, ox0, oy1, ox1 = boxes[right]
+            if y1 < oy0 or oy1 < y0 or x1 < ox0 or ox1 < x0:
+                continue
+            parent[find(right)] = find(left)
+    groups: dict[int, list[tuple]] = {}
+    for index, hole in enumerate(holes):
+        groups.setdefault(find(index), []).append(hole)
+    return list(groups.values())
+
+
+def _ring_is_textured(
+    component: np.ndarray,
+    ys: np.ndarray,
+    xs: np.ndarray,
+    rejected: np.ndarray,
+) -> bool:
+    """Точки скринтона разбросаны по кольцу, соседние буквы — в одном-двух секторах."""
+    if int(np.sum(rejected)) < _TEXTURE_MIN_REJECTED:
+        return False
+    cy = float(np.mean(np.nonzero(component > 0)[0]))
+    cx = float(np.mean(np.nonzero(component > 0)[1]))
+    angles = np.arctan2(ys[rejected].astype(np.float64) - cy, xs[rejected].astype(np.float64) - cx)
+    sectors = np.unique(((angles + np.pi) / (2 * np.pi) * 8).astype(np.int32) % 8)
+    return int(sectors.size) >= _TEXTURE_SECTORS
+
+
+def _ring_is_gradient(ys: np.ndarray, xs: np.ndarray, pixels: np.ndarray) -> bool:
+    """Яркость кольца заметно и линейно меняется вдоль страницы."""
+    if ys.size < _RING_MIN_PIXELS:
+        return False
+    luminance = pixels.mean(axis=1)
+    if float(luminance.max() - luminance.min()) < _GRADIENT_SPAN:
+        return False
+    for axis in (xs.astype(np.float64), ys.astype(np.float64)):
+        spread = float(axis.max() - axis.min())
+        if spread < 4:
+            continue
+        slope = float(np.polyfit(axis, luminance.astype(np.float64), 1)[0])
+        if abs(slope) * spread >= _GRADIENT_SPAN:
+            return True
+    return False
+
+
+def _edge_alpha(hole: np.ndarray, feather_px: float | int) -> np.ndarray:
+    """Вес вклейки внутри дырки: 1 в ядре, 0 у края (distance transform).
+
+    ``feather_px <= 0`` — жёсткая маска (везде 1 внутри hole).
+    """
+    mask = (np.asarray(hole) > 0).astype(np.uint8)
+    if not np.any(mask):
+        return np.zeros(mask.shape, dtype=np.float32)
+    feather = float(feather_px)
+    if feather <= 0.0:
+        return mask.astype(np.float32)
+    dist = cv2.distanceTransform(mask, cv2.DIST_L2, 3)
+    return np.clip(dist / feather, 0.0, 1.0).astype(np.float32)
+
+
+class LamaInpainter:
+    """Заливка однородного баллона или LaMa. Большое окно режется без уменьшения."""
+
+    def __init__(
+        self,
+        model_path: str | Path | None = None,
+        device: str = "auto",
+        force_opencv: bool = False,
+        uniform_std: float = 14.0,
+    ):
+        self.model_path = Path(model_path) if model_path else resolve_model("anime-manga-big-lama.pt")
+        self.device = resolve_device(device)
+        self.force_opencv = force_opencv
+        # Предупреждения последнего ``inpaint`` (неожиданный фолбэк на OpenCV).
+        self.last_warnings: list[str] = []
+        self.uniform_std = uniform_std
+        self._model = None
+
+    def inpaint(
+        self,
+        image: Image.Image,
+        mask: np.ndarray,
+        allow_flat_fill: bool = True,
+    ) -> Image.Image:
+        """Удалить пиксели маски. Сначала заливки, потом один проход LaMa.
+
+        ``allow_flat_fill=False`` пропускает однотонную заливку. Дальше тот же
+        путь: LaMa, либо OpenCV, если включён ``force_opencv``.
+        """
+        self.last_warnings = []
+        rgb = np.array(image.convert("RGB"))
+        binary = (mask > 0).astype(np.uint8) * 255
+        if binary.shape[:2] != rgb.shape[:2] or not np.any(binary):
+            return Image.fromarray(rgb)
+
+        num, labels = cv2.connectedComponents(binary)
+        result = rgb.copy()
+        height, width = binary.shape
+        holes: list[tuple] = []
+        ring_pad = max(_RING_KERNEL, _HALO_KERNEL)
+        for label_id in range(1, num):
+            ys, xs = np.where(labels == label_id)
+            if ys.size == 0:
+                continue
+            y0, x0 = int(ys.min()), int(xs.min())
+            y1, x1 = int(ys.max()) + 1, int(xs.max()) + 1
+            local = np.where(labels[y0:y1, x0:x1] == label_id, np.uint8(255), np.uint8(0))
+            if allow_flat_fill:
+                py0, px0 = max(0, y0 - ring_pad), max(0, x0 - ring_pad)
+                py1, px1 = min(height, y1 + ring_pad), min(width, x1 + ring_pad)
+                window = np.zeros((py1 - py0, px1 - px0), dtype=np.uint8)
+                window[y0 - py0:y1 - py0, x0 - px0:x1 - px0] = local
+                if self._fill_if_uniform(result[py0:py1, px0:px1], window, binary[py0:py1, px0:px1]):
+                    continue
+            holes.append((y0, x0, y1, x1, local))
+        if not holes:
+            return Image.fromarray(result)
+
+        dilate = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE, (_LAMA_MASK_DILATE, _LAMA_MASK_DILATE),
+        )
+        for group in _merge_holes(holes, gap=96):
+            component = np.zeros_like(binary)
+            for y0, x0, y1, x1, local in group:
+                component[y0:y1, x0:x1] = np.maximum(component[y0:y1, x0:x1], local)
+            lama_mask = cv2.dilate(component, dilate, iterations=1)
+            if self.force_opencv:
+                result = self._opencv_window(result, component, lama_mask)
+                continue
+            try:
+                result = self._lama_crop(result, component, lama_mask)
+            except Exception as exc:
+                result = self._lama_after_failure(result, component, lama_mask, exc)
+        return Image.fromarray(result)
+
+    def _lama_after_failure(
+        self,
+        image: np.ndarray,
+        component: np.ndarray,
+        lama_mask: np.ndarray,
+        exc: BaseException,
+    ) -> np.ndarray:
+        """При сбое CUDA — один retry на CPU; иначе OpenCV и баннер."""
+        detail = f"{type(exc).__name__}: {exc!r}"
+        if str(self.device).startswith("cuda"):
+            logger.warning("LaMa CUDA failed (%s), retry on CPU", detail)
+            self._model = None
+            self.device = "cpu"
+            try:
+                return self._lama_crop(image, component, lama_mask)
+            except Exception as cpu_exc:
+                detail = f"{type(cpu_exc).__name__}: {cpu_exc!r}"
+        logger.warning("LaMa fallback to OpenCV: %s", detail)
+        note = f"Очистка переключена на OpenCV (LaMa недоступна): {detail}"
+        if note not in self.last_warnings:
+            self.last_warnings.append(note)
+        return self._opencv_window(image, component, lama_mask)
+
+    def _fill_if_uniform(
+        self,
+        image: np.ndarray,
+        component: np.ndarray,
+        full_mask: np.ndarray,
+    ) -> bool:
+        """Залить компоненту, если фон кольца однотонный (чернила соседа не в счёт)."""
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (_RING_KERNEL, _RING_KERNEL))
+        ring = (cv2.dilate(component, kernel) > 0) & (full_mask == 0)
+        pixels = image[ring].astype(np.float32)
+        if pixels.shape[0] < _RING_MIN_PIXELS:
+            return False
+        median = np.median(pixels, axis=0)
+        distances = np.linalg.norm(pixels - median, axis=1)
+        # Высококонтрастные «чернила» соседа не входят в оценку фона.
+        background = distances < _RING_INK_DISTANCE
+        bg_pixels = pixels[background]
+        if bg_pixels.shape[0] < _RING_MIN_PIXELS:
+            return False
+        median = np.median(bg_pixels, axis=0)
+        inliers = np.linalg.norm(bg_pixels - median, axis=1) < _RING_INLIER_DISTANCE
+        if float(inliers.mean()) < _RING_INLIER_RATIO or not np.any(inliers):
+            return False
+        if float(bg_pixels[inliers].std(axis=0).mean()) > self.uniform_std:
+            return False
+        ys, xs = np.where(ring)
+        kept = np.flatnonzero(background)[inliers]
+        if _ring_is_gradient(ys[kept], xs[kept], bg_pixels[inliers]):
+            return False
+        if _ring_is_textured(component, ys, xs, ~background):
+            return False
+        color = np.clip(np.round(median), 0, 255).astype(np.uint8)
+        image[component > 0] = color
+        self._clear_halo(image, component, full_mask, color)
+        return True
+
+    @staticmethod
+    def _clear_halo(
+        image: np.ndarray,
+        component: np.ndarray,
+        full_mask: np.ndarray,
+        color: np.ndarray,
+    ) -> None:
+        """Узкая полоса у края: близкие к заливке пиксели перекрасить, контур не трогать."""
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (_HALO_KERNEL, _HALO_KERNEL))
+        band = (cv2.dilate(component, kernel) > 0) & (component == 0) & (full_mask == 0)
+        if not np.any(band):
+            return
+        pixels = image[band].astype(np.float32)
+        close = np.linalg.norm(pixels - color.astype(np.float32), axis=1) < 60
+        if not np.any(close):
+            return
+        updated = pixels.copy()
+        updated[close] = color.astype(np.float32)
+        image[band] = np.clip(np.round(updated), 0, 255).astype(np.uint8)
+
+    def _load_model(self):
+        if self._model is not None:
+            return self._model
+        if not self.model_path.exists():
+            raise FileNotFoundError(f"Нет модели LaMa: {self.model_path}")
+        import torch
+
+        logger.info(f"Loading LaMa on {self.device}: {self.model_path.name}")
+        model = torch.jit.load(str(self.model_path), map_location=self.device)
+        model.eval()
+        self._model = model
+        return model
+
+    def _lama_forward(self, crop: np.ndarray, crop_mask: np.ndarray) -> np.ndarray:
+        """Один вызов модели без уменьшения кадра."""
+        import torch
+
+        out_h = _ceil_mod(crop.shape[0])
+        out_w = _ceil_mod(crop.shape[1])
+        padded_img = np.pad(
+            crop,
+            ((0, out_h - crop.shape[0]), (0, out_w - crop.shape[1]), (0, 0)),
+            mode="symmetric",
+        )
+        padded_mask = np.pad(
+            crop_mask,
+            ((0, out_h - crop_mask.shape[0]), (0, out_w - crop_mask.shape[1])),
+            mode="constant",
+        )
+        image_t = torch.from_numpy(padded_img.transpose(2, 0, 1).astype(np.float32) / 255.0)
+        mask_t = torch.from_numpy((padded_mask > 127).astype(np.float32))
+        image_t = image_t.unsqueeze(0).to(self.device)
+        mask_t = mask_t.unsqueeze(0).unsqueeze(0).to(self.device)
+
+        model = self._load_model()
+        with torch.inference_mode():
+            predicted = model(image_t, mask_t)
+        if isinstance(predicted, (tuple, list)):
+            predicted = predicted[0]
+        predicted = predicted[0].detach().float().cpu().permute(1, 2, 0).numpy()
+        predicted = np.clip(predicted * 255.0, 0, 255).astype(np.uint8)
+        return predicted[: crop.shape[0], : crop.shape[1]]
+
+    def _lama_tiles(
+        self,
+        crop: np.ndarray,
+        crop_mask: np.ndarray,
+        component_crop: np.ndarray,
+    ) -> np.ndarray:
+        """Кропы не длиннее ``_TILE``. Перекрытие смешивается, в дыру пишется только компонента."""
+        color = np.zeros_like(crop, dtype=np.float32)
+        weight_sum = np.zeros(crop.shape[:2], dtype=np.float32)
+        step = _TILE - _TILE_OVERLAP
+        for y0 in _tile_starts(crop.shape[0], _TILE, step):
+            for x0 in _tile_starts(crop.shape[1], _TILE, step):
+                y1 = min(crop.shape[0], y0 + _TILE)
+                x1 = min(crop.shape[1], x0 + _TILE)
+                if not np.any(component_crop[y0:y1, x0:x1]):
+                    continue
+                predicted = self._lama_forward(crop[y0:y1, x0:x1], crop_mask[y0:y1, x0:x1])
+                weight = _feather(y1 - y0, x1 - x0, _TILE_OVERLAP // 2)
+                hole = component_crop[y0:y1, x0:x1] > 0
+                color[y0:y1, x0:x1][hole] += predicted[hole] * weight[hole, None]
+                weight_sum[y0:y1, x0:x1][hole] += weight[hole]
+        painted = crop.copy()
+        hole = (component_crop > 0) & (weight_sum > 0)
+        if not np.any(hole):
+            return painted
+        combined = np.zeros_like(crop, dtype=np.float32)
+        combined[hole] = color[hole] / weight_sum[hole, None]
+        # Край дырки гасим здесь же: page-paste потом копирует уже смешанный кроп жёстко по hole.
+        alpha = _edge_alpha(component_crop, _EDGE_FEATHER_PX)
+        blend = (
+            painted.astype(np.float32) * (1.0 - alpha[..., None])
+            + combined * alpha[..., None]
+        )
+        painted[hole] = np.clip(np.round(blend[hole]), 0, 255).astype(np.uint8)
+        return painted
+
+    def _lama_crop(
+        self,
+        image: np.ndarray,
+        component: np.ndarray,
+        lama_mask: np.ndarray,
+    ) -> np.ndarray:
+        bounds = _window_bounds(component, image.shape[:2], pad=128)
+        if bounds is None:
+            return image
+        y0, x0, y1, x1 = bounds
+        crop = image[y0:y1, x0:x1]
+        crop_mask = lama_mask[y0:y1, x0:x1]
+        if max(crop.shape[0], crop.shape[1]) <= _LAMA_LIMIT:
+            predicted = self._lama_forward(crop, crop_mask)
+            return self._paste_component(image, component, predicted, y0, x0)
+        predicted = self._lama_tiles(crop, crop_mask, component[y0:y1, x0:x1])
+        # Тайлы уже смягчили край относительно crop — на страницу копируем без второго feather.
+        return self._paste_component(image, component, predicted, y0, x0, feather_px=0)
+
+    def _opencv_window(
+        self,
+        image: np.ndarray,
+        component: np.ndarray,
+        lama_mask: np.ndarray,
+    ) -> np.ndarray:
+        """OpenCV на той же маске окна, что ушла бы в LaMa."""
+        bounds = _window_bounds(component, image.shape[:2], pad=128)
+        if bounds is None:
+            return image
+        y0, x0, y1, x1 = bounds
+        crop = image[y0:y1, x0:x1]
+        crop_mask = lama_mask[y0:y1, x0:x1]
+        if not np.any(crop_mask):
+            return image
+        bgr = cv2.cvtColor(crop, cv2.COLOR_RGB2BGR)
+        filled = cv2.inpaint(bgr, crop_mask, 3, cv2.INPAINT_TELEA)
+        predicted = cv2.cvtColor(filled, cv2.COLOR_BGR2RGB)
+        return self._paste_component(image, component, predicted, y0, x0)
+
+    @staticmethod
+    def _paste_component(
+        image: np.ndarray,
+        component: np.ndarray,
+        predicted: np.ndarray,
+        y0: int,
+        x0: int,
+        feather_px: float | int | None = None,
+    ) -> np.ndarray:
+        """Вклеить компоненту с feather у края (α из distance transform).
+
+        ``feather_px is None`` — ``_EDGE_FEATHER_PX``; ``0`` — жёсткая замена.
+        Для кропа из ``_lama_tiles`` (уже смягчённого) передаём ``feather_px=0``.
+        """
+        y1 = y0 + predicted.shape[0]
+        x1 = x0 + predicted.shape[1]
+        patch = image[y0:y1, x0:x1].copy()
+        hole_mask = component[y0:y1, x0:x1] > 0
+        if not np.any(hole_mask):
+            return image
+        fade = _EDGE_FEATHER_PX if feather_px is None else feather_px
+        alpha = _edge_alpha(hole_mask, fade)
+        use = hole_mask & (alpha > 0)
+        if not np.any(use):
+            return image
+        blended = (
+            patch.astype(np.float32) * (1.0 - alpha[..., None])
+            + predicted.astype(np.float32) * alpha[..., None]
+        )
+        patch[use] = np.clip(np.round(blended[use]), 0, 255).astype(np.uint8)
+        image[y0:y1, x0:x1] = patch
+        return image

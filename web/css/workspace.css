@@ -1,0 +1,198 @@
+/* Адаптивная оболочка браузера с той же палитрой, что у Flutter. */
+.access-login {
+  display: grid;
+  gap: var(--space);
+}
+
+.access-login .field {
+  display: grid;
+  gap: var(--space-xs);
+}
+
+.app {
+  min-width: 0;
+  min-height: 0;
+}
+
+.toolbar {
+  flex-wrap: wrap;
+  height: auto;
+  padding-block: var(--space-sm);
+}
+
+.toolbar__group {
+  flex-wrap: wrap;
+}
+
+.statusbar .panel-toggle {
+  flex-shrink: 0;
+}
+
+.panel-toggle[aria-expanded="true"] {
+  color: var(--primary);
+  background: var(--surface-2);
+  border-color: var(--line);
+}
+
+body.is-pages-collapsed .pages,
+body.is-inspector-collapsed .inspector {
+  visibility: hidden;
+}
+
+body.is-compact-layout {
+  --pages-w: min(calc(268px * var(--ui-scale)), 40vw);
+  --inspector-w: min(calc(344px * var(--ui-scale)), 48vw);
+}
+
+body.is-compact-layout .net-clients {
+  display: none;
+}
+
+body.is-small-layout .toolbar__spacer {
+  display: none;
+}
+
+body.is-small-layout .toolbar {
+  gap: var(--space-xs);
+  padding-inline: var(--space-sm);
+}
+
+body.is-small-layout .toolbar__lang .select {
+  width: calc(112px * var(--ui-scale));
+}
+
+body.is-small-layout .sfx-toggle {
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.statusbar {
+  min-width: 0;
+  gap: var(--space-sm);
+}
+
+.statusbar__job {
+  flex: 0 1 auto;
+}
+
+body.is-small-layout .statusbar__size,
+body.is-small-layout .statusbar__time,
+body.is-small-layout .statusbar__device {
+  display: none;
+}
+
+body.is-small-layout .statusbar__llm,
+body.is-small-layout .statusbar__zoom {
+  display: none;
+}
+
+.drop-wrap {
+  align-items: center;
+  justify-content: safe center;
+  padding: clamp(12px, 3vw, 40px);
+}
+
+.drop {
+  flex: 0 0 auto;
+  width: min(100%, calc(620px * var(--ui-scale)));
+  min-height: 0;
+  padding: clamp(16px, 4vw, 44px);
+  gap: calc(16px * var(--ui-scale));
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-sheet);
+}
+
+.drop > .icon {
+  width: calc(44px * var(--ui-scale));
+  height: calc(44px * var(--ui-scale));
+  color: var(--primary);
+  padding: var(--space-sm);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+}
+
+.drop h2 {
+  font-size: calc(22px * var(--ui-scale));
+  font-weight: 600;
+  line-height: 1.25;
+  max-width: 24ch;
+  text-wrap: balance;
+}
+
+.drop__description {
+  max-width: 42ch;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.drop__formats {
+  color: var(--text-muted);
+  font-size: var(--font-size-small);
+}
+
+.drop__actions .btn {
+  min-height: calc(36px * var(--ui-scale));
+  height: auto;
+  padding-block: var(--space-sm);
+  border-radius: var(--radius-sm);
+}
+
+.drop__guide {
+  align-self: stretch;
+  display: grid;
+  gap: var(--space);
+  padding-top: calc(16px * var(--ui-scale));
+  margin-top: var(--space-xs);
+  border-top: 1px solid var(--line);
+  text-align: left;
+  color: var(--text-muted);
+}
+
+.drop__guide li {
+  display: flex;
+  align-items: center;
+  gap: var(--space);
+}
+
+.drop__guide span {
+  display: inline-grid;
+  place-items: center;
+  width: calc(24px * var(--ui-scale));
+  height: calc(24px * var(--ui-scale));
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--text-primary);
+  font-size: var(--font-size-small);
+}
+
+.recent {
+  width: min(100%, calc(620px * var(--ui-scale)));
+  flex-shrink: 0;
+}
+
+.page {
+  border-bottom-color: var(--line-soft);
+}
+
+.page__thumb,
+.recent__item {
+  border-radius: var(--radius-sm);
+}
+
+.pages__head,
+.inspector > .tabs {
+  min-height: calc(40px * var(--ui-scale));
+}
+
+.dock__pop {
+  max-width: calc(100vw - 24px);
+}
+
+@media (max-height: 560px) {
+  .drop__guide {
+    display: none;
+  }
+}

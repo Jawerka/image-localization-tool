@@ -1,0 +1,1794 @@
+{
+  "source_path": "sources/encyclopedia-girls-en-p03.png",
+  "reading_direction": "ltr",
+  "ocr_engine": "vlm",
+  "translator_engine": "llm",
+  "timings": {
+    "load": 0.025,
+    "detect": 0.503,
+    "ocr": 52.064,
+    "translate": 16.513,
+    "segment": 0.156,
+    "inpaint": 1.246,
+    "typeset": 5.165
+  },
+  "warnings": [],
+  "regions": [
+    {
+      "id": 1,
+      "bbox": [
+        858,
+        85,
+        120,
+        40
+      ],
+      "class_name": "text_free",
+      "confidence": 0.68,
+      "text": "OH NO...",
+      "translation": "О нет...",
+      "type": "dialogue",
+      "speaker": "",
+      "speaker_gender": "unknown",
+      "bubble_bbox": null,
+      "order": 0,
+      "skip": false,
+      "manual": false,
+      "edited": false,
+      "overflow": false,
+      "translation_locked": false,
+      "document": false,
+      "text_position": null,
+      "style": {
+        "fill_rgb": [
+          255,
+          255,
+          255
+        ],
+        "fill_locked": false,
+        "stroke_rgb": null,
+        "font_size": 15,
+        "alignment": "center",
+        "uppercase": false,
+        "line_height": 18,
+        "font_size_override": 0,
+        "font_id": "Heroika-Regular",
+        "stroke_mode": "auto",
+        "stroke_width": 0.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "rotation": 0.0,
+        "skew_x": 0.0,
+        "warp": {
+          "version": 1,
+          "kind": "none",
+          "bend": 0.0,
+          "quad": null,
+          "mesh": null
+        }
+      },
+      "auto_layout": {
+        "version": 1,
+        "kind": "bubble",
+        "angle": 0.0,
+        "evidence": {
+          "raw_angle": -1,
+          "gain": 1.002,
+          "reason": "недостаточная уверенность"
+        },
+        "source_bbox": [
+          858,
+          85,
+          120,
+          40
+        ],
+        "ink_bbox": [
+          867,
+          94,
+          105,
+          22
+        ],
+        "outline_px": 3.0,
+        "mask_pad_px": 8.0,
+        "contour": [
+          [
+            864,
+            102.24
+          ],
+          [
+            864,
+            110.88
+          ],
+          [
+            865.44,
+            113.76
+          ],
+          [
+            868.32,
+            115.92
+          ],
+          [
+            874.8,
+            117.36
+          ],
+          [
+            907.92,
+            118.08
+          ],
+          [
+            969.12,
+            116.64
+          ],
+          [
+            971.28,
+            115.92
+          ],
+          [
+            974.16,
+            112.32
+          ],
+          [
+            974.16,
+            109.44
+          ],
+          [
+            971.28,
+            105.84
+          ],
+          [
+            943.2,
+            90.72
+          ],
+          [
+            876.24,
+            90.72
+          ],
+          [
+            871.2,
+            92.88
+          ],
+          [
+            866.16,
+            97.92
+          ]
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "bbox": [
+        104,
+        126,
+        154,
+        104
+      ],
+      "class_name": "text_bubble",
+      "confidence": 0.9419,
+      "text": "YOU CAN'T TAKE A HINT FOR THE LIFE OF YOU, HUH?",
+      "translation": "Ты не понимаешь намёков, да?",
+      "type": "dialogue",
+      "speaker": "",
+      "speaker_gender": "female",
+      "bubble_bbox": [
+        92,
+        77,
+        181,
+        210
+      ],
+      "order": 1,
+      "skip": false,
+      "manual": false,
+      "edited": false,
+      "overflow": false,
+      "translation_locked": false,
+      "document": false,
+      "text_position": null,
+      "style": {
+        "fill_rgb": [
+          0,
+          0,
+          0
+        ],
+        "fill_locked": false,
+        "stroke_rgb": null,
+        "font_size": 24,
+        "alignment": "center",
+        "uppercase": false,
+        "line_height": 18,
+        "font_size_override": 0,
+        "font_id": "Heroika-Regular",
+        "stroke_mode": "auto",
+        "stroke_width": 0.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "rotation": 0.0,
+        "skew_x": 0.0,
+        "warp": {
+          "version": 1,
+          "kind": "none",
+          "bend": 0.0,
+          "quad": null,
+          "mesh": null
+        }
+      },
+      "auto_layout": {
+        "version": 1,
+        "kind": "bubble",
+        "angle": 0.0,
+        "evidence": {
+          "raw_angle": 0,
+          "gain": 1.0,
+          "reason": "недостаточная уверенность"
+        },
+        "source_bbox": [
+          104,
+          126,
+          154,
+          104
+        ],
+        "ink_bbox": [
+          110,
+          137,
+          140,
+          85
+        ],
+        "outline_px": 3.0,
+        "mask_pad_px": 8.0,
+        "contour": [
+          [
+            117.36,
+            85.68
+          ],
+          [
+            108.72,
+            91.44
+          ],
+          [
+            102.24,
+            100.8
+          ],
+          [
+            100.08,
+            108.72
+          ],
+          [
+            100.08,
+            256.32
+          ],
+          [
+            108.72,
+            265.68
+          ],
+          [
+            121.68,
+            272.88
+          ],
+          [
+            138.24,
+            278.64
+          ],
+          [
+            172.8,
+            282.24
+          ],
+          [
+            176.4,
+            283.68
+          ],
+          [
+            182.88,
+            289.44
+          ],
+          [
+            187.92,
+            289.44
+          ],
+          [
+            183.6,
+            284.4
+          ],
+          [
+            185.04,
+            282.24
+          ],
+          [
+            189.36,
+            280.8
+          ],
+          [
+            198.72,
+            280.08
+          ],
+          [
+            215.28,
+            272.16
+          ],
+          [
+            218.16,
+            272.16
+          ],
+          [
+            230.4,
+            265.68
+          ],
+          [
+            240.48,
+            257.76
+          ],
+          [
+            251.28,
+            246.24
+          ],
+          [
+            255.6,
+            233.28
+          ],
+          [
+            257.76,
+            230.4
+          ],
+          [
+            264.24,
+            198
+          ],
+          [
+            266.4,
+            164.88
+          ],
+          [
+            264.96,
+            133.2
+          ],
+          [
+            261.36,
+            113.76
+          ],
+          [
+            256.32,
+            95.76
+          ],
+          [
+            249.12,
+            84.96
+          ],
+          [
+            160.56,
+            84.24
+          ]
+        ]
+      }
+    },
+    {
+      "id": 3,
+      "bbox": [
+        544,
+        122,
+        163,
+        78
+      ],
+      "class_name": "text_bubble",
+      "confidence": 0.9357,
+      "text": "YOU DID THIS NOT ONCE BUT TWICE!",
+      "translation": "Ты сделала это не один, а два раза!",
+      "type": "dialogue",
+      "speaker": "",
+      "speaker_gender": "female",
+      "bubble_bbox": [
+        526,
+        78,
+        201,
+        169
+      ],
+      "order": 2,
+      "skip": false,
+      "manual": false,
+      "edited": false,
+      "overflow": false,
+      "translation_locked": false,
+      "document": false,
+      "text_position": null,
+      "style": {
+        "fill_rgb": [
+          0,
+          0,
+          0
+        ],
+        "fill_locked": false,
+        "stroke_rgb": null,
+        "font_size": 22,
+        "alignment": "center",
+        "uppercase": false,
+        "line_height": 18,
+        "font_size_override": 0,
+        "font_id": "Heroika-Regular",
+        "stroke_mode": "auto",
+        "stroke_width": 0.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "rotation": 0.0,
+        "skew_x": 0.0,
+        "warp": {
+          "version": 1,
+          "kind": "none",
+          "bend": 0.0,
+          "quad": null,
+          "mesh": null
+        }
+      },
+      "auto_layout": {
+        "version": 1,
+        "kind": "bubble",
+        "angle": 0.0,
+        "evidence": {
+          "raw_angle": 0,
+          "gain": 1.0,
+          "reason": "недостаточная уверенность"
+        },
+        "source_bbox": [
+          544,
+          122,
+          163,
+          78
+        ],
+        "ink_bbox": [
+          541,
+          130,
+          157,
+          71
+        ],
+        "outline_px": 3.0,
+        "mask_pad_px": 8.0,
+        "contour": [
+          [
+            539.28,
+            84.96
+          ],
+          [
+            534.96,
+            96.48
+          ],
+          [
+            533.52,
+            110.88
+          ],
+          [
+            534.24,
+            113.04
+          ],
+          [
+            532.8,
+            126.72
+          ],
+          [
+            534.96,
+            164.16
+          ],
+          [
+            539.28,
+            175.68
+          ],
+          [
+            540,
+            180.72
+          ],
+          [
+            543.6,
+            188.64
+          ],
+          [
+            547.92,
+            195.12
+          ],
+          [
+            553.68,
+            200.88
+          ],
+          [
+            555.12,
+            205.2
+          ],
+          [
+            563.76,
+            213.12
+          ],
+          [
+            590.4,
+            228.96
+          ],
+          [
+            596.88,
+            231.84
+          ],
+          [
+            604.08,
+            233.28
+          ],
+          [
+            614.88,
+            239.04
+          ],
+          [
+            636.48,
+            239.76
+          ],
+          [
+            650.16,
+            241.92
+          ],
+          [
+            663.12,
+            241.92
+          ],
+          [
+            670.32,
+            239.76
+          ],
+          [
+            671.04,
+            242.64
+          ],
+          [
+            668.16,
+            249.84
+          ],
+          [
+            676.08,
+            242.64
+          ],
+          [
+            686.16,
+            244.8
+          ],
+          [
+            699.12,
+            244.08
+          ],
+          [
+            708.48,
+            241.92
+          ],
+          [
+            716.4,
+            238.32
+          ],
+          [
+            718.56,
+            236.16
+          ],
+          [
+            718.56,
+            110.88
+          ],
+          [
+            714.24,
+            98.64
+          ],
+          [
+            707.04,
+            90
+          ],
+          [
+            697.68,
+            84.96
+          ]
+        ]
+      }
+    },
+    {
+      "id": 4,
+      "bbox": [
+        732,
+        140,
+        124,
+        93
+      ],
+      "class_name": "text_free",
+      "confidence": 0.8066,
+      "text": "IF I ANSWER NOW...",
+      "translation": "Если я отвечу сейчас...",
+      "type": "dialogue",
+      "speaker": "",
+      "speaker_gender": "female",
+      "bubble_bbox": null,
+      "order": 3,
+      "skip": false,
+      "manual": false,
+      "edited": false,
+      "overflow": false,
+      "translation_locked": false,
+      "document": false,
+      "text_position": null,
+      "style": {
+        "fill_rgb": [
+          255,
+          255,
+          255
+        ],
+        "fill_locked": false,
+        "stroke_rgb": null,
+        "font_size": 16,
+        "alignment": "center",
+        "uppercase": false,
+        "line_height": 18,
+        "font_size_override": 0,
+        "font_id": "Heroika-Regular",
+        "stroke_mode": "auto",
+        "stroke_width": 0.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "rotation": 0.0,
+        "skew_x": 0.0,
+        "warp": {
+          "version": 1,
+          "kind": "none",
+          "bend": 0.0,
+          "quad": null,
+          "mesh": null
+        }
+      },
+      "auto_layout": {
+        "version": 1,
+        "kind": "bubble",
+        "angle": 0.0,
+        "evidence": {
+          "raw_angle": 1,
+          "gain": 1.0,
+          "reason": "недостаточная уверенность"
+        },
+        "source_bbox": [
+          732,
+          140,
+          124,
+          93
+        ],
+        "ink_bbox": [
+          737,
+          148,
+          109,
+          76
+        ],
+        "outline_px": 3.0,
+        "mask_pad_px": 8.0,
+        "contour": [
+          [
+            732.96,
+            191.52
+          ],
+          [
+            732.96,
+            197.28
+          ],
+          [
+            745.92,
+            223.2
+          ],
+          [
+            748.08,
+            225.36
+          ],
+          [
+            756,
+            226.8
+          ],
+          [
+            829.44,
+            226.08
+          ],
+          [
+            833.76,
+            223.2
+          ],
+          [
+            848.16,
+            196.56
+          ],
+          [
+            846.72,
+            176.4
+          ],
+          [
+            815.76,
+            146.16
+          ],
+          [
+            802.8,
+            144.72
+          ],
+          [
+            769.68,
+            144.72
+          ],
+          [
+            740.88,
+            176.4
+          ]
+        ]
+      }
+    },
+    {
+      "id": 5,
+      "bbox": [
+        423,
+        727,
+        84,
+        40
+      ],
+      "class_name": "text_free",
+      "confidence": 0.5024,
+      "text": "SHAKE",
+      "translation": "Тряска",
+      "type": "sfx",
+      "speaker": "",
+      "speaker_gender": "unknown",
+      "bubble_bbox": null,
+      "order": 4,
+      "skip": false,
+      "manual": false,
+      "edited": false,
+      "overflow": false,
+      "translation_locked": false,
+      "document": false,
+      "text_position": null,
+      "style": {
+        "fill_rgb": [
+          18,
+          18,
+          18
+        ],
+        "fill_locked": false,
+        "stroke_rgb": [
+          255,
+          255,
+          255
+        ],
+        "font_size": 26,
+        "alignment": "center",
+        "uppercase": false,
+        "line_height": 18,
+        "font_size_override": 0,
+        "font_id": "impact",
+        "stroke_mode": "auto",
+        "stroke_width": 3.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "rotation": 11.0,
+        "skew_x": 0.0,
+        "warp": {
+          "version": 1,
+          "kind": "none",
+          "bend": 0.0,
+          "quad": null,
+          "mesh": null
+        }
+      },
+      "auto_layout": {
+        "version": 1,
+        "kind": "free",
+        "angle": 11.0,
+        "evidence": {
+          "raw_angle": 11,
+          "gain": 1.168,
+          "reason": "проекция строк"
+        },
+        "source_bbox": [
+          423,
+          727,
+          84,
+          40
+        ],
+        "ink_bbox": [
+          427,
+          729,
+          75,
+          40
+        ],
+        "outline_px": 3.0,
+        "mask_pad_px": 8.0
+      }
+    },
+    {
+      "id": 6,
+      "bbox": [
+        558,
+        717,
+        91,
+        40
+      ],
+      "class_name": "text_free",
+      "confidence": 0.5135,
+      "text": "SHAKE",
+      "translation": "Тряска",
+      "type": "sfx",
+      "speaker": "",
+      "speaker_gender": "unknown",
+      "bubble_bbox": null,
+      "order": 5,
+      "skip": false,
+      "manual": false,
+      "edited": false,
+      "overflow": false,
+      "translation_locked": false,
+      "document": false,
+      "text_position": null,
+      "style": {
+        "fill_rgb": [
+          18,
+          18,
+          18
+        ],
+        "fill_locked": false,
+        "stroke_rgb": [
+          255,
+          255,
+          255
+        ],
+        "font_size": 35,
+        "alignment": "center",
+        "uppercase": false,
+        "line_height": 18,
+        "font_size_override": 0,
+        "font_id": "impact",
+        "stroke_mode": "auto",
+        "stroke_width": 3.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "rotation": 0.0,
+        "skew_x": 0.0,
+        "warp": {
+          "version": 1,
+          "kind": "none",
+          "bend": 0.0,
+          "quad": null,
+          "mesh": null
+        }
+      },
+      "auto_layout": {
+        "version": 1,
+        "kind": "free",
+        "angle": 0.0,
+        "evidence": {
+          "raw_angle": 0,
+          "gain": 1.0,
+          "reason": "недостаточная уверенность"
+        },
+        "source_bbox": [
+          558,
+          717,
+          91,
+          40
+        ],
+        "ink_bbox": [
+          556,
+          715,
+          96,
+          45
+        ],
+        "outline_px": 3.0,
+        "mask_pad_px": 8.0
+      }
+    },
+    {
+      "id": 7,
+      "bbox": [
+        102,
+        729,
+        89,
+        166
+      ],
+      "class_name": "text_bubble",
+      "confidence": 0.9427,
+      "text": "I KNOW IT'S A LITTLE LATE TO SAY THIS, BUT...",
+      "translation": "Я знаю, что уже поздно это говорить, но...",
+      "type": "dialogue",
+      "speaker": "",
+      "speaker_gender": "female",
+      "bubble_bbox": [
+        93,
+        711,
+        111,
+        207
+      ],
+      "order": 6,
+      "skip": false,
+      "manual": false,
+      "edited": false,
+      "overflow": false,
+      "translation_locked": false,
+      "document": false,
+      "text_position": null,
+      "style": {
+        "fill_rgb": [
+          0,
+          0,
+          0
+        ],
+        "fill_locked": false,
+        "stroke_rgb": null,
+        "font_size": 17,
+        "alignment": "center",
+        "uppercase": false,
+        "line_height": 18,
+        "font_size_override": 0,
+        "font_id": "Heroika-Regular",
+        "stroke_mode": "auto",
+        "stroke_width": 0.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "rotation": 0.0,
+        "skew_x": 0.0,
+        "warp": {
+          "version": 1,
+          "kind": "none",
+          "bend": 0.0,
+          "quad": null,
+          "mesh": null
+        }
+      },
+      "auto_layout": {
+        "version": 1,
+        "kind": "bubble",
+        "angle": 0.0,
+        "evidence": {
+          "raw_angle": 0,
+          "gain": 1.0,
+          "reason": "недостаточная уверенность"
+        },
+        "source_bbox": [
+          102,
+          729,
+          89,
+          166
+        ],
+        "ink_bbox": [
+          107,
+          737,
+          79,
+          149
+        ],
+        "outline_px": 3.0,
+        "mask_pad_px": 8.0,
+        "contour": [
+          [
+            100.08,
+            718.56
+          ],
+          [
+            100.08,
+            898.56
+          ],
+          [
+            107.28,
+            905.04
+          ],
+          [
+            118.8,
+            908.64
+          ],
+          [
+            123.84,
+            908.64
+          ],
+          [
+            126,
+            910.8
+          ],
+          [
+            130.32,
+            919.44
+          ],
+          [
+            133.2,
+            919.44
+          ],
+          [
+            131.04,
+            912.96
+          ],
+          [
+            131.76,
+            909.36
+          ],
+          [
+            134.64,
+            912.96
+          ],
+          [
+            134.64,
+            916.56
+          ],
+          [
+            136.08,
+            919.44
+          ],
+          [
+            147.6,
+            919.44
+          ],
+          [
+            147.6,
+            910.08
+          ],
+          [
+            144,
+            911.52
+          ],
+          [
+            134.64,
+            911.52
+          ],
+          [
+            133.2,
+            910.08
+          ],
+          [
+            134.64,
+            908.64
+          ],
+          [
+            145.44,
+            907.92
+          ],
+          [
+            171.36,
+            894.96
+          ],
+          [
+            179.28,
+            887.04
+          ],
+          [
+            187.2,
+            874.08
+          ],
+          [
+            195.12,
+            848.88
+          ],
+          [
+            195.84,
+            795.6
+          ],
+          [
+            193.68,
+            765.36
+          ],
+          [
+            189.36,
+            737.28
+          ],
+          [
+            187.2,
+            733.68
+          ],
+          [
+            183.6,
+            721.44
+          ],
+          [
+            181.44,
+            718.56
+          ]
+        ]
+      }
+    },
+    {
+      "id": 8,
+      "bbox": [
+        360,
+        739,
+        43,
+        54
+      ],
+      "class_name": "text_bubble",
+      "confidence": 0.8298,
+      "text": "UM ...",
+      "translation": "Эм...",
+      "type": "dialogue",
+      "speaker": "",
+      "speaker_gender": "female",
+      "bubble_bbox": [
+        348,
+        711,
+        66,
+        119
+      ],
+      "order": 7,
+      "skip": false,
+      "manual": false,
+      "edited": false,
+      "overflow": false,
+      "translation_locked": false,
+      "document": false,
+      "text_position": null,
+      "style": {
+        "fill_rgb": [
+          0,
+          0,
+          0
+        ],
+        "fill_locked": false,
+        "stroke_rgb": null,
+        "font_size": 18,
+        "alignment": "center",
+        "uppercase": false,
+        "line_height": 18,
+        "font_size_override": 0,
+        "font_id": "Heroika-Regular",
+        "stroke_mode": "auto",
+        "stroke_width": 0.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "rotation": 0.0,
+        "skew_x": 0.0,
+        "warp": {
+          "version": 1,
+          "kind": "none",
+          "bend": 0.0,
+          "quad": null,
+          "mesh": null
+        }
+      },
+      "auto_layout": {
+        "version": 1,
+        "kind": "bubble",
+        "angle": 0.0,
+        "evidence": {
+          "reason": "короткий знак или вертикальная японская строка"
+        },
+        "source_bbox": [
+          360,
+          739,
+          43,
+          54
+        ],
+        "ink_bbox": [
+          367,
+          747,
+          29,
+          38
+        ],
+        "outline_px": 3.0,
+        "mask_pad_px": 8.0,
+        "contour": [
+          [
+            362.88,
+            718.56
+          ],
+          [
+            360,
+            723.6
+          ],
+          [
+            355.68,
+            737.28
+          ],
+          [
+            355.68,
+            776.88
+          ],
+          [
+            357.12,
+            792
+          ],
+          [
+            359.28,
+            795.6
+          ],
+          [
+            360,
+            799.92
+          ],
+          [
+            369.36,
+            811.44
+          ],
+          [
+            382.32,
+            818.64
+          ],
+          [
+            380.88,
+            823.68
+          ],
+          [
+            383.76,
+            820.08
+          ],
+          [
+            401.76,
+            821.52
+          ],
+          [
+            406.8,
+            817.2
+          ],
+          [
+            406.8,
+            718.56
+          ]
+        ]
+      }
+    },
+    {
+      "id": 9,
+      "bbox": [
+        707,
+        722,
+        160,
+        111
+      ],
+      "class_name": "text_bubble",
+      "confidence": 0.9535,
+      "text": "YOU KNOW THE ANSWER, DON'T YOU? IT'S OKAY, YOU CAN SAY IT.",
+      "translation": "Ты знаешь ответ, правда? Ничего страшного, можешь сказать.",
+      "type": "dialogue",
+      "speaker": "",
+      "speaker_gender": "female",
+      "bubble_bbox": [
+        698,
+        712,
+        178,
+        137
+      ],
+      "order": 8,
+      "skip": false,
+      "manual": false,
+      "edited": false,
+      "overflow": false,
+      "translation_locked": false,
+      "document": false,
+      "text_position": null,
+      "style": {
+        "fill_rgb": [
+          0,
+          0,
+          0
+        ],
+        "fill_locked": false,
+        "stroke_rgb": null,
+        "font_size": 13,
+        "alignment": "center",
+        "uppercase": false,
+        "line_height": 18,
+        "font_size_override": 0,
+        "font_id": "Heroika-Regular",
+        "stroke_mode": "auto",
+        "stroke_width": 0.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "rotation": 0.0,
+        "skew_x": 0.0,
+        "warp": {
+          "version": 1,
+          "kind": "none",
+          "bend": 0.0,
+          "quad": null,
+          "mesh": null
+        }
+      },
+      "auto_layout": {
+        "version": 1,
+        "kind": "bubble",
+        "angle": 0.0,
+        "evidence": {
+          "raw_angle": 0,
+          "gain": 1.0,
+          "reason": "недостаточная уверенность"
+        },
+        "source_bbox": [
+          707,
+          722,
+          160,
+          111
+        ],
+        "ink_bbox": [
+          713,
+          728,
+          148,
+          100
+        ],
+        "outline_px": 3.0,
+        "mask_pad_px": 8.0,
+        "contour": [
+          [
+            713.52,
+            720
+          ],
+          [
+            706.32,
+            743.04
+          ],
+          [
+            705.6,
+            753.12
+          ],
+          [
+            703.44,
+            761.76
+          ],
+          [
+            703.44,
+            784.8
+          ],
+          [
+            705.6,
+            790.56
+          ],
+          [
+            707.76,
+            804.24
+          ],
+          [
+            718.56,
+            819.36
+          ],
+          [
+            729.36,
+            828.72
+          ],
+          [
+            741.6,
+            835.2
+          ],
+          [
+            751.68,
+            836.64
+          ],
+          [
+            754.56,
+            838.08
+          ],
+          [
+            775.44,
+            840.24
+          ],
+          [
+            792,
+            838.8
+          ],
+          [
+            793.44,
+            840.96
+          ],
+          [
+            789.12,
+            846
+          ],
+          [
+            799.92,
+            840.24
+          ],
+          [
+            817.2,
+            840.96
+          ],
+          [
+            831.6,
+            836.64
+          ],
+          [
+            843.84,
+            828
+          ],
+          [
+            858.96,
+            812.16
+          ],
+          [
+            865.44,
+            794.88
+          ],
+          [
+            866.16,
+            785.52
+          ],
+          [
+            869.04,
+            773.28
+          ],
+          [
+            868.32,
+            744.48
+          ],
+          [
+            866.16,
+            738
+          ],
+          [
+            866.16,
+            732.24
+          ],
+          [
+            863.28,
+            723.6
+          ],
+          [
+            859.68,
+            718.56
+          ],
+          [
+            714.96,
+            718.56
+          ]
+        ]
+      }
+    },
+    {
+      "id": 10,
+      "bbox": [
+        561,
+        791,
+        42,
+        58
+      ],
+      "class_name": "text_free",
+      "confidence": 0.3077,
+      "text": "HI",
+      "translation": "Привет",
+      "type": "sfx",
+      "speaker": "",
+      "speaker_gender": "unknown",
+      "bubble_bbox": null,
+      "order": 9,
+      "skip": false,
+      "manual": false,
+      "edited": false,
+      "overflow": false,
+      "translation_locked": false,
+      "document": false,
+      "text_position": null,
+      "style": {
+        "fill_rgb": [
+          18,
+          18,
+          18
+        ],
+        "fill_locked": false,
+        "stroke_rgb": [
+          255,
+          255,
+          255
+        ],
+        "font_size": 17,
+        "alignment": "center",
+        "uppercase": false,
+        "line_height": 18,
+        "font_size_override": 0,
+        "font_id": "impact",
+        "stroke_mode": "auto",
+        "stroke_width": 3.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "rotation": -26.0,
+        "skew_x": 0.0,
+        "warp": {
+          "version": 1,
+          "kind": "none",
+          "bend": 0.0,
+          "quad": null,
+          "mesh": null
+        }
+      },
+      "auto_layout": {
+        "version": 1,
+        "kind": "free",
+        "angle": -26.0,
+        "evidence": {
+          "raw_angle": -26,
+          "gain": 1.133,
+          "reason": "проекция строк"
+        },
+        "source_bbox": [
+          561,
+          791,
+          42,
+          58
+        ],
+        "ink_bbox": [
+          559,
+          788,
+          46,
+          63
+        ],
+        "outline_px": 3.0,
+        "mask_pad_px": 8.0
+      }
+    },
+    {
+      "id": 11,
+      "bbox": [
+        433,
+        1068,
+        191,
+        96
+      ],
+      "class_name": "text_free",
+      "confidence": 0.3684,
+      "text": "SHAAAKE",
+      "translation": "Тряска",
+      "type": "sfx",
+      "speaker": "",
+      "speaker_gender": "unknown",
+      "bubble_bbox": null,
+      "order": 10,
+      "skip": false,
+      "manual": false,
+      "edited": false,
+      "overflow": false,
+      "translation_locked": false,
+      "document": false,
+      "text_position": null,
+      "style": {
+        "fill_rgb": [
+          18,
+          18,
+          18
+        ],
+        "fill_locked": false,
+        "stroke_rgb": [
+          255,
+          255,
+          255
+        ],
+        "font_size": 65,
+        "alignment": "center",
+        "uppercase": false,
+        "line_height": 18,
+        "font_size_override": 0,
+        "font_id": "impact",
+        "stroke_mode": "auto",
+        "stroke_width": 3.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "rotation": 8.0,
+        "skew_x": 0.0,
+        "warp": {
+          "version": 1,
+          "kind": "none",
+          "bend": 0.0,
+          "quad": null,
+          "mesh": null
+        }
+      },
+      "auto_layout": {
+        "version": 1,
+        "kind": "free",
+        "angle": 8.0,
+        "evidence": {
+          "raw_angle": 8,
+          "gain": 1.081,
+          "reason": "проекция строк"
+        },
+        "source_bbox": [
+          433,
+          1068,
+          191,
+          96
+        ],
+        "ink_bbox": [
+          442,
+          1067,
+          184,
+          100
+        ],
+        "outline_px": 3.0,
+        "mask_pad_px": 8.0
+      }
+    },
+    {
+      "id": 12,
+      "bbox": [
+        662,
+        1050,
+        189,
+        120
+      ],
+      "class_name": "text_bubble",
+      "confidence": 0.9615,
+      "text": "COME ON, I'LL PUT YOU IN A HEADLOCK IF YOU DON'T SPIT IT OUT.",
+      "translation": "Давай, я задушу тебя, если не скажешь.",
+      "type": "dialogue",
+      "speaker": "",
+      "speaker_gender": "female",
+      "bubble_bbox": [
+        648,
+        1038,
+        217,
+        150
+      ],
+      "order": 11,
+      "skip": false,
+      "manual": false,
+      "edited": false,
+      "overflow": false,
+      "translation_locked": false,
+      "document": false,
+      "text_position": null,
+      "style": {
+        "fill_rgb": [
+          0,
+          0,
+          0
+        ],
+        "fill_locked": false,
+        "stroke_rgb": null,
+        "font_size": 20,
+        "alignment": "center",
+        "uppercase": false,
+        "line_height": 18,
+        "font_size_override": 0,
+        "font_id": "Heroika-Regular",
+        "stroke_mode": "auto",
+        "stroke_width": 0.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "rotation": 0.0,
+        "skew_x": 0.0,
+        "warp": {
+          "version": 1,
+          "kind": "none",
+          "bend": 0.0,
+          "quad": null,
+          "mesh": null
+        }
+      },
+      "auto_layout": {
+        "version": 1,
+        "kind": "bubble",
+        "angle": 0.0,
+        "evidence": {
+          "raw_angle": 0,
+          "gain": 1.0,
+          "reason": "недостаточная уверенность"
+        },
+        "source_bbox": [
+          662,
+          1050,
+          189,
+          120
+        ],
+        "ink_bbox": [
+          669,
+          1059,
+          174,
+          104
+        ],
+        "outline_px": 3.0,
+        "mask_pad_px": 8.0,
+        "contour": [
+          [
+            660.24,
+            1050.48
+          ],
+          [
+            656.64,
+            1057.68
+          ],
+          [
+            653.04,
+            1080
+          ],
+          [
+            653.76,
+            1113.12
+          ],
+          [
+            655.92,
+            1125.36
+          ],
+          [
+            659.52,
+            1134.72
+          ],
+          [
+            660.24,
+            1141.2
+          ],
+          [
+            670.32,
+            1159.2
+          ],
+          [
+            689.04,
+            1172.88
+          ],
+          [
+            704.88,
+            1177.92
+          ],
+          [
+            717.84,
+            1179.36
+          ],
+          [
+            734.4,
+            1179.36
+          ],
+          [
+            743.04,
+            1177.2
+          ],
+          [
+            744.48,
+            1179.36
+          ],
+          [
+            740.16,
+            1188.72
+          ],
+          [
+            746.64,
+            1185.12
+          ],
+          [
+            752.4,
+            1179.36
+          ],
+          [
+            758.16,
+            1179.36
+          ],
+          [
+            771.12,
+            1182.24
+          ],
+          [
+            799.2,
+            1181.52
+          ],
+          [
+            807.84,
+            1179.36
+          ],
+          [
+            830.88,
+            1169.28
+          ],
+          [
+            840.24,
+            1160.64
+          ],
+          [
+            848.16,
+            1149.84
+          ],
+          [
+            850.32,
+            1144.8
+          ],
+          [
+            856.8,
+            1115.28
+          ],
+          [
+            856.8,
+            1105.2
+          ],
+          [
+            858.96,
+            1087.92
+          ],
+          [
+            856.08,
+            1067.04
+          ],
+          [
+            853.2,
+            1056.96
+          ],
+          [
+            848.88,
+            1049.04
+          ],
+          [
+            843.12,
+            1044
+          ],
+          [
+            666.72,
+            1044
+          ]
+        ]
+      }
+    }
+  ]
+}

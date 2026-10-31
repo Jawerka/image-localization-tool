@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "rights_checked": "2026-10-25",
+  "excluded_sources": [
+    "Pepper&Carrot — исключён по просьбе пользователя из уважения к позиции автора об автоматических переводах и ИИ-производных."
+  ],
+  "settings": {
+    "ocr_backend": "vlm",
+    "translator_backend": "llm",
+    "inpainter_backend": "lama",
+    "sfx_mode": "replace",
+    "translate_sfx": true,
+    "adaptive_text": true,
+    "discover_missing_text": true,
+    "auto_stylized_fonts": true,
+    "layout_long_side": 2000,
+    "vlm_max_side": 1536,
+    "llm_thinking": false,
+    "ort_intra_op_threads": 4
+  },
+  "cases": [
+    {
+      "id": "chinese",
+      "source_lang": "zh",
+      "target_lang": "ru",
+      "input": "sources/dianshizhai-1889.png",
+      "title": "點石齋畫報 / Dian shi zhai hua bao",
+      "author": "Неизвестный литограф редакции 點石齋畫報",
+      "page": "1889, том Wu, с. 34; скан BSB, изображение слева в развороте",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Literati_in_a_charity_hall_around_a_spirit-writing_(fuji)_table,_with_deities_above._Dian_shi_zhai_hua_bao_(1889).png",
+      "license": "Public domain",
+      "license_url": "https://commons.wikimedia.org/wiki/Template:PD-anon-expired",
+      "credit": "Dian shi zhai hua bao (1889), anonymous lithographer; Bayerische Staatsbibliothek / MDZ; Wikimedia Commons (Bafuncius). Public domain.",
+      "sha256": "48ec51810f4717234278dddcceea8bd2132719bdb7af30130f023f46223a3f4a",
+      "download_url": "https://upload.wikimedia.org/wikipedia/commons/0/05/Literati_in_a_charity_hall_around_a_spirit-writing_%28fuji%29_table%2C_with_deities_above._Dian_shi_zhai_hua_bao_%281889%29.png",
+      "archive_page": "https://www.digitale-sammlungen.de/en/view/bsb00075645?page=267",
+      "rights_basis": "Анонимная публикация 1889 года; Commons указывает PD-China и PD-anon-expired. Это историческая иллюстрированная пресса, не современная маньхуа."
+    },
+    {
+      "id": "korean",
+      "source_lang": "ko",
+      "target_lang": "ru",
+      "input": "sources/dongbaek-01.jpg",
+      "title": "동백꽃 / Dongbaekkkot",
+      "author": "이호윤 (Lee Ho-yun), по рассказу 김유정 (Kim Yu-jeong)",
+      "page": "Первый файл; верхний фрагмент ленты, y=0…7400",
+      "source_page": "https://gongu.copyright.or.kr/gongu/wrt/wrt/view.do?menuNo=200018&wrtSn=13383527",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "credit": "Dongbaekkkot by Lee Ho-yun (이호윤), based on Kim Yu-jeong; via Korea Copyright Commission / Gongu. CC BY 4.0.",
+      "sha256": "da765bfdd2c10ebf99dca64bc92bcefd4dbc6921547436f898e589454913e6c1",
+      "download_url": "https://gongu.copyright.or.kr/gongu/wrt/cmmn/wrtFileDownload.do?wrtSn=13383527&fileSn=1",
+      "crop": [
+        0,
+        0,
+        2000,
+        7400
+      ],
+      "rights_basis": "Карточка правообладателя указывает CC BY; значок лицензии ведёт на CC BY 4.0. Обрезка длинной ленты фиксирована до запуска перевода."
+    },
+    {
+      "id": "japanese",
+      "source_lang": "ja",
+      "target_lang": "ru",
+      "input": "sources/encyclopedia-girls-ja-p03.jpg",
+      "title": "いけいけ！百科事典娘 / Go Go! Encyclopedia Girls",
+      "author": "Kasuga",
+      "page": "Страница 3, японский оригинал, 540×720",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Wikipe-tan_manga_page3.jpg",
+      "license": "CC BY-SA 3.0",
+      "license_url": "https://creativecommons.org/licenses/by-sa/3.0/",
+      "credit": "Go Go! Encyclopedia Girls, page 3, by Kasuga; Wikimedia Commons. CC BY-SA 3.0.",
+      "sha256": "21fdf31f8b378991711e4e5c5c981088aeefd1f3bc9321dd9d0db2cc0842249a",
+      "download_url": "https://upload.wikimedia.org/wikipedia/commons/e/e3/Wikipe-tan_manga_page3.jpg?utm_campaign=index&utm_content=original&utm_source=commons.wikimedia.org",
+      "rights_basis": "Загрузка и лицензия автора Kasuga. Низкое исходное разрешение сохранено; программа применяет обычный апскейл разметки."
+    },
+    {
+      "id": "english",
+      "source_lang": "en",
+      "target_lang": "ru",
+      "input": "sources/encyclopedia-girls-en-p03.png",
+      "title": "Go Go! Encyclopedia Girls",
+      "author": "Kasuga; английский перевод и апскейл Masatami",
+      "page": "Страница 3, английская версия, 1080×1440",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Go_Go!_Encyclopedia_Girls_-_English_03.png",
+      "license": "CC BY-SA 4.0",
+      "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "credit": "Go Go! Encyclopedia Girls, page 3, by Kasuga; English translation and waifu2x upscale by Masatami; Wikimedia Commons. CC BY-SA 4.0.",
+      "sha256": "69a45ac68c393b536bed3c998b62925cd52b0cbff87cc3bf2011d935b7390e76",
+      "download_url": "https://upload.wikimedia.org/wikipedia/commons/c/c9/Go_Go%21_Encyclopedia_Girls_-_English_03.png?utm_campaign=index&utm_content=original&utm_source=commons.wikimedia.org",
+      "rights_basis": "Страница автора английской адаптации указывает CC BY-SA 4.0. Это уже опубликованный английский перевод японской манги; русский результат создаётся программой из английского изображения."
+    }
+  ]
+}

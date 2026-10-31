@@ -1,0 +1,168 @@
+/* Настройки и мастер первого запуска. */
+
+.toolbar h1 {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.settings__body,
+.wizard__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: var(--settings-sidebar-w) minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.settings__nav,
+.stepper {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-sm);
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border);
+}
+
+.settings__nav .btn,
+.stepper__btn {
+  width: 100%;
+  justify-content: flex-start;
+  border-color: transparent;
+  background: transparent;
+  text-align: left;
+}
+
+.settings__nav .btn[aria-selected="true"],
+.stepper__btn.is-active {
+  background: var(--primary);
+  color: var(--primary-fg);
+  font-weight: 700;
+}
+
+.stepper__btn .icon {
+  visibility: hidden;
+}
+
+.stepper__btn.is-done .icon {
+  visibility: visible;
+}
+
+.settings__content,
+.wizard__panel {
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  padding: var(--space);
+  background: var(--bg-card);
+}
+
+.settings__section h2,
+.wizard__step h2 {
+  font-size: var(--font-size-ui);
+  font-weight: 700;
+  margin-bottom: var(--space-xs);
+}
+
+.settings__intro,
+.wizard__step .settings__intro {
+  margin: 0 0 var(--space);
+  color: var(--text-muted);
+}
+
+.settings__rule {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 0 0 var(--space);
+}
+
+.form {
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) minmax(0, 1fr);
+  gap: var(--space-sm) var(--space);
+  align-items: center;
+}
+
+.form__full {
+  grid-column: 1 / -1;
+}
+
+.form__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+}
+
+.settings__footer,
+.wizard__nav {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+  flex-shrink: 0;
+  padding: var(--space-sm) var(--space);
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border);
+}
+
+.settings__footer .btn,
+.wizard__nav .btn {
+  min-width: 100px;
+}
+
+.wizard__nav {
+  justify-content: space-between;
+}
+
+.wizard__nav-right {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.model-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(120px, 1fr) auto;
+  gap: var(--space-sm);
+  align-items: center;
+  padding: var(--space-sm) 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.model-row__name {
+  font-weight: 700;
+}
+
+.model-row__main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.about-path {
+  font-family: var(--font-editor);
+  font-size: var(--font-size-editor);
+  color: var(--text-editor);
+}
+
+.scale-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.scale-row input[type="range"] {
+  flex: 1;
+}
+
+.choice-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.stack-top {
+  margin-top: var(--space);
+}

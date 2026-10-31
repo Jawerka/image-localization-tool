@@ -1,0 +1,124 @@
+name: Release Linux
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, e.g. v1.0.1"
+        required: true
+      source_ref:
+        description: "Exact source commit for the candidate"
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    name: Linux sidecar & runtime locks
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && (inputs.source_ref || inputs.tag) || github.ref }}
+
+      - name: Resolve tag and version
+        id: meta
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$(python -c 'from scripts.smoke_dist import read_app_version; print(read_app_version())')" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-release.txt pyinstaller
+
+      - name: Generate fixed catalogs before packaging
+        run: python scripts/build-runtime-manifest.py
+
+      - name: Build stdlib.zip
+        run: python scripts/build-stdlib-zip.py
+
+      - name: Build sidecar
+        run: python -m PyInstaller ImageLocalizationTool.spec --clean --noconfirm
+
+      - name: Assemble server tar.gz
+        run: |
+          set -eux
+          VERSION="${{ steps.meta.outputs.version }}"
+          ROOT="dist/server/ImageLocalizationTool"
+          mkdir -p "$ROOT"
+          cp -r dist/ilt_sidecar/_internal "$ROOT/_internal"
+          cp dist/ilt_sidecar/ImageLocalizationTool "$ROOT/"
+          cp -r dist/ilt_sidecar/web "$ROOT/web"
+          if [ -d dist/ilt_sidecar/fonts ]; then cp -r dist/ilt_sidecar/fonts "$ROOT/fonts"; fi
+          for folder in data models runtime; do
+            mkdir -p "$ROOT/$folder"
+            touch "$ROOT/$folder/.keep"
+          done
+          cp scripts/deploy-server.sh "$ROOT/deploy.sh"
+          cp scripts/install-server-linux.sh "$ROOT/"
+          cp scripts/update-server-linux.sh "$ROOT/"
+          cp scripts/rollback-server-linux.sh "$ROOT/"
+          cp scripts/linux-deploy-common.sh "$ROOT/"
+          cp deploy/ilt.service "$ROOT/ilt.service"
+          printf '{"schema":1,"version":"%s","platform":"linux-x64","executable":"ImageLocalizationTool"}\n' "$VERSION" > "$ROOT/release.json"
+          sed -i 's/\r$//' "$ROOT/deploy.sh"
+          sed -i 's/\r$//' "$ROOT/"*.sh
+          chmod +x "$ROOT/deploy.sh" "$ROOT/install-server-linux.sh" "$ROOT/update-server-linux.sh" "$ROOT/rollback-server-linux.sh" "$ROOT/linux-deploy-common.sh"
+          tar -C dist/server -czf "dist/ImageLocalizationTool-${VERSION}-server-linux-x64.tar.gz" ImageLocalizationTool
+
+      - name: Test Linux deployment scripts with an isolated fake root
+        run: |
+          bash -n scripts/linux-deploy-common.sh scripts/install-server-linux.sh scripts/update-server-linux.sh scripts/rollback-server-linux.sh tests/linux/test_deploy_scripts.sh
+          bash tests/linux/test_deploy_scripts.sh
+
+      - name: Frozen CPU and offline components
+        run: |
+          set -eux
+          ROOT="dist/server/ImageLocalizationTool"
+          python -c 'import json; from pathlib import Path; p=Path("dist/server/ImageLocalizationTool/data/check.json"); p.write_text(json.dumps({"kind":"prepare-offline","device":"cpu"}))'
+          "$ROOT/ImageLocalizationTool" --component-check "$ROOT/data/check.json"
+          python -c 'import json; from pathlib import Path; p=Path("dist/server/ImageLocalizationTool/data/check.json"); p.write_text(json.dumps({"kind":"offline-functional","device":"cpu","path":str(p.parent.resolve()/"offline-source.png")}))'
+          "$ROOT/ImageLocalizationTool" --component-check "$ROOT/data/check.json"
+
+      - name: Checksums for Linux assets
+        run: |
+          set -eux
+          cd dist
+          sha256sum ImageLocalizationTool-*-server-linux-x64.tar.gz > SHA256SUMS-linux.txt
+          python -c 'import json; from pathlib import Path; d=json.loads(Path("../locks/runtime-catalog.json").read_text()); Path("packs-linux.json").write_text(json.dumps([p for p in d if p["os"]=="linux"]))'
+
+      - name: Upload to release
+        run: |
+          set -eux
+          TAG="${{ steps.meta.outputs.tag }}"
+          VERSION="${{ steps.meta.outputs.version }}"
+          if [ "$(gh release view "$TAG" --json isDraft --jq '.isDraft' 2>/dev/null || true)" = "false" ]; then
+            echo "Published releases are immutable; use a new version."
+            exit 1
+          fi
+          gh release view "$TAG" >/dev/null 2>&1 \
+            || gh release create "$TAG" --draft --title "$VERSION" --notes "Linux assets for $TAG"
+          gh release upload "$TAG" \
+            dist/ImageLocalizationTool-*-server-linux-x64.tar.gz \
+            dist/packs-linux.json \
+            dist/SHA256SUMS-linux.txt \
+            --clobber

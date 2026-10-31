@@ -1,0 +1,13 @@
+**
+!Dockerfile
+!requirements-base.txt
+!requirements-container.txt
+!requirements-container.lock
+!src/
+!src/**
+!web/
+!web/**
+!assets/
+!assets/argostranslate-1.11.1-py3-none-any.whl
+**/__pycache__/
+**/*.pyc

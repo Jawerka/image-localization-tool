@@ -1,0 +1,4 @@
+# Релизная база frozen-сайдкара: без torch, Argos-стека и dev-инструментов.
+# Тяжёлые рантаймы (torch, argostranslate) — внешние паки, не в этой базе.
+-r requirements-base.txt
+pyinstaller==6.22.3

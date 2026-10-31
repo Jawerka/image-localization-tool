@@ -1,0 +1,87 @@
+"""Тесты конфигурации."""
+
+import json
+
+from src.config import Config
+
+
+class TestConfig:
+    def test_defaults(self):
+        config = Config()
+        assert config.source_lang == "en"
+        assert config.target_lang == "ru"
+        assert config.llm_base_url == "http://127.0.0.1:8080/v1"
+        assert config.ocr_backend == "vlm"
+        assert config.sfx_mode == "replace"
+        assert config.render_cache_limit_mb == 256
+        assert config.ort_intra_op_threads == 0
+
+    def test_load_missing_file(self, tmp_path):
+        config = Config.load(tmp_path / "missing.json")
+        assert config.min_confidence == 0.5
+
+    def test_load_valid_file(self, tmp_path):
+        path = tmp_path / "config.json"
+        path.write_text(
+            json.dumps({"min_confidence": 0.8, "llm_base_url": "http://127.0.0.1:9/v1"}),
+            encoding="utf-8",
+        )
+        config = Config.load(path)
+        assert config.min_confidence == 0.8
+        assert config.llm_base_url == "http://127.0.0.1:9/v1"
+
+    def test_load_ignores_unknown_fields(self, tmp_path):
+        path = tmp_path / "config.json"
+        path.write_text(
+            json.dumps({"ocr_engine": "tesseract", "min_confidence": 0.6}),
+            encoding="utf-8",
+        )
+        config = Config.load(path)
+        assert config.min_confidence == 0.6
+        assert not hasattr(config, "ocr_engine")
+
+    def test_load_invalid_json(self, tmp_path, capsys):
+        path = tmp_path / "config.json"
+        path.write_text("{invalid", encoding="utf-8")
+        config = Config.load(path)
+        assert config.min_confidence == 0.5
+
+    def test_save(self, tmp_path):
+        config = Config(min_confidence=0.7, ort_intra_op_threads=4)
+        path = tmp_path / "out.json"
+        config.save(path)
+        data = json.loads(path.read_text(encoding="utf-8"))
+        assert data["min_confidence"] == 0.7
+        assert data["ort_intra_op_threads"] == 4
+        assert Config.load(path).ort_intra_op_threads == 4
+
+    def test_save_never_writes_api_key(self, tmp_path):
+        config = Config(llm_api_key="secret-key")
+        path = tmp_path / "out.json"
+        config.save(path)
+        text = path.read_text(encoding="utf-8")
+        assert "secret-key" not in text
+        assert "llm_api_key" not in text
+
+    def test_load_reads_manual_api_key(self, tmp_path):
+        path = tmp_path / "config.json"
+        path.write_text(json.dumps({"llm_api_key": "manual"}), encoding="utf-8")
+        assert Config.load(path).llm_api_key == "manual"
+
+
+def test_sfx_config_precedence(tmp_path):
+    cases = [({}, True), ({'translate_sfx': False}, False),
+             ({'translate_sfx': True}, True),
+             ({'sfx_mode': 'skip', 'translate_sfx': True}, False),
+             ({'sfx_mode': None}, False),
+             ({'sfx_mode': 'invalid'}, False),
+             ({'sfx_mode': 'replace', 'translate_sfx': False}, True)]
+    for payload, enabled in cases:
+        path = tmp_path / 'settings.json'
+        path.write_text(json.dumps(payload), encoding='utf-8')
+        config = Config.load(path)
+        assert config.translate_sfx is enabled
+        assert config.sfx_mode == ('replace' if enabled else 'skip')
+    assert Config(sfx_mode='skip').translate_sfx is False
+    assert Config(translate_sfx=False).sfx_mode == 'skip'
+    assert Config().translate_sfx is True

@@ -1,0 +1,2 @@
+# База Linux-сервера. Torch и Argos устанавливаются из фиксированного runtime-каталога.
+-r requirements-base.txt

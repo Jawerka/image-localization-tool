@@ -1,0 +1,318 @@
+{
+  "source_path": "sources/dongbaek-01.jpg",
+  "reading_direction": "ltr",
+  "ocr_engine": "vlm",
+  "translator_engine": "llm",
+  "timings": {
+    "load": 0.125,
+    "detect": 0.474,
+    "ocr": 25.803,
+    "translate": 10.194,
+    "segment": 1.011,
+    "inpaint": 1.171,
+    "typeset": 8.017
+  },
+  "warnings": [],
+  "regions": [
+    {
+      "id": 1,
+      "bbox": [
+        158,
+        1125,
+        1212,
+        467
+      ],
+      "class_name": "text_bubble",
+      "confidence": 0.9439,
+      "text": "젠장 또...또...!!!\n내가 잠깐 일하러 간 사이에..\n분명 그 계집애 짓이 틀림없다.",
+      "translation": "Чёрт, опять... опять!!! Пока я ненадолго ушёл на работу... Это явно проделки той девчонки.",
+      "type": "dialogue",
+      "speaker": "",
+      "speaker_gender": "male",
+      "bubble_bbox": [
+        32,
+        852,
+        1434,
+        1053
+      ],
+      "order": 0,
+      "skip": false,
+      "manual": false,
+      "edited": false,
+      "overflow": false,
+      "translation_locked": false,
+      "document": false,
+      "text_position": null,
+      "style": {
+        "fill_rgb": [
+          0,
+          0,
+          0
+        ],
+        "fill_locked": false,
+        "stroke_rgb": null,
+        "font_size": 103,
+        "alignment": "center",
+        "uppercase": false,
+        "line_height": 18,
+        "font_size_override": 0,
+        "font_id": "Heroika-Regular",
+        "stroke_mode": "auto",
+        "stroke_width": 0.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "rotation": 0.0,
+        "skew_x": 0.0,
+        "warp": {
+          "version": 1,
+          "kind": "none",
+          "bend": 0.0,
+          "quad": null,
+          "mesh": null
+        }
+      },
+      "auto_layout": {
+        "version": 1,
+        "kind": "bubble",
+        "angle": 0.0,
+        "evidence": {
+          "raw_angle": 0,
+          "gain": 1.0,
+          "reason": "недостаточная уверенность"
+        },
+        "source_bbox": [
+          158,
+          1125,
+          1212,
+          467
+        ],
+        "ink_bbox": [
+          195,
+          1176,
+          1149,
+          365
+        ],
+        "outline_px": 3.0,
+        "mask_pad_px": 8.0,
+        "contour": [
+          [
+            64,
+            903
+          ],
+          [
+            65,
+            1872
+          ],
+          [
+            1429,
+            1871
+          ],
+          [
+            1428,
+            902
+          ]
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "bbox": [
+        112,
+        5250,
+        994,
+        318
+      ],
+      "class_name": "text_bubble",
+      "confidence": 0.9249,
+      "text": "우리집 닭이 왜 이 모양 이 꼴이냐고?",
+      "translation": "Почему наша курица в таком виде?",
+      "type": "narration",
+      "speaker": "",
+      "speaker_gender": "male",
+      "bubble_bbox": [
+        33,
+        5129,
+        1156,
+        608
+      ],
+      "order": 1,
+      "skip": false,
+      "manual": false,
+      "edited": false,
+      "overflow": false,
+      "translation_locked": false,
+      "document": false,
+      "text_position": null,
+      "style": {
+        "fill_rgb": [
+          0,
+          0,
+          0
+        ],
+        "fill_locked": false,
+        "stroke_rgb": null,
+        "font_size": 117,
+        "alignment": "center",
+        "uppercase": false,
+        "line_height": 18,
+        "font_size_override": 0,
+        "font_id": "Heroika-Regular",
+        "stroke_mode": "auto",
+        "stroke_width": 0.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "rotation": 0.0,
+        "skew_x": 0.0,
+        "warp": {
+          "version": 1,
+          "kind": "none",
+          "bend": 0.0,
+          "quad": null,
+          "mesh": null
+        }
+      },
+      "auto_layout": {
+        "version": 1,
+        "kind": "bubble",
+        "angle": 0.0,
+        "evidence": {
+          "raw_angle": 0,
+          "gain": 1.0,
+          "reason": "недостаточная уверенность"
+        },
+        "source_bbox": [
+          112,
+          5250,
+          994,
+          318
+        ],
+        "ink_bbox": [
+          144,
+          5293,
+          927,
+          233
+        ],
+        "outline_px": 3.0,
+        "mask_pad_px": 8.0,
+        "contour": [
+          [
+            64,
+            5172
+          ],
+          [
+            65,
+            5707
+          ],
+          [
+            1158,
+            5706
+          ],
+          [
+            1157,
+            5171
+          ]
+        ]
+      }
+    },
+    {
+      "id": 3,
+      "bbox": [
+        763,
+        6620,
+        1178,
+        302
+      ],
+      "class_name": "text_bubble",
+      "confidence": 0.92,
+      "text": "장담하건데 그 일에는 나에게 조금의 잘못도 없었다.",
+      "translation": "Могу поклясться, что в этом деле я ни при чём.",
+      "type": "narration",
+      "speaker": "",
+      "speaker_gender": "male",
+      "bubble_bbox": [
+        646,
+        6446,
+        1345,
+        597
+      ],
+      "order": 2,
+      "skip": false,
+      "manual": false,
+      "edited": false,
+      "overflow": false,
+      "translation_locked": false,
+      "document": false,
+      "text_position": null,
+      "style": {
+        "fill_rgb": [
+          0,
+          0,
+          0
+        ],
+        "fill_locked": false,
+        "stroke_rgb": null,
+        "font_size": 109,
+        "alignment": "center",
+        "uppercase": false,
+        "line_height": 18,
+        "font_size_override": 0,
+        "font_id": "Heroika-Regular",
+        "stroke_mode": "auto",
+        "stroke_width": 0.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "rotation": 0.0,
+        "skew_x": 0.0,
+        "warp": {
+          "version": 1,
+          "kind": "none",
+          "bend": 0.0,
+          "quad": null,
+          "mesh": null
+        }
+      },
+      "auto_layout": {
+        "version": 1,
+        "kind": "bubble",
+        "angle": 0.0,
+        "evidence": {
+          "raw_angle": 0,
+          "gain": 1.0,
+          "reason": "недостаточная уверенность"
+        },
+        "source_bbox": [
+          763,
+          6620,
+          1178,
+          302
+        ],
+        "ink_bbox": [
+          794,
+          6654,
+          1126,
+          233
+        ],
+        "outline_px": 3.0,
+        "mask_pad_px": 8.0,
+        "contour": [
+          [
+            672,
+            6503
+          ],
+          [
+            673,
+            7020
+          ],
+          [
+            1971,
+            7019
+          ],
+          [
+            1970,
+            6502
+          ]
+        ]
+      }
+    }
+  ]
+}

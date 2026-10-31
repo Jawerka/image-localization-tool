@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Настройки</title>
+  <style>
+    body {
+      margin: 24px;
+      max-width: 420px;
+      font-family: system-ui, "Segoe UI", sans-serif;
+      font-size: 15px;
+    }
+    label, input, p {
+      display: block;
+    }
+    label {
+      margin: 12px 0 4px;
+    }
+    input, button {
+      font: inherit;
+    }
+    input[type="text"] {
+      box-sizing: border-box;
+      width: 100%;
+      padding: 6px 8px;
+    }
+    .actions {
+      margin-top: 12px;
+    }
+    button {
+      margin-right: 8px;
+      padding: 6px 12px;
+    }
+    #status {
+      min-height: 1.2em;
+    }
+    h2 {
+      margin: 28px 0 4px;
+      font-size: 16px;
+    }
+    .hint {
+      margin: 0 0 8px;
+      color: #444;
+    }
+    .chime {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 6px 0;
+    }
+    .chime label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0;
+      flex: 1;
+    }
+    #chime-volume {
+      width: 100%;
+    }
+  </style>
+</head>
+<body>
+  <link rel="stylesheet" href="ui.css">
+  <section class="card">
+  <h2>Подключение</h2>
+  <label for="server-url">Адрес сервера</label>
+  <input id="server-url" type="text" value="http://127.0.0.1:8765" placeholder="http://127.0.0.1:8765" autocomplete="off" spellcheck="false">
+  <label for="pair-code">Код сопряжения</label>
+  <div class="cells" id="pair-cells"></div>
+  <input id="pair-code" type="text" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="off">
+  <div class="actions">
+    <button id="pair" type="button">Сопрячь</button>
+    <button id="check" type="button">Проверить связь</button>
+  </div>
+  <p id="status"></p>
+  </section>
+  <section class="card">
+  <h2>Кнопка</h2>
+  <label class="switch" for="button-enabled"><input id="button-enabled" type="checkbox" checked> Кнопка включена</label>
+  <label for="hover-delay">Задержка появления, мс</label>
+  <input id="hover-delay" type="number" min="0" max="2000" value="220">
+  <label for="hover-min">Минимальная длинная сторона, px</label>
+  <input id="hover-min" type="number" min="40" max="2000" value="160">
+  <label for="hover-disabled-sites">Исключённые домены</label>
+  <textarea id="hover-disabled-sites" rows="4" placeholder="pikabu.ru"></textarea>
+  <p class="hint">Сочетание по умолчанию Alt+Shift+T меняется в настройках команд браузера.</p>
+  </section>
+  <section class="card">
+  <h2>Оформление</h2>
+  <label for="theme">Тема</label>
+  <select id="theme">
+    <option value="system">Как в системе</option>
+    <option value="light">Светлая</option>
+    <option value="dark">Тёмная</option>
+  </select>
+  </section>
+  <section class="card">
+  <h2>Сигнал</h2>
+  <p class="hint">Звук по готовности картинки. По умолчанию выключен.</p>
+  <label class="switch" for="chime-on"><input id="chime-on" type="checkbox"> Играть, когда картинка готова</label>
+  <label for="chime-volume">Громкость <span id="chime-volume-value">50%</span></label>
+  <input id="chime-volume" type="range" min="0" max="100" value="50">
+  <div id="chimes"></div>
+  </section>
+  <section class="card">
+  <h2>Диагностика</h2>
+  <label class="switch" for="log-verbose"><input id="log-verbose" type="checkbox"> Подробный журнал</label>
+  <div class="row">
+    <button id="save-logs" type="button">Сохранить логи</button>
+    <button id="copy-logs" type="button">Копировать</button>
+    <button id="clear-logs" type="button">Очистить</button>
+  </div>
+  </section>
+  <script src="chime.js"></script>
+  <script src="log.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

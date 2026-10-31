@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Перевод</title>
+  <link rel="stylesheet" href="ui.css">
+  <style>
+    body { width: 280px; padding: 12px; }
+    #connect { font-size: 15px; }
+  </style>
+</head>
+<body>
+  <div class="row" id="link-row">
+    <span id="dot" class="dot"></span>
+    <span id="link">Нет связи</span>
+  </div>
+  <p id="connect" hidden><a id="open-options-connect" href="#">Подключить к приложению</a></p>
+  <label for="target">Язык перевода</label>
+  <select id="target">
+    <option value="ru" selected>Русский</option>
+    <option value="en">English</option>
+    <option value="uk">Українська</option>
+  </select>
+  <label class="switch" for="site-button"><input id="site-button" type="checkbox"> Кнопка на картинках на этом сайте</label>
+  <p class="muted" id="count">Переводов на вкладке: 0</p>
+  <div class="row">
+    <button id="show-originals" type="button">Показать все оригиналы</button>
+  </div>
+  <div class="row">
+    <button id="remove-all" type="button">Убрать все</button>
+  </div>
+  <div class="row">
+    <button id="select-image" type="button">Выбрать изображение вручную</button>
+  </div>
+  <div class="row">
+    <button id="open-options" type="button">Настройки</button>
+    <button id="save-logs" type="button" hidden>Сохранить логи</button>
+  </div>
+  <p id="status" class="muted"></p>
+  <script src="log.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

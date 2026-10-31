@@ -1,0 +1,557 @@
+{
+  "source_path": "sources/dianshizhai-1889.png",
+  "reading_direction": "ltr",
+  "ocr_engine": "vlm",
+  "translator_engine": "llm",
+  "timings": {
+    "load": 0.098,
+    "detect": 4.402,
+    "ocr": 28.962,
+    "translate": 14.659,
+    "segment": 2.837,
+    "inpaint": 26.658,
+    "typeset": 9.072
+  },
+  "warnings": [],
+  "regions": [
+    {
+      "id": 1,
+      "bbox": [
+        106,
+        514,
+        124,
+        164
+      ],
+      "class_name": "text_free",
+      "confidence": 0.3134,
+      "text": "鐘離氏印",
+      "translation": "",
+      "type": "sign",
+      "speaker": "",
+      "speaker_gender": "",
+      "bubble_bbox": null,
+      "order": 0,
+      "skip": false,
+      "manual": false,
+      "edited": false,
+      "overflow": false,
+      "translation_locked": false,
+      "document": false,
+      "text_position": null,
+      "style": {
+        "fill_rgb": [
+          0,
+          0,
+          0
+        ],
+        "fill_locked": false,
+        "stroke_rgb": null,
+        "font_size": 16,
+        "alignment": "center",
+        "uppercase": false,
+        "line_height": 18,
+        "font_size_override": 0,
+        "font_id": "",
+        "stroke_mode": "auto",
+        "stroke_width": 0.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "rotation": 0.0,
+        "skew_x": 0.0,
+        "warp": {
+          "version": 1,
+          "kind": "none",
+          "bend": 0.0,
+          "quad": null,
+          "mesh": null
+        }
+      }
+    },
+    {
+      "id": 2,
+      "bbox": [
+        193,
+        118,
+        1579,
+        673
+      ],
+      "class_name": "text_free",
+      "confidence": 0.7629,
+      "text": "按例呈銀准\n如所請\n以七月朔始\n年終止\n書例詳載七月\n朔申報\n坿頁中覆按可得也\n茲將希\n夷子所書八六尺大壽字各一\n挂唐氏\n六如先生所書八六尺大虎字各\n一挂以\n及種種符籙寄交上海公所分別\n懸示任\n人觀覽求書宜速過期不書等\n因分予\n餘潤藉仙心佛手以爲功哺彼哀\n嗷如玉\n液瓊漿之遙貺行道則有福盡\n人以回\n天是所望於惻隱君子焉",
+      "translation": "По обычаю представлено на утверждение. Как и просили, с первого числа седьмого месяца до конца года. Подробности в седьмом месяце. В приложении можно найти. Теперь передаём в Шанхайское общество для развешивания и обозрения. Просьба поторопиться, после срока не пишем. Остаток средств пойдёт на благотворительность, чтобы помочь нуждающимся. Это то, чего ждут от милосердных людей.",
+      "type": "narration",
+      "speaker": "",
+      "speaker_gender": "unknown",
+      "bubble_bbox": null,
+      "order": 1,
+      "skip": false,
+      "manual": false,
+      "edited": false,
+      "overflow": false,
+      "translation_locked": false,
+      "document": false,
+      "text_position": null,
+      "style": {
+        "fill_rgb": [
+          18,
+          18,
+          18
+        ],
+        "fill_locked": false,
+        "stroke_rgb": [
+          255,
+          255,
+          255
+        ],
+        "font_size": 49,
+        "alignment": "center",
+        "uppercase": false,
+        "line_height": 18,
+        "font_size_override": 0,
+        "font_id": "comicz",
+        "stroke_mode": "auto",
+        "stroke_width": 3.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "rotation": 0.0,
+        "skew_x": 0.0,
+        "warp": {
+          "version": 1,
+          "kind": "none",
+          "bend": 0.0,
+          "quad": null,
+          "mesh": null
+        }
+      },
+      "auto_layout": {
+        "version": 1,
+        "kind": "free",
+        "angle": 0.0,
+        "evidence": {
+          "raw_angle": 0,
+          "gain": 1.0,
+          "reason": "недостаточная уверенность"
+        },
+        "source_bbox": [
+          193,
+          118,
+          1579,
+          673
+        ],
+        "ink_bbox": [
+          207,
+          134,
+          1549,
+          646
+        ],
+        "outline_px": 3.0,
+        "mask_pad_px": 8.0
+      }
+    },
+    {
+      "id": 3,
+      "bbox": [
+        193,
+        1991,
+        37,
+        89
+      ],
+      "class_name": "text_free",
+      "confidence": 0.6,
+      "text": "社",
+      "translation": "Общество",
+      "type": "narration",
+      "speaker": "",
+      "speaker_gender": "unknown",
+      "bubble_bbox": null,
+      "order": 6,
+      "skip": false,
+      "manual": false,
+      "edited": false,
+      "overflow": false,
+      "translation_locked": false,
+      "document": false,
+      "text_position": null,
+      "style": {
+        "fill_rgb": [
+          18,
+          18,
+          18
+        ],
+        "fill_locked": false,
+        "stroke_rgb": [
+          255,
+          255,
+          255
+        ],
+        "font_size": 10,
+        "alignment": "center",
+        "uppercase": false,
+        "line_height": 18,
+        "font_size_override": 0,
+        "font_id": "comicz",
+        "stroke_mode": "auto",
+        "stroke_width": 3.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "rotation": 24.0,
+        "skew_x": 0.0,
+        "warp": {
+          "version": 1,
+          "kind": "none",
+          "bend": 0.0,
+          "quad": null,
+          "mesh": null
+        }
+      },
+      "auto_layout": {
+        "version": 1,
+        "kind": "free",
+        "angle": 24.0,
+        "evidence": {
+          "raw_angle": 24,
+          "gain": 1.178,
+          "reason": "проекция строк"
+        },
+        "source_bbox": [
+          193,
+          1991,
+          37,
+          89
+        ],
+        "ink_bbox": [
+          190,
+          1988,
+          43,
+          95
+        ],
+        "outline_px": 3.0,
+        "mask_pad_px": 8.0
+      }
+    },
+    {
+      "id": 4,
+      "bbox": [
+        230,
+        1962,
+        39,
+        89
+      ],
+      "class_name": "text_free",
+      "confidence": 0.6,
+      "text": "香",
+      "translation": "Аромат",
+      "type": "narration",
+      "speaker": "",
+      "speaker_gender": "unknown",
+      "bubble_bbox": null,
+      "order": 4,
+      "skip": false,
+      "manual": false,
+      "edited": false,
+      "overflow": false,
+      "translation_locked": false,
+      "document": false,
+      "text_position": null,
+      "style": {
+        "fill_rgb": [
+          18,
+          18,
+          18
+        ],
+        "fill_locked": false,
+        "stroke_rgb": [
+          255,
+          255,
+          255
+        ],
+        "font_size": 13,
+        "alignment": "center",
+        "uppercase": false,
+        "line_height": 18,
+        "font_size_override": 0,
+        "font_id": "comicz",
+        "stroke_mode": "auto",
+        "stroke_width": 3.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "rotation": 9.0,
+        "skew_x": 0.0,
+        "warp": {
+          "version": 1,
+          "kind": "none",
+          "bend": 0.0,
+          "quad": null,
+          "mesh": null
+        }
+      },
+      "auto_layout": {
+        "version": 1,
+        "kind": "free",
+        "angle": 9.0,
+        "evidence": {
+          "raw_angle": 9,
+          "gain": 1.223,
+          "reason": "проекция строк"
+        },
+        "source_bbox": [
+          230,
+          1962,
+          39,
+          89
+        ],
+        "ink_bbox": [
+          227,
+          1963,
+          45,
+          91
+        ],
+        "outline_px": 3.0,
+        "mask_pad_px": 8.0
+      }
+    },
+    {
+      "id": 5,
+      "bbox": [
+        269,
+        1932,
+        38,
+        89
+      ],
+      "class_name": "text_free",
+      "confidence": 0.6,
+      "text": "分",
+      "translation": "Распространяется",
+      "type": "narration",
+      "speaker": "",
+      "speaker_gender": "unknown",
+      "bubble_bbox": null,
+      "order": 5,
+      "skip": false,
+      "manual": false,
+      "edited": false,
+      "overflow": false,
+      "translation_locked": false,
+      "document": false,
+      "text_position": null,
+      "style": {
+        "fill_rgb": [
+          18,
+          18,
+          18
+        ],
+        "fill_locked": false,
+        "stroke_rgb": [
+          255,
+          255,
+          255
+        ],
+        "font_size": 5,
+        "alignment": "center",
+        "uppercase": false,
+        "line_height": 18,
+        "font_size_override": 0,
+        "font_id": "comicz",
+        "stroke_mode": "auto",
+        "stroke_width": 3.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "rotation": 5.0,
+        "skew_x": 0.0,
+        "warp": {
+          "version": 1,
+          "kind": "none",
+          "bend": 0.0,
+          "quad": null,
+          "mesh": null
+        }
+      },
+      "auto_layout": {
+        "version": 1,
+        "kind": "free",
+        "angle": 5.0,
+        "evidence": {
+          "raw_angle": 5,
+          "gain": 1.377,
+          "reason": "проекция строк"
+        },
+        "source_bbox": [
+          269,
+          1932,
+          38,
+          89
+        ],
+        "ink_bbox": [
+          266,
+          1929,
+          44,
+          90
+        ],
+        "outline_px": 3.0,
+        "mask_pad_px": 8.0
+      }
+    },
+    {
+      "id": 6,
+      "bbox": [
+        307,
+        1902,
+        39,
+        89
+      ],
+      "class_name": "text_free",
+      "confidence": 0.6,
+      "text": "雲",
+      "translation": "Облака",
+      "type": "narration",
+      "speaker": "",
+      "speaker_gender": "unknown",
+      "bubble_bbox": null,
+      "order": 2,
+      "skip": false,
+      "manual": false,
+      "edited": false,
+      "overflow": false,
+      "translation_locked": false,
+      "document": false,
+      "text_position": null,
+      "style": {
+        "fill_rgb": [
+          18,
+          18,
+          18
+        ],
+        "fill_locked": false,
+        "stroke_rgb": [
+          255,
+          255,
+          255
+        ],
+        "font_size": 15,
+        "alignment": "center",
+        "uppercase": false,
+        "line_height": 18,
+        "font_size_override": 0,
+        "font_id": "comicz",
+        "stroke_mode": "auto",
+        "stroke_width": 3.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "rotation": 26.0,
+        "skew_x": 0.0,
+        "warp": {
+          "version": 1,
+          "kind": "none",
+          "bend": 0.0,
+          "quad": null,
+          "mesh": null
+        }
+      },
+      "auto_layout": {
+        "version": 1,
+        "kind": "free",
+        "angle": 26.0,
+        "evidence": {
+          "raw_angle": 26,
+          "gain": 1.432,
+          "reason": "проекция строк"
+        },
+        "source_bbox": [
+          307,
+          1902,
+          39,
+          89
+        ],
+        "ink_bbox": [
+          304,
+          1912,
+          45,
+          82
+        ],
+        "outline_px": 3.0,
+        "mask_pad_px": 8.0
+      }
+    },
+    {
+      "id": 7,
+      "bbox": [
+        346,
+        1872,
+        39,
+        90
+      ],
+      "class_name": "text_free",
+      "confidence": 0.6,
+      "text": "駐",
+      "translation": "Останавливаются",
+      "type": "narration",
+      "speaker": "",
+      "speaker_gender": "unknown",
+      "bubble_bbox": null,
+      "order": 3,
+      "skip": false,
+      "manual": false,
+      "edited": false,
+      "overflow": false,
+      "translation_locked": false,
+      "document": false,
+      "text_position": null,
+      "style": {
+        "fill_rgb": [
+          18,
+          18,
+          18
+        ],
+        "fill_locked": false,
+        "stroke_rgb": [
+          255,
+          255,
+          255
+        ],
+        "font_size": 6,
+        "alignment": "center",
+        "uppercase": false,
+        "line_height": 18,
+        "font_size_override": 0,
+        "font_id": "comicz",
+        "stroke_mode": "auto",
+        "stroke_width": 3.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "rotation": 24.0,
+        "skew_x": 0.0,
+        "warp": {
+          "version": 1,
+          "kind": "none",
+          "bend": 0.0,
+          "quad": null,
+          "mesh": null
+        }
+      },
+      "auto_layout": {
+        "version": 1,
+        "kind": "free",
+        "angle": 24.0,
+        "evidence": {
+          "raw_angle": 24,
+          "gain": 2.345,
+          "reason": "проекция строк"
+        },
+        "source_bbox": [
+          346,
+          1872,
+          39,
+          90
+        ],
+        "ink_bbox": [
+          343,
+          1870,
+          45,
+          95
+        ],
+        "outline_px": 3.0,
+        "mask_pad_px": 8.0
+      }
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+# Translation (Argos Translate - оффлайн)
+argostranslate @ https://raw.githubusercontent.com/Jawerka/image-localization-tool/cbe2960b7d620cbc0348f50ba325e8945384d795/assets/argostranslate-1.11.1-py3-none-any.whl#sha256=b0fa2c47dcede945d9a8edbb6845de9b25791faa363bfff0b89fefaea28241f7
+
+# Image processing / ML
+torch>=2.0.0
+opencv-python>=4.8.0
+Pillow>=10.0.0
+fonttools
+numpy>=1.24.0
+rapidocr>=3.0.0
+onnxruntime>=1.16.0
+
+# Archives (cbr/rar — rarfile и 7-Zip или UnRAR; cb7/7z — py7zr)
+rarfile>=4.1
+py7zr>=0.21
+
+# Utilities
+requests>=2.31.0
+pyphen>=0.14.0
+pywebview>=5.1
+
+# CUDA-сборка torch для локальной GPU: python scripts/setup_models.py --torch-cuda
+# Проверки: pip install -r requirements-dev.txt

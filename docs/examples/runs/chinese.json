@@ -1,0 +1,64 @@
+{
+  "generated_at": "2026-10-25T08:01:53.690037+00:00",
+  "code": {
+    "commit": "c498ba2271a2e9470bf2db92774ee2b8719bfbf7",
+    "tracked_code_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tracked_code_dirty": false,
+    "generator_sha256": "e0072c584e4dd3b5f63827fc1c22430a10d0c5f54af36db4acb136bb4c2ce310"
+  },
+  "python": "3.10.11",
+  "platform": "Windows",
+  "model": "qwen36-27b-mtp-q6k-2x5060ti",
+  "source_lang": "zh",
+  "target_lang": "ru",
+  "input_sha256": "48ec51810f4717234278dddcceea8bd2132719bdb7af30130f023f46223a3f4a",
+  "crop": null,
+  "prepared_input_sha256": "9a175345e5c5a9aff948c5c0d4968b74be664ff463e6a27f3a060ee65cf866ce",
+  "settings": {
+    "ocr_backend": "vlm",
+    "translator_backend": "llm",
+    "inpainter_backend": "lama",
+    "sfx_mode": "replace",
+    "translate_sfx": true,
+    "adaptive_text": true,
+    "discover_missing_text": true,
+    "auto_stylized_fonts": true,
+    "layout_long_side": 2000,
+    "vlm_max_side": 1536,
+    "llm_thinking": false,
+    "ort_intra_op_threads": 4
+  },
+  "seconds": 90.96,
+  "ocr_engine": "vlm",
+  "translator_engine": "llm",
+  "regions": 7,
+  "warnings": [],
+  "stages_completed": [
+    "load",
+    "detect",
+    "ocr",
+    "translate",
+    "segment",
+    "inpaint",
+    "typeset"
+  ],
+  "timings": {
+    "load": 0.098,
+    "detect": 4.402,
+    "ocr": 28.962,
+    "translate": 14.659,
+    "segment": 2.837,
+    "inpaint": 26.658,
+    "typeset": 9.072
+  },
+  "fonts": [
+    "comicz"
+  ],
+  "manual_edits": false,
+  "artifacts": {
+    "translated/chinese.png": "5ef98a1b3fc6ccee68205c081a572c0ea6ba1d2905753499a932fde06c649b7f",
+    "regions/chinese.json": "d03a49b9f18236113e26e25114a22afe166f591c8e42f12de7c8ce50f6f0047e",
+    "comparisons/chinese.jpg": "f173b690ca553e086ec405b0bd8bc11c49cd9b44fc0410bd5047e5a0ea2f9334",
+    "comparisons/chinese-full.jpg": "002609c8201279dc2d69c1c238b3a6fa690a660aa906eda587ea811a6b0986c6"
+  }
+}

@@ -1,0 +1,66 @@
+{
+  "generated_at": "2026-10-25T08:03:46.161364+00:00",
+  "code": {
+    "commit": "c498ba2271a2e9470bf2db92774ee2b8719bfbf7",
+    "tracked_code_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tracked_code_dirty": false,
+    "generator_sha256": "e0072c584e4dd3b5f63827fc1c22430a10d0c5f54af36db4acb136bb4c2ce310"
+  },
+  "python": "3.10.11",
+  "platform": "Windows",
+  "model": "qwen36-27b-mtp-q6k-2x5060ti",
+  "source_lang": "ja",
+  "target_lang": "ru",
+  "input_sha256": "21fdf31f8b378991711e4e5c5c981088aeefd1f3bc9321dd9d0db2cc0842249a",
+  "crop": null,
+  "prepared_input_sha256": "aa3110ef8bc105cdb72be551d00248ee5ee77bb72c03661cafa51dc3b52eb8f1",
+  "settings": {
+    "ocr_backend": "vlm",
+    "translator_backend": "llm",
+    "inpainter_backend": "lama",
+    "sfx_mode": "replace",
+    "translate_sfx": true,
+    "adaptive_text": true,
+    "discover_missing_text": true,
+    "auto_stylized_fonts": true,
+    "layout_long_side": 2000,
+    "vlm_max_side": 1536,
+    "llm_thinking": false,
+    "ort_intra_op_threads": 4
+  },
+  "seconds": 61.73,
+  "ocr_engine": "vlm",
+  "translator_engine": "llm",
+  "regions": 11,
+  "warnings": [],
+  "stages_completed": [
+    "load",
+    "detect",
+    "ocr",
+    "translate",
+    "segment",
+    "inpaint",
+    "typeset"
+  ],
+  "timings": {
+    "load": 0.013,
+    "detect": 0.544,
+    "ocr": 36.823,
+    "translate": 16.276,
+    "segment": 0.212,
+    "inpaint": 1.714,
+    "typeset": 5.213
+  },
+  "fonts": [
+    "Heroika-Regular",
+    "comicz",
+    "impact"
+  ],
+  "manual_edits": false,
+  "artifacts": {
+    "translated/japanese.png": "c68e5873519dbdf6cbabf2d0365a2ac9935be7d5d2e8b0156bb225092259db4a",
+    "regions/japanese.json": "7001cdb3a6134934e69f22c785ac4a235c8a81f71f6ca4763380cfdf33adbac1",
+    "comparisons/japanese.jpg": "4521cd94be78e0b5bd7f94cc801699640601eae33e529b105f68365a24818de3",
+    "comparisons/japanese-full.jpg": "92dbe6d9d32161bbaf8b758587c24ea42a84fc584837c97e83f66ca1c42899aa"
+  }
+}
