@@ -53,7 +53,7 @@ function Resolve-BuildPython {
         Write-Host "venv\Scripts\python.exe not found; using $($onPath.Source)"
         return $onPath.Source
     }
-    throw "python.exe not found. Create venv, install requirements.txt and pyinstaller, then retry."
+    throw "python.exe not found. Create venv, install requirements-dev.txt (or requirements-release.txt for a release build) and retry."
 }
 
 function Get-AppVersion {

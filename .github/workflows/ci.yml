@@ -36,6 +36,9 @@ jobs:
           -q
           --tb=short
 
+      - name: Linux deploy scripts
+        run: bash tests/linux/test_deploy_scripts.sh
+
   frontend:
     name: Frontend unit tests
     runs-on: ubuntu-latest

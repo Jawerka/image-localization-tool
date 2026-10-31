@@ -1,6 +1,6 @@
 services:
   ilt:
-    image: ghcr.io/jawerka/image-localization-tool:1.2.0-cpu-full
+    image: ghcr.io/jawerka/image-localization-tool:1.0.0-cpu-full
     platform: linux/amd64
     init: true
     restart: unless-stopped

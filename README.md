@@ -10,7 +10,7 @@
 
 Качество зависит от страницы и модели. На эталонных прогонах ink recall маски букв был 99.8–100% (см. [docs/BENCHMARK_RESULTS.md](docs/BENCHMARK_RESULTS.md)); на произвольных страницах это не гарантировано. Звуковые эффекты по умолчанию переводятся; отключаются режимом `sfx_mode: skip`. Узкие баллоны переносятся по слогам; текст на скринтоне чистится хуже ровного баллона.
 
-История версий — [CHANGELOG.md](CHANGELOG.md). Заметки к текущему релизу — [docs/RELEASE_NOTES_1.2.0.md](docs/RELEASE_NOTES_1.2.0.md).
+История версий — [CHANGELOG.md](CHANGELOG.md). Заметки к версии 1.0.0 — [docs/RELEASE_NOTES_1.0.0.md](docs/RELEASE_NOTES_1.0.0.md).
 
 ## Содержание
 
@@ -102,35 +102,33 @@ flowchart LR
 
 ### Windows: готовое приложение
 
-Откройте [GitHub Releases](https://github.com/Jawerka/image-localization-tool/releases) и выберите архив для Windows. `Source code.zip` — исходники, а не готовое приложение. Windows поставляется только portable ZIP, без установщика.
+Выпуск 1.0.0 ещё не опубликован, готового ZIP на GitHub нет. Windows поставляется только portable ZIP, без установщика. Когда архив появится, `Source code.zip` по-прежнему будет исходниками, а не приложением.
 
-- **Полный CPU-пакет:** `ImageLocalizationTool-<version>-windows-x64-portable-cpu-full.zip` — около 868 МиБ. Модели и зависимости уже внутри, начальная загрузка не нужна. OCR, очистка и перевод en↔ru работают офлайн.
-- **Лёгкий пакет:** `ImageLocalizationTool-<version>-windows-x64-portable.zip` — около 103 МиБ. При первом запуске выберите языки и нажмите «Подготовить»; для скачивания компонентов нужен интернет.
+- **Полный CPU-пакет:** `ImageLocalizationTool-1.0.0-windows-x64-portable-cpu-full.zip`. Модели и зависимости уже внутри, начальная загрузка не нужна. OCR, очистка и перевод en↔ru работают офлайн.
+- **Лёгкий пакет:** `ImageLocalizationTool-1.0.0-windows-x64-portable.zip`. При первом запуске выберите языки и нажмите «Подготовить»; для скачивания компонентов нужен интернет.
 
-Полные Windows и Docker пакеты доступны начиная с **1.1.0**. Выбирайте файл с суффиксом `cpu-full`, если нужна поставка со всеми моделями.
+Выбирайте файл с суффиксом `cpu-full`, если нужна поставка со всеми моделями.
 
 Распакуйте ZIP целиком и запустите `ImageLocalizationTool/desktop/ImageLocalizationTool.exe`. Оставьте остальные папки рядом с EXE. Настройки, проекты, журнал и ключи находятся в `ImageLocalizationTool/data`; приложение не использует `%APPDATA%` и `%LOCALAPPDATA%`.
 
 Для обновления полного пакета закройте приложение и сохраните старую папку как резервную копию. Распакуйте новую версию в чистую папку по **прежнему пути программы** и перенесите из резервной копии только `data`: так сохранятся абсолютные пути к оригиналам в проектах. Скрипты обновления лёгкого ZIP для полного пакета не подходят. [Подробности поставки и обновления](docs/DISTRIBUTIONS.md).
 
-Лёгкий ZIP обновляется скриптом из нового пакета: [docs/WINDOWS_UPDATE.md](docs/WINDOWS_UPDATE.md). Если обновляете именно 1.1.0, сначала замените `windows-update-common.ps1` рядом со скриптом на [исправленный файл релиза 1.1.0](https://github.com/Jawerka/image-localization-tool/releases/download/v1.1.0/windows-update-common.ps1) (сумма — в `SHA256SUMS-updater-fix.txt` того же релиза). В 1.2.0 исправление уже в пакете. К полному CPU-пакету этот скрипт не применяется. Linux-служба, отдельно от Docker: [docs/LINUX_SERVER.md](docs/LINUX_SERVER.md).
+Лёгкий ZIP обновляется скриптом из нового пакета: [docs/WINDOWS_UPDATE.md](docs/WINDOWS_UPDATE.md). К полному CPU-пакету этот скрипт не применяется. Linux-служба, отдельно от Docker: [docs/LINUX_SERVER.md](docs/LINUX_SERVER.md).
 
 ### Docker: приложение в браузере
 
-Скачайте `ImageLocalizationTool-<version>-docker-cpu-full.zip` в [Releases](https://github.com/Jawerka/image-localization-tool/releases), распакуйте и откройте терминал в полученной папке. Для CPU-пакета 1.2.0 архив занимает 1 235 966 432 байта, около 1,15 ГиБ:
+Готовый архив `ImageLocalizationTool-1.0.0-docker-cpu-full.zip` ещё не опубликован. Когда он появится, распакуйте его и откройте терминал в полученной папке:
 
 ```sh
-docker load -i ImageLocalizationTool-1.2.0-linux-amd64-cpu-full.tar.gz
+docker load -i ImageLocalizationTool-1.0.0-linux-amd64-cpu-full.tar.gz
 docker compose up -d --no-build
 ```
 
-Откройте `http://localhost:8080`. В актуальных исходниках вход по умолчанию выключен: **Настройки → Доступ**, логин и пароль владельца, **Сохранить доступ**. Учётная запись сохраняется в `data/web-access.json` внутри volume; пароль хранится как хеш. Это одна учётная запись для общего редактора, не отдельные проекты пользователей. Опубликованный образ 1.2.0 этой схемы ещё не содержит и по-прежнему спрашивает токен.
-
-Ранее опубликованные образы могут запрашивать старый ключ: для них используйте `docker compose exec -T ilt cat /opt/ilt/data/web.token`. После обновления на новую схему старые `web.token` и `ILT_WEB_TOKEN` не включают защиту; при необходимости настройте её через приложение. [Подробнее о доступе](docs/DISTRIBUTIONS.md#доступ-к-редактору).
+Откройте `http://localhost:8080`. Вход по умолчанию выключен: **Настройки → Доступ**, логин и пароль владельца, **Сохранить доступ**. Учётная запись сохраняется в `data/web-access.json` внутри volume; пароль хранится как хеш. Это одна учётная запись для общего редактора, не отдельные проекты пользователей. [Подробнее о доступе](docs/DISTRIBUTIONS.md#доступ-к-редактору).
 
 Данные сохраняются в Docker volume. `docker compose down` останавливает приложение с сохранением данных; **`docker compose down -v` удаляет данные**. Для LAN, другого порта, резервирования и обновления см. [инструкцию Docker](docs/DISTRIBUTIONS.md#docker-браузерный-редактор).
 
-Для установки через реестр скачайте [compose.ghcr.yaml](compose.ghcr.yaml) в отдельную папку как `compose.yaml`, затем выполните `docker compose pull` и `docker compose up -d`. В нём закреплён образ `ghcr.io/jawerka/image-localization-tool:1.2.0-cpu-full`; правила входа зависят от версии образа; адрес редактора тот же. При обновлении меняйте тег версии и сохраняйте volume.
+[compose.ghcr.yaml](compose.ghcr.yaml) указывает образ `ghcr.io/jawerka/image-localization-tool:1.0.0-cpu-full`. Наличие этого образа в реестре не проверено. Когда он будет опубликован, скачайте файл в отдельную папку как `compose.yaml`, затем выполните `docker compose pull` и `docker compose up -d`. При обновлении меняйте тег версии и сохраняйте volume.
 
 Из корня актуальных исходников можно собрать образ самостоятельно (для сборки нужен интернет):
 

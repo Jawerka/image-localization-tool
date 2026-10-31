@@ -100,7 +100,15 @@ try {
         'tar -xf /tmp/ilt-deploy.tar'
         'rm -f /tmp/ilt-deploy.tar'
         "systemctl restart '$Service'"
-        'sleep 1'
+        'ready=0'
+        'for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do'
+        '  body=$(curl -fsS --max-time 3 http://127.0.0.1:8765/v1/health 2>/dev/null) || { sleep 1; continue; }'
+        '  case "$body" in'
+        '    *\"ready\":true*|*\"ready\": true*) ready=1; break ;;'
+        '  esac'
+        '  sleep 1'
+        'done'
+        'test "$ready" = 1'
         "systemctl is-active '$Service'"
     ) -join "`n"
     Write-Host "==> Extract and restart $Service"

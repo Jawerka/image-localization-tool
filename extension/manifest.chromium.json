@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Image Localization Tool",
-  "version": "1.2.0",
+  "version": "1.0.0",
   "description": "Перевод текста на изображениях страницы",
   "permissions": ["storage", "contextMenus", "activeTab", "offscreen", "downloads", "declarativeNetRequest", "declarativeNetRequestWithHostAccess"],
   "minimum_chrome_version": "116",

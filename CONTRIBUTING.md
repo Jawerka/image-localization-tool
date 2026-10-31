@@ -49,7 +49,7 @@ flutter test
 .\scripts\build-windows.ps1 -ServerZip
 ```
 
-`-ServerZip` собирает архив Linux-сервера через `scripts\package-server.ps1`. `-SkipFlutter` не пересобирает хост.
+`-ServerZip` собирает Windows server zip через `scripts\package-server.ps1`. Архив Linux-сервера собирает `.github/workflows/release.yml`. `-SkipFlutter` не пересобирает хост.
 
 Результат:
 

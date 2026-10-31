@@ -2,11 +2,11 @@
 
 Два канала используют один пайплайн v2: Linux amd64 CPU-контейнер с браузерным редактором и Windows x64 portable CPU с Flutter-окном. Профиль включает детектор, RapidOCR, LaMa, шрифты, Torch CPU, Argos и языковые модели en↔ru. LLM подключается отдельно. CUDA и ARM не входят в этот профиль.
 
-Начиная с 1.1.0 полные пакеты входят в выпуск. Скачивание — [GitHub Releases](https://github.com/Jawerka/image-localization-tool/releases). Для установки из реестра используйте публичный GHCR и закреплённую версию образа.
+Текущая версия — 1.0.0. Готовые ZIP ещё не опубликованы: их собирает выпуск. Образ `ghcr.io/jawerka/image-localization-tool:1.0.0-cpu-full` в реестре не проверялся.
 
 ## Windows portable CPU full
 
-Распакуйте `ImageLocalizationTool-1.2.0-windows-x64-portable-cpu-full.zip` в доступную на запись папку. Запустите `ImageLocalizationTool/desktop/ImageLocalizationTool.exe`.
+После выпуска распакуйте `ImageLocalizationTool-1.0.0-windows-x64-portable-cpu-full.zip` в доступную на запись папку. Запустите `ImageLocalizationTool/desktop/ImageLocalizationTool.exe`.
 
 Системный Python, установка библиотек и первоначальная загрузка моделей не требуются. Локальные библиотеки Visual C++ находятся также рядом с Flutter EXE. Для RAR/CBR в полном пакете предусмотрены 7z.exe, 7z.dll и лицензия в `tools/7zip`; загрузчик предпочитает их системным распаковщикам. Настройки, проекты, журнал и ключи создаются в `data` рядом с приложением.
 
@@ -27,7 +27,7 @@
 - `-UsePreparedStage` повторно использует компоненты `build/portable-full/ImageLocalizationTool`, обновляет код/Flutter/web из актуального dist и проверяет готовность перед ZIP. Личные файлы в staging data приводят к отказу.
 
 ```powershell
-venv/Scripts/python scripts/smoke-components.py --portable dist/ImageLocalizationTool-1.2.0-windows-x64-portable-cpu-full.zip --prepared
+venv/Scripts/python scripts/smoke-components.py --portable dist/ImageLocalizationTool-1.0.0-windows-x64-portable-cpu-full.zip --prepared
 venv/Scripts/python scripts/smoke-portable-desktop.py --app build/frozen-smoke-<digest>/ImageLocalizationTool
 ```
 
@@ -39,17 +39,17 @@ venv/Scripts/python scripts/smoke-portable-desktop.py --app build/frozen-smoke-<
 
 ### Из готового образа
 
-Готовый `ImageLocalizationTool-1.2.0-docker-cpu-full.zip` содержит образ `.tar.gz`, Compose без стадии сборки и README. Распакуйте его и выполняйте команды в этой папке. Исходники и пользовательские данные в пакет не входят.
+Готовый `ImageLocalizationTool-1.0.0-docker-cpu-full.zip` содержит образ `.tar.gz`, Compose без стадии сборки и README. Выпуск 1.0.0 ещё не опубликован. Когда архив будет, распакуйте его и выполняйте команды в этой папке. Исходники и пользовательские данные в пакет не входят.
 
 ```sh
-docker load -i ImageLocalizationTool-1.2.0-linux-amd64-cpu-full.tar.gz
+docker load -i ImageLocalizationTool-1.0.0-linux-amd64-cpu-full.tar.gz
 docker compose up -d --no-build
 ```
 
 Сборка такого ZIP из уже экспортированного образа:
 
 ```powershell
-venv/Scripts/python scripts/package-docker.py --image-archive dist/ImageLocalizationTool-1.2.0-linux-amd64-cpu-full.tar.gz
+venv/Scripts/python scripts/package-docker.py --image-archive dist/ImageLocalizationTool-1.0.0-linux-amd64-cpu-full.tar.gz
 ```
 
 Откройте `http://localhost:8080`. Новая схема необязательного входа описана ниже. Ранее опубликованные архивы сохраняют поведение своей версии до обновления образа.
@@ -90,7 +90,7 @@ ILT_PUBLISH_HOST=0.0.0.0 ILT_PORT=18080 ILT_WEB_ORIGINS=http://192.168.88.42:180
 
 `ILT_WEB_ORIGINS` — список точных публичных HTTP(S) origins через запятую, с нужным портом. Wildcard, путь и учётные данные не допускаются. Для HTTPS перед reverse proxy укажите внешний HTTPS origin; proxy должен сохранять публичный Host. Приложение не доверяет `X-Forwarded-*`. Для доступа через недоверенную сеть нужен HTTPS на proxy.
 
-Авторизация через существующую HttpOnly/SameSite cookie. Все пользовательские API требуют сессии. `/healthz` сообщает лишь о доступности HTTP, не о качестве/готовности моделей. Это один оператор и общий текущий проект на экземпляр, не многопользовательский сервер.
+Пока защита выключена, пользовательские API открываются без cookie. Сессия HttpOnly/SameSite нужна только после включения входа. `/healthz` сообщает лишь о доступности HTTP, не о качестве/готовности моделей. Это один оператор и общий текущий проект на экземпляр, не многопользовательский сервер.
 
 ### Файлы и данные
 
@@ -102,7 +102,7 @@ ILT_PUBLISH_HOST=0.0.0.0 ILT_PORT=18080 ILT_WEB_ORIGINS=http://192.168.88.42:180
 - Compose использует именованный volume в `/opt/ilt/data`. Его нужно сохранять и резервировать. `docker compose down` сохраняет данные; `down -v` удаляет volume.
 - Загруженные originals и полученные ZIP/пакеты остаются в данных; автоматическая очистка не реализована. Не удаляйте originals открытых проектов.
 
-Развёрнутый CPU-образ занимает около 4,1 ГБ по измерению Docker Engine. ZIP для загрузки версии 1.2.0 — 1 235 966 432 байта, около 1,15 ГиБ. При обновлении нужно место под старый и новый образы, кэш и пользовательские данные. На тестовом rootfs 20 ГБ несколько промежуточных образов и build cache исчерпали свободное место; удаление только ненужного тестового образа восстановило запуск. Планируйте запас диска и не очищайте тома с проектами вместе с образами.
+Развёрнутый CPU-образ занимает около 4,1 ГБ по измерению Docker Engine. При обновлении нужно место под старый и новый образы, кэш и пользовательские данные. На тестовом rootfs 20 ГБ несколько промежуточных образов и build cache исчерпали свободное место; удаление только ненужного тестового образа восстановило запуск. Планируйте запас диска и не очищайте тома с проектами вместе с образами.
 
 При обновлении заменяется образ, данные остаются. Старый образ не восстанавливает изменения данных; перед изменением версии сохраняйте резервную копию volume. SIGTERM останавливает worker и сохраняет очередь; незавершённая очередь восстанавливается на паузе.
 
