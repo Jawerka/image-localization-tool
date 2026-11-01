@@ -731,6 +731,21 @@ def test_release_workflow_builds_and_uploads_linux_assets():
     assert "server-linux-x64.tar.gz" in text
     assert "packs-linux.json" in text
     assert "packs/*.7z" not in text
+    # Публичный тег не пересобирает и не перезаписывает файлы; ручной запуск — отказ.
+    assert "Guard published tag" in text
+    assert "skip Linux rebuild and upload" in text
+    assert 'if: steps.gate.outputs.skip != \'true\'' in text
+    assert text.index("Guard published tag") < text.index("Checkout")
+    assert text.count("gh release upload") == 1
+    assert "GH_REPO: ${{ github.repository }}" in text
+    assert text.index("GH_REPO: ${{ github.repository }}") < text.index("name: Checkout")
+    assert '--repo "$GITHUB_REPOSITORY"' in _guard_run(text)
+
+
+def _guard_run(text: str) -> str:
+    return text[text.index("name: Guard published tag") : text.index("name: Checkout")]
+
+
 def test_manifest_merge_keeps_other_platform_placeholders():
     import importlib.util
 

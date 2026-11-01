@@ -22,13 +22,39 @@ jobs:
     timeout-minutes: 150
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # До checkout нет git-корня: без репозитория `gh` пишет "not a git repository".
+      GH_REPO: ${{ github.repository }}
     steps:
+      - name: Guard published tag
+        id: gate
+        run: |
+          set -eux
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          DRAFT="$(gh release view "$TAG" --json isDraft --jq '.isDraft' --repo "$GITHUB_REPOSITORY" 2>/dev/null || true)"
+          if [ "$DRAFT" = "false" ]; then
+            if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+              echo "Published releases are immutable; use a new version."
+              exit 1
+            fi
+            echo "Published release $TAG is immutable; skip Linux rebuild and upload."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout
+        if: steps.gate.outputs.skip != 'true'
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && (inputs.source_ref || inputs.tag) || github.ref }}
 
       - name: Resolve tag and version
+        if: steps.gate.outputs.skip != 'true'
         id: meta
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
@@ -40,26 +66,32 @@ jobs:
           echo "version=$(python -c 'from scripts.smoke_dist import read_app_version; print(read_app_version())')" >> "$GITHUB_OUTPUT"
 
       - name: Set up Python
+        if: steps.gate.outputs.skip != 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
           cache: pip
 
       - name: Install build dependencies
+        if: steps.gate.outputs.skip != 'true'
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-release.txt pyinstaller
 
       - name: Generate fixed catalogs before packaging
+        if: steps.gate.outputs.skip != 'true'
         run: python scripts/build-runtime-manifest.py
 
       - name: Build stdlib.zip
+        if: steps.gate.outputs.skip != 'true'
         run: python scripts/build-stdlib-zip.py
 
       - name: Build sidecar
+        if: steps.gate.outputs.skip != 'true'
         run: python -m PyInstaller ImageLocalizationTool.spec --clean --noconfirm
 
       - name: Assemble server tar.gz
+        if: steps.gate.outputs.skip != 'true'
         run: |
           set -eux
           VERSION="${{ steps.meta.outputs.version }}"
@@ -87,11 +119,13 @@ jobs:
           tar -C dist/server -czf "dist/ImageLocalizationTool-${VERSION}-server-linux-x64.tar.gz" ImageLocalizationTool
 
       - name: Test Linux deployment scripts with an isolated fake root
+        if: steps.gate.outputs.skip != 'true'
         run: |
           bash -n scripts/linux-deploy-common.sh scripts/install-server-linux.sh scripts/update-server-linux.sh scripts/rollback-server-linux.sh tests/linux/test_deploy_scripts.sh
           bash tests/linux/test_deploy_scripts.sh
 
       - name: Frozen CPU and offline components
+        if: steps.gate.outputs.skip != 'true'
         run: |
           set -eux
           ROOT="dist/server/ImageLocalizationTool"
@@ -101,6 +135,7 @@ jobs:
           "$ROOT/ImageLocalizationTool" --component-check "$ROOT/data/check.json"
 
       - name: Checksums for Linux assets
+        if: steps.gate.outputs.skip != 'true'
         run: |
           set -eux
           cd dist
@@ -108,17 +143,18 @@ jobs:
           python -c 'import json; from pathlib import Path; d=json.loads(Path("../locks/runtime-catalog.json").read_text()); Path("packs-linux.json").write_text(json.dumps([p for p in d if p["os"]=="linux"]))'
 
       - name: Upload to release
+        if: steps.gate.outputs.skip != 'true'
         run: |
           set -eux
           TAG="${{ steps.meta.outputs.tag }}"
           VERSION="${{ steps.meta.outputs.version }}"
-          if [ "$(gh release view "$TAG" --json isDraft --jq '.isDraft' 2>/dev/null || true)" = "false" ]; then
+          if [ "$(gh release view "$TAG" --json isDraft --jq '.isDraft' --repo "$GITHUB_REPOSITORY" 2>/dev/null || true)" = "false" ]; then
             echo "Published releases are immutable; use a new version."
             exit 1
           fi
-          gh release view "$TAG" >/dev/null 2>&1 \
-            || gh release create "$TAG" --draft --title "$VERSION" --notes "Linux assets for $TAG"
-          gh release upload "$TAG" \
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --title "$VERSION" --notes "Linux assets for $TAG"
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" \
             dist/ImageLocalizationTool-*-server-linux-x64.tar.gz \
             dist/packs-linux.json \
             dist/SHA256SUMS-linux.txt \
