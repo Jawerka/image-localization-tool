@@ -35,9 +35,13 @@ from src.app.jobs import BATCH_KINDS, REGION_KINDS, JobQueue
 from src.app.settings import AppSettings, get_api_key
 from src.app.portable_project import (
     PortableProjectError,
-    pack_project,
     resolve_archive_open_kind,
-    unpack_project,
+)
+from src.app.project_service import (
+    load_package,
+    purge_finished_exports,
+    save_package,
+    storage_report,
 )
 from src.app.store import ProjectStore, VersionConflict
 from src.app.worker import (
@@ -691,6 +695,21 @@ def _api_impl(state: AppState, method: str, path: str, body: dict, query: dict |
     if path == "/api/dialog/reveal":
         _need_method(method, "POST")
         return _Result(_reveal(state, body))
+    if path == "/api/storage":
+        _need_method(method, "GET")
+        snap = state.queue.snapshot() if hasattr(state.queue, "snapshot") else {}
+        active = {
+            str(item.get("id") or item.get("job", {}).get("id") or "")
+            for item in (snap.get("exports") or [])
+            if isinstance(item, dict)
+        }
+        return _Result(storage_report(state.store, active_export_ids={item for item in active if item}))
+    if path == "/api/storage/purge":
+        _need_method(method, "POST")
+        snap = state.queue.snapshot() if hasattr(state.queue, "snapshot") else {}
+        keep = {str(item.get("id") or "") for item in (snap.get("exports") or []) if isinstance(item, dict)}
+        keep.update(str(item.get("id") or "") for item in (snap.get("running") or []) if isinstance(item, dict))
+        return _Result(purge_finished_exports(state.store, keep_ids={item for item in keep if item}))
     if path == "/api/settings":
         _need_method(method, "PUT")
         return _Result({"settings": _update_settings(state, body)})
@@ -954,6 +973,7 @@ def _page_row(state: AppState, record: dict) -> dict:
         "error": status["error"],
         "warnings": status["warnings"],
         "render_version": int(provenance["document_version"]) if provenance else 0,
+        "has_auto": (state.store.page_dir(state.project_id or "", page_id) / "auto.json").is_file(),
     }
 
 
@@ -1033,7 +1053,12 @@ def _reset_page(state: AppState, page_id: str) -> dict:
     _require_page(state, page_id)
     project_id = state.project_id or ""
     with state._page_edit_lock:
-        snapshot = state.store.read_auto(project_id, page_id)
+        try:
+            snapshot = state.store.read_auto(project_id, page_id)
+        except FileNotFoundError as exc:
+            raise _HttpError(
+                409, "Нет автоматического снимка: сброс правок недоступен",
+            ) from exc
         current = state.store.read_document(project_id, page_id)
         try:
             saved = state.store.write_document(
@@ -1794,15 +1819,17 @@ def _package_save(state: AppState, body: dict | None = None) -> dict:
     dest = Path(path_text)
     editor = body.get("editor") if isinstance(body.get("editor"), dict) else None
     try:
-        packed = pack_project(state.store, state.project_id, dest, editor=editor)
+        packed = save_package(state.store, state.project_id, dest, editor=editor)
     except PortableProjectError as exc:
         raise ValueError(str(exc)) from exc
     with state._lock:
         state.package_path = str(packed.path)
-        state.package_dirty = False
+        if packed.complete:
+            state.package_dirty = False
     payload = _collection(state)
     payload["package"] = _package_status(state)
     payload["path"] = str(packed.path)
+    payload["complete"] = packed.complete
     if editor is not None:
         from src.app.portable_project import normalize_editor
 
@@ -1816,7 +1843,7 @@ def _package_save(state: AppState, body: dict | None = None) -> dict:
 
 def _apply_portable_load(state: AppState, package: Path) -> dict:
     try:
-        loaded = unpack_project(state.store, package)
+        loaded = load_package(state.store, package)
     except PortableProjectError as exc:
         raise ValueError(str(exc)) from exc
     with state._lock:
@@ -2154,14 +2181,9 @@ def _font_list() -> dict:
 
 
 def _preview_text(query: dict) -> str:
-    raw = ""
-    values = query.get("text") if query else None
-    if values:
-        raw = values[0]
-    text = str(raw or "").replace("\r", " ").replace("\n", " ").strip()
-    if not text:
-        text = "Привет"
-    return text[:40]
+    from src.app.preview_service import preview_text
+
+    return preview_text(query)
 
 
 def _font_preview(font_id: str, query: dict) -> _Result:

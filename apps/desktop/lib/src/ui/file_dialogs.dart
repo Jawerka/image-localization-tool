@@ -5,9 +5,27 @@ import 'package:file_selector/file_selector.dart';
 /// В `--api` режиме серверные диалоги недоступны (DialogBridge-заглушка),
 /// поэтому пути выбирает сам хост и отправляет их в API.
 
+/// Расширения, которые sidecar принимает как страницу или архив.
+const List<String> pageFileExtensions = [
+  'png',
+  'jpg',
+  'jpeg',
+  'bmp',
+  'tif',
+  'tiff',
+  'zip',
+  'cbz',
+  'cbr',
+  'rar',
+  'cb7',
+  '7z',
+  'cbt',
+  'tar',
+];
+
 const XTypeGroup _pageGroup = XTypeGroup(
   label: 'Страницы и архивы',
-  extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif', 'tif', 'tiff', 'cbz', 'cbr', 'zip'],
+  extensions: pageFileExtensions,
 );
 
 const XTypeGroup _packageGroup = XTypeGroup(

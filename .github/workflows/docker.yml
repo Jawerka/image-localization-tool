@@ -81,6 +81,7 @@ jobs:
         run: |
           docker run --rm --network none --entrypoint python image-localization-tool:cpu-full -m src.app.distribution functional
       - name: Publish verified image
+        if: github.event_name != 'push'
         env:
           REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           IMAGE: ${{ steps.meta.outputs.image }}
@@ -92,7 +93,7 @@ jobs:
           if [ "${{ github.event_name }}" = release ]; then
             TAG=cpu-full
           elif [ -z "$RELEASE_TAG" ]; then
-            TAG=edge-cpu-full
+            echo 'Push to main must not publish a GHCR tag'; exit 1
           else
             TAG="$VERSION-cpu-full"
           fi

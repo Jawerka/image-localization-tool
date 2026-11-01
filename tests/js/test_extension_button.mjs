@@ -24,4 +24,14 @@ test("адрес без query и оценка времени", () => {
   assert.equal(model.formatEta(8000), "8 с");
   assert.equal(model.pickCorner({ tr: true, tl: false }), "tl");
   assert.equal(model.pickCorner({ tr: true, tl: true, br: true, bl: true }), "tr");
+  const contain = model.visibleImageRect(
+    { left: 0, top: 0, width: 200, height: 100 },
+    100,
+    100,
+    "contain",
+    "50% 50%",
+  );
+  assert.equal(contain.width, 100);
+  assert.equal(contain.height, 100);
+  assert.equal(contain.left, 50);
 });

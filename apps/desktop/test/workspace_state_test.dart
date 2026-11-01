@@ -70,6 +70,24 @@ void main() {
     expect(ws.batch.total, 2);
     expect(ws.batch.finished, 1);
     expect(ws.batch.percent, 50);
+    expect(ws.pages.first.hasAuto, isTrue);
+  });
+
+  test('has_auto false из bootstrap, отсутствие поля оставляет сброс', () {
+    final ws = _workspace(null, []);
+    ws.applyBootstrap({
+      'project': {'id': 'pr'},
+      'pages': [
+        {'id': 'a', 'name': '001.jpg', 'has_auto': false},
+        {'id': 'b', 'name': '002.jpg'},
+      ],
+    });
+    expect(ws.pages[0].hasAuto, isFalse);
+    expect(ws.pages[1].hasAuto, isTrue);
+    ws.applyEvent('page.updated', {'page_id': 'a', 'status': 'edited'});
+    expect(ws.pages[0].hasAuto, isFalse);
+    ws.applyEvent('page.updated', {'page_id': 'a', 'has_auto': true});
+    expect(ws.pages[0].hasAuto, isTrue);
   });
 
   test('событие page.updated двигает строку и счётчики', () {
@@ -401,5 +419,24 @@ void main() {
     expect(ws.pages[1].status, 'idle');
     expect(ws.pages[2].status, 'done');
     expect(ws.busy, isFalse);
+  });
+
+  test('фильтр очереди не меняет активную страницу', () async {
+    final ws = WorkspaceState();
+    ws.applyBootstrap({
+      'project': {'id': 'pr'},
+      'pages': [
+        {'id': 'a', 'name': '001.jpg', 'status': 'error'},
+        {'id': 'b', 'name': '002.jpg', 'status': 'queued'},
+        {'id': 'c', 'name': '003.jpg', 'status': 'edited', 'overflow': true},
+      ],
+    });
+    await ws.selectPage('b');
+    expect(ws.activeId, 'b');
+    ws.setQueueFilter('error');
+    expect(ws.activeId, 'b');
+    expect(ws.queuePages.map((page) => page.id), ['a']);
+    ws.setQueueFilter('edit');
+    expect(ws.queuePages.map((page) => page.id), ['c']);
   });
 }

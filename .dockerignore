@@ -3,6 +3,11 @@
 !requirements-base.txt
 !requirements-container.txt
 !requirements-container.lock
+!LICENSE
+!docs/LICENSE_INVENTORY.md
+!docs/THIRD_PARTY_NOTICES.md
+!docs/FONTS.md
+!assets/README.md
 !src/
 !src/**
 !web/

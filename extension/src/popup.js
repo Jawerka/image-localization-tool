@@ -36,6 +36,11 @@ function pickLang(value) {
 
 function setStatus(text) { statusEl.textContent = text || ""; }
 
+function applyTheme(value) {
+  const theme = value === "light" || value === "dark" ? value : "system";
+  document.documentElement.dataset.theme = theme;
+}
+
 async function activeTab() {
   const tabs = await call(ext.tabs.query.bind(ext.tabs), { active: true, currentWindow: true });
   return tabs && tabs[0];
@@ -135,7 +140,8 @@ logsEl.addEventListener("click", () => {
 });
 
 async function init() {
-  const data = await storageGet({ targetLang: "ru", hoverDisabledSites: [], token: "" }).catch(() => ({}));
+  const data = await storageGet({ targetLang: "ru", hoverDisabledSites: [], token: "", theme: "system" }).catch(() => ({}));
+  applyTheme(data.theme);
   targetEl.value = pickLang(data.targetLang);
   tab = await activeTab().catch(() => null);
   host = hostname(tab && tab.url);

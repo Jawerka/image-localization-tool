@@ -83,6 +83,33 @@ def test_dock_position_normalizes():
     assert AppSettings.from_dict({"dock_position": 3}).dock_position == "bottom"
 
 
+def test_pipeline_defaults_match_config():
+    settings = AppSettings()
+    config = Config()
+    for name in (
+        "source_lang",
+        "target_lang",
+        "ocr_backend",
+        "translator_backend",
+        "inpainter_backend",
+        "reading_order",
+        "auto_stylized_fonts",
+        "adaptive_text",
+        "discover_missing_text",
+        "detector_conf",
+        "ctd_conf",
+        "ort_intra_op_threads",
+        "text_stroke_ratio",
+        "text_margin",
+        "layout_long_side",
+        "min_font_size",
+        "max_font_size",
+        "viewer_show_boxes",
+        "viewer_show_mask",
+    ):
+        assert getattr(settings, name) == getattr(config, name)
+
+
 def test_viewer_layers_default_true_and_persist(tmp_path):
     assert AppSettings().viewer_show_boxes is True
     assert AppSettings().viewer_show_mask is True
@@ -325,3 +352,14 @@ def test_sfx_explicit_constructor_off():
     assert AppSettings(sfx_mode='skip').translate_sfx is False
     assert AppSettings(translate_sfx=False).sfx_mode == 'skip'
     assert AppSettings().translate_sfx is True
+
+
+def test_pipeline_defaults_come_from_config():
+    pipeline = Config()
+    settings = AppSettings()
+    assert settings.source_lang == pipeline.source_lang
+    assert settings.target_lang == pipeline.target_lang
+    assert settings.ocr_backend == pipeline.ocr_backend
+    assert settings.layout_long_side == pipeline.layout_long_side
+    assert settings.viewer_show_boxes == pipeline.viewer_show_boxes
+    assert settings.llm_base_url == ""

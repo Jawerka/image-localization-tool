@@ -8,6 +8,7 @@ import socket
 import threading
 import time
 import urllib.error
+import zipfile
 from http.client import HTTPConnection
 from pathlib import Path
 from urllib.parse import quote
@@ -387,7 +388,9 @@ def test_dialog_files_keeps_original(api: Api, tmp_path):
         "error",
         "warnings",
         "render_version",
+        "has_auto",
     }
+    assert page["has_auto"] is False
     assert page["name"] == "page.png"
     assert page["status"] == "idle"
     assert _same_path(page["source_path"], image)
@@ -2094,3 +2097,119 @@ def test_fill_preview_returns_crop_and_leaves_document_alone(api: Api, tmp_path)
         {"x": 1, "y": 1},
     )
     assert status == 400
+
+
+def test_reset_without_auto_snapshot_keeps_document(api: Api, tmp_path):
+    payload, _image = _add_page(api, tmp_path)
+    page_id = payload["pages"][0]["id"]
+    project_id = api.state.project_id
+    before = api.store.read_document(project_id, page_id)
+    before.ocr_engine = "keep"
+    saved = api.store.write_document(project_id, page_id, before, base_version=before.version)
+    status, _, body = api.json("POST", f"/api/pages/{page_id}/reset", {})
+    assert status == 409
+    assert "снимка" in body["error"]
+    assert api.store.read_document(project_id, page_id).ocr_engine == "keep"
+    assert api.store.read_document(project_id, page_id).version == saved.version
+
+    snapshot = PageDocument(version=1, ocr_engine="auto")
+    api.store.write_auto(project_id, page_id, snapshot)
+    status, _, collection = api.json("GET", "/api/bootstrap")
+    assert status == 200
+    row = next(item for item in collection["pages"] if item["id"] == page_id)
+    assert row["has_auto"] is True
+    status, _, body = api.json("POST", f"/api/pages/{page_id}/reset", {})
+    assert status == 200
+    assert body["document"]["ocr_engine"] == "auto"
+
+
+def test_import_rejects_unsupported_image_format(api: Api, tmp_path):
+    gif = tmp_path / "frame.gif"
+    Image.new("RGB", (8, 8), (1, 2, 3)).save(gif, format="GIF")
+    status, _, payload = api.json("POST", "/api/import", {"path": str(gif)})
+    assert status == 400
+    assert ".gif" in payload["error"]
+    assert ".png" in payload["error"]
+
+
+def test_package_save_incomplete_keeps_dirty(api: Api, tmp_path):
+    payload, image = _add_page(api, tmp_path)
+    extra = tmp_path / "extra.png"
+    Image.new("RGB", (24, 16), (9, 8, 7)).save(extra)
+    api.dialogs.files = [extra]
+    status, _, payload = api.json("POST", "/api/dialog/files", {})
+    assert status == 200
+    image.unlink()
+    dest = tmp_path / "partial.ilt.zip"
+    status, _, payload = api.json("POST", "/api/project/package/save", {"path": str(dest)})
+    assert status == 200
+    assert payload["complete"] is False
+    assert payload["package"]["dirty"] is True
+    assert payload.get("warnings")
+
+
+def test_package_load_future_schema_keeps_open_project(api: Api, tmp_path):
+    payload, _image = _add_page(api, tmp_path)
+    open_id = api.state.project_id
+    dest = tmp_path / "future.ilt.zip"
+    with zipfile.ZipFile(dest, "w") as archive:
+        archive.writestr(
+            "project.json",
+            json.dumps({
+                "kind": "ilt-project",
+                "schema_version": 99,
+                "name": "Будущее",
+                "source_lang": "en",
+                "target_lang": "ru",
+                "pages": [{
+                    "id": "abcd1234",
+                    "name": "p.png",
+                    "image": "pages/0001_p.png",
+                    "document": PageDocument(version=1).to_dict(),
+                }],
+            }),
+        )
+        archive.writestr("pages/0001_p.png", b"x")
+    status, _, body = api.json("POST", "/api/project/package/load", {"path": str(dest)})
+    assert status == 400
+    assert "99" in body["error"]
+    assert api.state.project_id == open_id
+    status, _, payload = api.json("GET", "/api/bootstrap")
+    assert status == 200
+    assert payload["project"]["id"] == open_id
+
+
+def test_package_load_truncated_zip_keeps_open_project(api: Api, tmp_path):
+    payload, image = _add_page(api, tmp_path)
+    open_id = api.state.project_id
+    dest = tmp_path / "ok.ilt.zip"
+    status, _, payload = api.json("POST", "/api/project/package/save", {"path": str(dest)})
+    assert status == 200
+    truncated = tmp_path / "trunc.ilt.zip"
+    truncated.write_bytes(dest.read_bytes()[:24])
+    status, _, body = api.json("POST", "/api/project/package/load", {"path": str(truncated)})
+    assert status == 400
+    assert api.state.project_id == open_id
+    assert api.store.open_project(open_id)["pages"][0]["id"] == payload["pages"][0]["id"]
+
+
+def test_package_save_write_error_keeps_previous_and_dirty(api: Api, tmp_path, monkeypatch):
+    payload, _image = _add_page(api, tmp_path)
+    dest = tmp_path / "keep.ilt.zip"
+    status, _, payload = api.json("POST", "/api/project/package/save", {"path": str(dest)})
+    assert status == 200
+    previous = dest.read_bytes()
+    api.state.package_dirty = True
+    original_write = zipfile.ZipFile.write
+
+    def failing_write(self, filename, arcname=None, *args, **kwargs):
+        if str(arcname or "").startswith("pages/"):
+            raise OSError("диск заполнен")
+        return original_write(self, filename, arcname, *args, **kwargs)
+
+    monkeypatch.setattr(zipfile.ZipFile, "write", failing_write)
+    status, _, body = api.json("POST", "/api/project/package/save", {"path": str(dest)})
+    assert status == 400
+    assert dest.read_bytes() == previous
+    assert api.state.package_dirty is True
+    assert "pages/" in body["error"]

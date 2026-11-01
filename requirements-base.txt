@@ -1,6 +1,6 @@
 # Общие пины базы: сайдкар Windows и Linux-сервер.
 opencv-python==4.13.0.92
-Pillow==12.1.1
+Pillow==12.3.0
 fonttools==4.63.0
 numpy==2.2.6
 rapidocr==3.9.2

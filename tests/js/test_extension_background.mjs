@@ -57,6 +57,64 @@ test("Отказ в разрешении сохраняет выбор для п
   assert.equal(events.find(event => event[0] === "inline")[2].permitted, false);
 });
 
+test("ключ кэша различает язык и URL картинки", () => {
+  const { context } = background();
+  const ru = vm.runInContext(`resultCacheUrl('https://img.example/a.png', 'ru')`, context);
+  const en = vm.runInContext(`resultCacheUrl('https://img.example/a.png', 'en')`, context);
+  const other = vm.runInContext(`resultCacheUrl('https://img.example/b.png', 'ru')`, context);
+  assert.notEqual(ru, en);
+  assert.notEqual(ru, other);
+  const pageA = vm.runInContext(`cacheKey('https://site.example/p1', 'https://img.example/a.png')`, context);
+  const pageB = vm.runInContext(`cacheKey('https://site.example/p2', 'https://img.example/a.png')`, context);
+  assert.notEqual(pageA, pageB);
+});
+
+test("force создаёт новую задачу, повтор без force не дублирует running", () => {
+  const { context } = background();
+  vm.runInContext(`
+    const url = 'https://img.example/force-' + Date.now() + '.png';
+    const first = reserveJob('https://site.example/force', url, false);
+    const again = reserveJob('https://site.example/force', url, false);
+    globalThis._created = Boolean(first.created && !again.created && first.job === again.job);
+    first.job.status = 'running';
+    const forced = reserveJob('https://site.example/force', url, true);
+    globalThis._forced = Boolean(forced.created === true && forced.job.fresh === true);
+  `, context);
+  assert.equal(Boolean(vm.runInContext("_created", context)), true);
+  assert.equal(Boolean(vm.runInContext("_forced", context)), true);
+});
+
+test("resumeStoredJobs не дублирует задачу с тем же ключом", async () => {
+  const { context, state } = background();
+  const key = vm.runInContext(`cacheKey('https://site.example/', 'https://img.example/a.png')`, context);
+  state.iltJobs = [{
+    key,
+    pageUrl: "https://site.example/",
+    imageUrl: "https://img.example/a.png",
+    targetLang: "en",
+    remoteId: "job-1",
+    status: "running",
+  }];
+  vm.runInContext(`jobs.set(${JSON.stringify(key)}, makeJob(${JSON.stringify(key)}, 'https://site.example/', 'https://img.example/a.png'))`, context);
+  await vm.runInContext("resumeStoredJobs()", context);
+  const count = vm.runInContext("jobs.size", context);
+  assert.equal(count, 1);
+});
+
+test("resume без ключа сопряжения даёт ошибку", async () => {
+  const { context } = background();
+  await vm.runInContext(`(async () => {
+    const job = makeJob(cacheKey('https://site.example/', 'https://img.example/a.png'), 'https://site.example/', 'https://img.example/a.png');
+    job.remoteId = 'stale';
+    job.status = 'running';
+    await resumeRemote(job);
+    globalThis._resumeError = job.status;
+    globalThis._resumeMessage = job.error;
+  })()`, context);
+  assert.equal(vm.runInContext("_resumeError", context), "error");
+  assert.match(String(vm.runInContext("_resumeMessage", context)), /ключ/i);
+});
+
 test("Сохранить перевод качает файл с языком в имени", async () => {
   const { context, events } = background();
   vm.runInContext(`jobs.set(cacheKey('https://site.example/','https://img.example/large.png'), {status:'done', blob:{}, mime:'image/png', targetLang:'ru', imageUrl:'https://img.example/large.png', imageBase64:'QQ=='})`, context);

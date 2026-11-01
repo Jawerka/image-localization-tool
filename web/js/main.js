@@ -848,6 +848,9 @@ function onPageUpdated(payload) {
   if (Object.prototype.hasOwnProperty.call(page, "stage")) partial.stage = page.stage || "";
   if (page.error != null) partial.error = page.error;
   if (page.version != null) partial.version = page.version;
+  if (Object.prototype.hasOwnProperty.call(page, "has_auto")) {
+    partial.has_auto = page.has_auto !== false;
+  }
   if (Object.keys(partial).length) updatePage(pageId, partial);
   const pending = getState().pendingAction;
   if (pending && String(pending.pageId) === pageId) patch({ pendingAction: null });

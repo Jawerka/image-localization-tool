@@ -106,6 +106,10 @@ class TestTextRegion:
         region.skip = False
         assert should_translate(region) is True
 
+    def test_empty_text_is_not_translated(self):
+        region = TextRegion(id=1, bbox=(0, 0, 10, 10), text="  ", block_type="dialogue")
+        assert should_translate(region) is False
+
 
 class TestMaskStroke:
     def test_roundtrip_and_bad_mode(self):

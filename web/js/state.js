@@ -1,6 +1,6 @@
 /* Состояние вкладки: проект, документ, стек отмены. После перезагрузки берётся с сервера. */
 
-import { getPage, imageUrl, layoutSnapshot, putDocument, rebakePage } from "./api.js";
+import { getPage, imageUrl, layoutSnapshot, putDocument, putSettings, rebakePage } from "./api.js";
 import {
   isDeferredPending,
   nextDeferredBaseline,
@@ -47,6 +47,8 @@ export const DEFAULT_SETTINGS = {
   single_key_shortcuts: true,
   first_run_complete: false,
   recent_projects: [],
+  viewer_show_boxes: true,
+  viewer_show_mask: true,
 };
 
 const STAGE_LABELS = {
@@ -117,8 +119,8 @@ function emptyState() {
     selectedRegionId: null,
     textMoveRegionId: "",
     view: "original",
-    showBoxes: false,
-    showMask: false,
+    showBoxes: true,
+    showMask: true,
     tool: "brush",
     brushSize: 12,
     fillTolerance: 20,
@@ -151,8 +153,28 @@ function emit() {
 }
 
 export function patch(partial) {
+  const previousBoxes = state.showBoxes;
+  const previousMask = state.showMask;
   state = { ...state, ...partial };
   emit();
+  if (("showBoxes" in partial && partial.showBoxes !== previousBoxes)
+      || ("showMask" in partial && partial.showMask !== previousMask)) {
+    persistViewerLayers();
+  }
+}
+
+let layerSaveTimer = 0;
+function persistViewerLayers() {
+  const settings = {
+    ...state.settings,
+    viewer_show_boxes: state.showBoxes,
+    viewer_show_mask: state.showMask,
+  };
+  state = { ...state, settings };
+  clearTimeout(layerSaveTimer);
+  layerSaveTimer = setTimeout(() => {
+    putSettings(settingsForSave(settings)).catch(() => {});
+  }, 200);
 }
 
 export function clone(value) {
@@ -240,6 +262,7 @@ function normalizeRegion(raw) {
 export function normalizeDocument(raw) {
   const data = raw && typeof raw === "object" ? raw : {};
   return {
+    ...data,
     version: Number(data.version) || 0,
     regions: Array.isArray(data.regions) ? data.regions.map(normalizeRegion) : [],
     strokes: Array.isArray(data.strokes)
@@ -277,6 +300,7 @@ export function normalizePage(raw, index) {
     chapter: source.chapter == null ? "" : String(source.chapter),
     overflow: Boolean(source.overflow),
     version: Number(source.version ?? source.document_version ?? source.document?.version ?? 0) || 0,
+    has_auto: source.has_auto !== false,
     index,
   };
 }
@@ -445,6 +469,8 @@ export function applyBootstrap(data) {
     paths: incoming.paths || null,
     package: normalizePackage(incoming.package),
     hasApiKey: Boolean(incoming.has_api_key || incoming.settings?.has_api_key || incoming.llm?.has_api_key),
+    showBoxes: settings.viewer_show_boxes !== false,
+    showMask: settings.viewer_show_mask !== false,
   };
   syncHistoryFlags();
   strokeCounts.clear();

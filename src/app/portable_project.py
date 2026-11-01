@@ -14,10 +14,11 @@ import tempfile
 import uuid
 import zipfile
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Literal
 
-from src.app.store import ProjectStore
+from src.app.document import PageDocument
+from src.app.store import ProjectStore, _replace_file
 
 KIND = "ilt-project"
 SCHEMA_VERSION = 2
@@ -41,6 +42,7 @@ class PortableProjectError(ValueError):
 class PackResult:
     path: Path
     warnings: list[str] = field(default_factory=list)
+    complete: bool = True
 
 
 @dataclass
@@ -85,7 +87,10 @@ def pack_project(
     *,
     editor: dict | None = None,
 ) -> PackResult:
-    """Собрать ZIP по текущему порядку страниц. Ошибки полей не прерывают весь Save."""
+    """Собрать ZIP по текущему порядку страниц. Ошибки полей не прерывают весь Save.
+
+    Прежний пакет заменяется только целиком. Сбой замены оставляет его байты на месте.
+    """
     project = store.open_project(project_id)
     pages = [item for item in project.get("pages") or [] if isinstance(item, dict)]
     if not pages:
@@ -151,8 +156,18 @@ def pack_project(
             "clean": None,
             "result": None,
             "thumb": None,
+            "auto": None,
             "errors": errors,
         }
+
+        try:
+            auto_path = store.page_dir(project_id, page_id) / "auto.json"
+            if auto_path.is_file():
+                auto_rel = f"res/{stem}.auto.json"
+                files_to_write.append((auto_path, auto_rel))
+                entry["auto"] = auto_rel
+        except OSError as exc:
+            errors.append(f"auto: {exc}")
 
         for json_key, store_kind, suffix in _ARTIFACTS:
             try:
@@ -171,6 +186,10 @@ def pack_project(
             for item in errors:
                 warnings.append(f"{label}: {item}")
         manifest_pages.append(entry)
+
+    wanted_ids = [str(item.get("id") or "") for item in pages if str(item.get("id") or "")]
+    packed_ids = [str(item["id"]) for item in manifest_pages]
+    complete = packed_ids == wanted_ids
 
     if not manifest_pages:
         raise PortableProjectError("Не удалось включить ни одной страницы в пакет")
@@ -193,6 +212,7 @@ def pack_project(
                 "clean": item["clean"],
                 "result": item["result"],
                 "thumb": item["thumb"],
+                "auto": item["auto"],
                 "errors": item["errors"],
             }
             for item in manifest_pages
@@ -220,14 +240,13 @@ def pack_project(
                 try:
                     archive.write(source, arcname=arcname)
                 except OSError as exc:
-                    warnings.append(f"{arcname}: {exc}")
-        if dest.exists():
-            dest.unlink()
-        temporary.replace(dest)
+                    raise PortableProjectError(f"{arcname}: {exc}") from exc
+        # Без unlink заранее: при отказе replace прежний ZIP остаётся.
+        _replace_file(temporary, dest)
     except Exception:
         temporary.unlink(missing_ok=True)
         raise
-    return PackResult(path=dest, warnings=warnings)
+    return PackResult(path=dest, warnings=warnings, complete=complete)
 
 
 def is_portable_package(path: Path) -> bool:
@@ -269,7 +288,11 @@ def unpack_project(store: ProjectStore, package: Path) -> UnpackResult:
         raise PortableProjectError(f"Файл не найден: {package}")
 
     warnings: list[str] = []
-    with zipfile.ZipFile(package, "r") as archive:
+    try:
+        archive_file = zipfile.ZipFile(package, "r")
+    except zipfile.BadZipFile as exc:
+        raise PortableProjectError("Повреждённый ZIP") from exc
+    with archive_file as archive:
         names = set(archive.namelist())
         if "project.json" not in names:
             raise PortableProjectError("В архиве нет project.json — это не портативный проект")
@@ -291,25 +314,28 @@ def unpack_project(store: ProjectStore, package: Path) -> UnpackResult:
             created_id = str(project["id"])
             import_dir = store.project_dir(created_id) / "imports" / _safe_stem(package.stem)
             import_dir.mkdir(parents=True, exist_ok=True)
+            taken_names: set[str] = set()
 
-            for entry in raw_pages:
+            for index, entry in enumerate(raw_pages, start=1):
                 label = str(entry.get("name") or entry.get("id") or "?")
                 image = str(entry.get("image") or "").replace("\\", "/").lstrip("/")
                 if not image:
                     warnings.append(f"{label}: нет image в JSON")
                     continue
+                if not _safe_archive_member(image):
+                    warnings.append(f"{label}: небезопасный путь image")
+                    continue
                 if image not in names:
                     warnings.append(f"{label}: в архиве нет {image}")
                     continue
-                source_name = Path(image).name
+                dest_name = _unique_import_name(index, image, taken_names)
+                dest_image = import_dir / dest_name
                 try:
-                    staged = staging / source_name
-                    with archive.open(image) as src, staged.open("wb") as out:
+                    with archive.open(image) as src, dest_image.open("wb") as out:
                         shutil.copyfileobj(src, out)
-                    dest_image = import_dir / source_name
-                    shutil.copy2(staged, dest_image)
                 except OSError as exc:
                     warnings.append(f"{label}: image: {exc}")
+                    dest_image.unlink(missing_ok=True)
                     continue
 
                 document = entry.get("document") if isinstance(entry.get("document"), dict) else None
@@ -320,7 +346,7 @@ def unpack_project(store: ProjectStore, package: Path) -> UnpackResult:
                     created_id,
                     dest_image,
                     page_id=str(entry.get("id") or "") or None,
-                    name=str(entry.get("name") or _original_name(source_name)),
+                    name=str(entry.get("name") or _original_name(Path(image).name)),
                     chapter=str(entry.get("chapter") or ""),
                     status=str(entry.get("status") or "idle"),
                     document=document,
@@ -334,11 +360,14 @@ def unpack_project(store: ProjectStore, package: Path) -> UnpackResult:
                     if not isinstance(rel, str) or not rel.strip():
                         continue
                     rel = rel.replace("\\", "/").lstrip("/")
+                    if not _safe_archive_member(rel):
+                        warnings.append(f"{label}: небезопасный путь {json_key}")
+                        continue
                     if rel not in names:
                         warnings.append(f"{label}: в архиве нет {rel}")
                         continue
                     try:
-                        staged_art = staging / rel.replace("/", "_")
+                        staged_art = staging / f"{index:04d}_{json_key}_{rel.replace('/', '_')}"
                         with archive.open(rel) as src, staged_art.open("wb") as out:
                             shutil.copyfileobj(src, out)
                         artifact_paths[json_key] = staged_art
@@ -349,6 +378,9 @@ def unpack_project(store: ProjectStore, package: Path) -> UnpackResult:
                     warnings.extend(
                         store.restore_portable_artifacts(created_id, page_id, artifact_paths)
                     )
+                _restore_auto_snapshot(
+                    store, archive, names, created_id, page_id, entry, label, warnings,
+                )
 
             if imported == 0:
                 raise PortableProjectError("Не удалось импортировать ни одной страницы")
@@ -395,19 +427,30 @@ def _validate_manifest(manifest: dict) -> list[dict]:
     if version is None:
         raise PortableProjectError("Нет schema_version")
     try:
-        if int(version) < 1:
-            raise PortableProjectError("Некорректный schema_version")
+        schema = int(version)
     except (TypeError, ValueError) as exc:
         raise PortableProjectError("Некорректный schema_version") from exc
+    if schema < 1:
+        raise PortableProjectError("Некорректный schema_version")
+    if schema > SCHEMA_VERSION:
+        raise PortableProjectError(
+            f"Схема пакета {schema} новее поддерживаемой {SCHEMA_VERSION}"
+        )
 
     raw_pages = manifest.get("pages")
     if not isinstance(raw_pages, list) or not raw_pages:
         raise PortableProjectError("В проекте нет страниц")
 
     pages: list[dict] = []
+    seen_ids: set[str] = set()
     for item in raw_pages:
         if not isinstance(item, dict):
             raise PortableProjectError("Элемент pages должен быть объектом")
+        page_id = str(item.get("id") or "").strip()
+        if page_id:
+            if page_id in seen_ids:
+                raise PortableProjectError("Повторный id страницы в пакете")
+            seen_ids.add(page_id)
         pages.append(dict(item))
     return pages
 
@@ -423,3 +466,64 @@ def _original_name(name: str) -> str:
 def _safe_stem(stem: str) -> str:
     cleaned = _SAFE_NAME_RE.sub("_", str(stem)).strip("._")
     return cleaned or "package"
+
+
+def _safe_archive_member(rel: str) -> bool:
+    """Путь члена архива без абсолютного корня и сегментов ``..``."""
+    text = str(rel or "").replace("\\", "/").strip()
+    if not text or text.startswith("/") or text.startswith("\\"):
+        return False
+    posix = PurePosixPath(text)
+    if posix.is_absolute() or posix.anchor:
+        return False
+    if any(part in ("..", "") for part in posix.parts):
+        return False
+    as_path = Path(text)
+    if as_path.is_absolute() or as_path.anchor:
+        return False
+    return True
+
+
+def _unique_import_name(index: int, image: str, taken_casefold: set[str]) -> str:
+    """Имя исходника в imports/: номер страницы и плоский член архива."""
+    flat = _SAFE_NAME_RE.sub("_", str(image).replace("\\", "/")).strip("._") or "page.png"
+    suffix = Path(flat).suffix
+    stem = Path(flat).stem or "page"
+    base = f"{index:04d}_{stem}{suffix}"
+    candidate = base
+    extra = 2
+    while candidate.casefold() in taken_casefold:
+        candidate = f"{index:04d}_{stem}_{extra}{suffix}"
+        extra += 1
+    taken_casefold.add(candidate.casefold())
+    return candidate
+
+
+def _restore_auto_snapshot(
+    store: ProjectStore,
+    archive: zipfile.ZipFile,
+    names: set[str],
+    project_id: str,
+    page_id: str,
+    entry: dict,
+    label: str,
+    warnings: list[str],
+) -> None:
+    """Записать auto.json из пакета. Повреждённый снимок не подменяет документ."""
+    rel = entry.get("auto")
+    if not isinstance(rel, str) or not rel.strip():
+        return
+    rel = rel.replace("\\", "/").lstrip("/")
+    if not _safe_archive_member(rel):
+        warnings.append(f"{label}: небезопасный путь auto")
+        return
+    if rel not in names:
+        warnings.append(f"{label}: в архиве нет {rel}")
+        return
+    try:
+        raw = json.loads(archive.read(rel).decode("utf-8"))
+        if not isinstance(raw, dict):
+            raise ValueError("снимок не объект")
+        store.write_auto(project_id, page_id, PageDocument.from_dict(raw))
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError, TypeError) as exc:
+        warnings.append(f"{label}: auto повреждён, пропущен ({exc})")

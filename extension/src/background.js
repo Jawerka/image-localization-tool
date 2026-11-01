@@ -301,7 +301,7 @@ function reserveJob(pageUrl, imageUrl, force) {
   if (!force && existing && existing.status === "done" && existing.blob) {
     return { job: existing, created: false };
   }
-  if (existing && (existing.status === "queued" || existing.status === "running")) {
+  if (!force && existing && (existing.status === "queued" || existing.status === "running")) {
     return { job: existing, created: false };
   }
   removeKey(pending, key);

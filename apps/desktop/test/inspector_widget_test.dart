@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ilt_desktop/src/app.dart';
+import 'package:ilt_desktop/src/ui/inspector/inspector_controls.dart';
 
 import 'support/fake_host.dart';
 
@@ -259,6 +260,54 @@ void main() {
           .where((r) => r == 'POST /api/jobs/retry-errors')
           .toList(),
       hasLength(1),
+    );
+  });
+
+  testWidgets('сброс недоступен без автоматического снимка', (tester) async {
+    sizeWindow(tester);
+    final (state, host) = await readyHost(
+      bootstrap: {
+        'settings': settingsDone(<String, dynamic>{}),
+        'project': {'id': 'pr', 'name': 'Глава'},
+        'pages': [
+          {
+            'id': 'a',
+            'name': '001.jpg',
+            'status': 'edited',
+            'has_auto': false,
+          },
+        ],
+      },
+      reply: (path, method) {
+        if (path == '/api/pages/a') {
+          return <String, dynamic>{
+            'page': {'id': 'a', 'has_auto': false},
+            'document': _doc(),
+          };
+        }
+        return <String, dynamic>{};
+      },
+    );
+    addTearDown(() {
+      state.dispose();
+      host.events.close();
+    });
+    await tester.pumpWidget(IltApp(state: state));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('page-row-a')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.tap(find.byKey(const Key('inspector-tab-page')));
+    await tester.pump();
+    expect(find.byKey(const Key('page-reset-unavailable')), findsOneWidget);
+    final reset = tester.widget<InspectorAction>(find.byKey(const Key('page-reset')));
+    expect(reset.onPressed, isNull);
+    await tester.tap(find.byKey(const Key('page-reset')));
+    await tester.pump();
+    expect(find.byKey(const Key('page-reset-dialog')), findsNothing);
+    expect(
+      host.requests.where((r) => r == 'POST /api/pages/a/reset'),
+      isEmpty,
     );
   });
 }

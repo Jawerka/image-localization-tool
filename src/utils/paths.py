@@ -61,7 +61,7 @@ def models_dir(override: str | Path | None = None) -> Path:
 def resolve_model(filename: str, override: str | Path | None = None) -> Path:
     """Первый существующий файл модели. Если файла нет — последний кандидат."""
     candidates: list[Path] = []
-    from src.app.component_catalog import installed_file
+    from src.utils.resources import installed_file
 
     external = installed_file(filename)
     if external is not None:
@@ -80,7 +80,7 @@ def resolve_model(filename: str, override: str | Path | None = None) -> Path:
 
 def resolve_font(filename: str) -> Path:
     """Шрифт в бандле, рядом с программой или в src/resources/fonts."""
-    from src.app.component_catalog import installed_file
+    from src.utils.resources import installed_file
 
     external = installed_file(filename)
     candidates = ([external] if external is not None else []) + [

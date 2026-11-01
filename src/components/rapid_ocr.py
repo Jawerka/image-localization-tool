@@ -101,7 +101,7 @@ class RapidOcr:
             from rapidocr import RapidOCR
         except ImportError:
             from rapidocr_onnxruntime import RapidOCR
-        from src.app.component_catalog import ocr_params
+        from src.utils.resources import ocr_params
 
         params = ocr_params()
         if self.intra_op_threads:

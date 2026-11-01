@@ -49,6 +49,7 @@ class PageRow {
     this.error = '',
     this.warnings = const [],
     this.overflow = false,
+    this.hasAuto = true,
   });
 
   final String id;
@@ -60,6 +61,7 @@ class PageRow {
   final String error;
   final List<String> warnings;
   final bool overflow;
+  final bool hasAuto;
 
   factory PageRow.fromJson(Map<String, dynamic> json) => PageRow(
         id: '${json['id'] ?? ''}',
@@ -73,6 +75,7 @@ class PageRow {
           for (final item in (json['warnings'] as List? ?? const [])) '$item',
         ],
         overflow: json['overflow'] == true,
+        hasAuto: json.containsKey('has_auto') ? json['has_auto'] == true : true,
       );
 
   /// Слияние частичного `page.updated`.
@@ -90,6 +93,9 @@ class PageRow {
         overflow: data.containsKey('overflow')
             ? data['overflow'] == true
             : overflow,
+        hasAuto: data.containsKey('has_auto')
+            ? data['has_auto'] == true
+            : hasAuto,
       );
 
   PageRow copyWith({String? status, int? progress, String? stage, String? error}) =>
@@ -103,6 +109,7 @@ class PageRow {
         error: error ?? this.error,
         warnings: warnings,
         overflow: overflow,
+        hasAuto: hasAuto,
       );
 
   bool get isReady =>
@@ -210,6 +217,7 @@ class WorkspaceState extends ChangeNotifier {
   bool _unfinished = false;
   String _query = '';
   bool _problemsOnly = false;
+  String _queueFilter = 'all';
   String? _activeId;
   final Set<String> _selected = <String>{};
   String? _errorText;
@@ -219,6 +227,38 @@ class WorkspaceState extends ChangeNotifier {
 
   ProjectInfo? get project => _project;
   List<PageRow> get pages => _pages;
+  String get queueFilter => _queueFilter;
+
+  void setQueueFilter(String value) {
+    const allowed = {'all', 'error', 'fit', 'offline', 'edit'};
+    final next = allowed.contains(value) ? value : 'all';
+    if (_queueFilter == next) return;
+    _queueFilter = next;
+    notifyListeners();
+  }
+
+  List<PageRow> get queuePages {
+    final rows = <PageRow>[
+      for (final page in _pages)
+        if (page.isQueued || page.isRunning || page.isProblem || page.overflow
+            || page.status == 'offline' || page.status == 'edited')
+          page,
+    ];
+    if (_queueFilter == 'all') {
+      return [
+        for (final page in rows)
+          if (page.isQueued || page.isRunning || page.isProblem) page,
+      ];
+    }
+    return [
+      for (final page in rows)
+        if ((_queueFilter == 'error' && page.isProblem)
+            || (_queueFilter == 'fit' && page.overflow)
+            || (_queueFilter == 'offline' && page.status == 'offline')
+            || (_queueFilter == 'edit' && page.status == 'edited'))
+          page,
+    ];
+  }
   List<RecentEntry> get recent => _recent;
   Map<String, dynamic> get llm => _llm;
 

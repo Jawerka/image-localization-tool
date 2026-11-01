@@ -2,7 +2,27 @@
 
 Два канала используют один пайплайн v2: Linux amd64 CPU-контейнер с браузерным редактором и Windows x64 portable CPU с Flutter-окном. Профиль включает детектор, RapidOCR, LaMa, шрифты, Torch CPU, Argos и языковые модели en↔ru. LLM подключается отдельно. CUDA и ARM не входят в этот профиль.
 
-Текущая версия — 1.0.0. Готовые ZIP собирает выпуск. Образ — `ghcr.io/jawerka/image-localization-tool:1.0.0-cpu-full`.
+Опубликованная линия — **1.0.0**. Совместимые исправления выходят как **1.0.1**; тег `v1.0.0` и его архивы не перезаписываются. Образ — `ghcr.io/jawerka/image-localization-tool:1.0.0-cpu-full`.
+
+## Матрица поверхностей
+
+Заявленная поставка. Входы не удаляются. `python -m src.app` без флагов — окно pywebview из исходников, не архив выпуска.
+
+| Поверхность | ОС | Форматы | Языки | Сеть | Приёмка |
+|---|---|---|---|---|---|
+| Windows portable CPU full | Windows 10/11 x64, папка на запись | PNG, JPEG, BMP, TIFF; ZIP, CBZ, CBR, RAR, 7Z, TAR; проект `.ilt.zip` | LLM — любой заявленный сервером; офлайн Argos en↔ru | Локально. LAN API выключается в настройках | `scripts/smoke-portable-desktop.py` после распаковки full ZIP |
+| Windows portable light | Windows 10/11 x64 | Те же, после подготовки компонентов | Те же после `--deploy` / «Подготовить» | Интернет на первую подготовку | `docs/WINDOWS_UPDATE.md`; smoke после профилей first-run |
+| Docker CPU full | Linux amd64 Docker Engine; браузер вне контейнера | Браузер: PNG, JPEG, BMP, TIFF, ZIP, CBZ, `.ilt.zip` | Как у полного CPU-профиля | По умолчанию localhost:8080; LAN — `ILT_PUBLISH_HOST` | `docker load` + `compose up --no-build`; `/healthz` |
+| Linux headless | Linux x64 frozen sidecar / служба | Картинки LAN API | Как у CPU-профиля | `--headless --remote`, `/v1/health` | [LINUX_SERVER.md](LINUX_SERVER.md) |
+| Windows headless | `*-server-win64.zip` | Картинки LAN API | Как у CPU-профиля | `--headless --remote` | `scripts/smoke_dist.py` для server ZIP |
+| Расширение Chromium | Chromium, распакованный ZIP | Картинка со страницы через LAN | Языки сопряжённого сервера | HTTP LAN, без TLS | `python scripts/build-extension.py`; `tests/e2e/test_extension.py` |
+| CLI | Python 3.10–3.13 на машине сборки или исходников | PNG, JPEG, BMP, TIFF | `--source-lang` / `--target-lang`; офлайн en↔ru | Не обязательна | `python src/main.py page.png out.png` |
+
+Отдельно от заявленной поставки:
+
+- **Firefox.** Сборка `ilt-extension-firefox-*.zip` существует. Живая приёмка и магазин не заявлены; не считать канал равным Chromium.
+- **CUDA.** Профиль не заявлен в поставке 1.0.1 (P06 deferred). Исторический `--deploy cuda` / `--torch-cuda` не входит в полный ZIP и Docker. Аппаратный прогон cu128/cu130 нужен только если поддержку снова заявят.
+- **Окно из исходников.** `python -m src.app` — pywebview + WebView2. Готовое окно — Flutter-хост и сайдкар `--api`.
 
 ## Windows portable CPU full
 
@@ -108,11 +128,11 @@ ILT_PUBLISH_HOST=0.0.0.0 ILT_PORT=18080 ILT_WEB_ORIGINS=http://192.168.88.42:180
 
 ## Обязательный процесс выпуска
 
-После каждого изменения `main` workflow `.github/workflows/docker.yml` собирает полный CPU-образ из актуального кода, выполняет настоящую обработку с `--network none` и только при успехе публикует `edge-cpu-full`. Это канал разработки.
+После каждого изменения `main` workflow `.github/workflows/docker.yml` собирает полный CPU-образ из актуального кода и выполняет обработку с `--network none`. Канал `edge-cpu-full` больше не публикуется: в реестре остаётся только принятый выпуск.
 
 При выпуске новой версии `scripts/release.ps1 -Prepare` обязательно запускает Linux CI и Docker CI на одном конкретном commit, включает полный Windows CPU ZIP и Docker ZIP в неизменяемый кандидат и сохраняет `GHCR-DIGEST.txt`. Docker workflow проверяет совпадение тега и версии приложения; в образ записываются OCI source/revision/version. Выпуск без полного Docker-пакета и digest отклоняется.
 
 Для пользователей публикуется `ghcr.io/jawerka/image-localization-tool:<version>-cpu-full`. После публикации стабильного GitHub Release автоматически обновляется тег `cpu-full`; опубликованный выпуск не подменяется новым кодом под старой версией. Workflow требует только встроенный `GITHUB_TOKEN` с `packages: write`; личные ключи в исходники и образы не попадают. Публичная видимость пакета задаётся отдельно в настройках GHCR и проверяется анонимным pull.
 
-Готовый [compose.ghcr.yaml](../compose.ghcr.yaml) фиксирует стабильную версию; его нужно скачать как `compose.yaml`. Обновление: резервная копия данных, смена тега версии, `docker compose pull`, затем `docker compose up -d`. Для стабильного окружения не используйте `edge-cpu-full`.
+Готовый [compose.ghcr.yaml](../compose.ghcr.yaml) фиксирует стабильную версию; его нужно скачать как `compose.yaml`. Обновление: резервная копия данных, смена тега версии, `docker compose pull`, затем `docker compose up -d`.
 

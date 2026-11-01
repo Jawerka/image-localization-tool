@@ -9,65 +9,7 @@ import '../api/errors.dart';
 import '../api/ilt_api.dart';
 import '../model/page_document.dart';
 import '../model/view_transform.dart';
-
-/// Снимок документа вместе с оценкой его размера в JSON-байтах.
-class _HistoryEntry {
-  _HistoryEntry(this.snapshot, this.bytes);
-
-  final Map<String, dynamic> snapshot;
-  final int bytes;
-}
-
-/// История правок одной страницы (снимки документа).
-class _PageHistory {
-  final List<_HistoryEntry> past = [];
-  final List<_HistoryEntry> future = [];
-  int pastBytes = 0;
-  int futureBytes = 0;
-  static const limit = 1000;
-  static const maxBytes = 256 * 1024 * 1024;
-
-  void addPast(Map<String, dynamic> snapshot, int bytes) {
-    past.add(_HistoryEntry(snapshot, bytes));
-    pastBytes += bytes;
-    _trim(past, pastBytes, (value) => pastBytes = value);
-  }
-
-  void addFuture(Map<String, dynamic> snapshot, int bytes) {
-    future.add(_HistoryEntry(snapshot, bytes));
-    futureBytes += bytes;
-    _trim(future, futureBytes, (value) => futureBytes = value);
-  }
-
-  _HistoryEntry popPast() {
-    final entry = past.removeLast();
-    pastBytes -= entry.bytes;
-    return entry;
-  }
-
-  _HistoryEntry popFuture() {
-    final entry = future.removeLast();
-    futureBytes -= entry.bytes;
-    return entry;
-  }
-
-  void clearFuture() {
-    future.clear();
-    futureBytes = 0;
-  }
-
-  static void _trim(
-    List<_HistoryEntry> entries,
-    int bytes,
-    void Function(int) setBytes,
-  ) {
-    var total = bytes;
-    while (entries.length > limit || (total > maxBytes && entries.length > 1)) {
-      total -= entries.removeAt(0).bytes;
-    }
-    setBytes(total);
-  }
-}
+import 'viewer_history.dart';
 
 /// Состояние просмотрщика: документ активной страницы, правки, инструменты.
 ///
@@ -114,7 +56,7 @@ class ViewerState extends ChangeNotifier {
 
   /// Число штрихов, уже запечённых в маску версии (`pageId|version`).
   final Map<String, int> _strokeCounts = {};
-  final Map<String, _PageHistory> _histories = {};
+  final Map<String, PageHistory> _histories = {};
   String _coalesceKey = '';
   String _deferredBaselineKey = '';
   bool _deferredApply = false;
@@ -271,9 +213,9 @@ class ViewerState extends ChangeNotifier {
     return _strokeCounts['$pageId|$version'] ?? document.strokes.length;
   }
 
-  _PageHistory _historyFor(String? pageId) {
+  PageHistory _historyFor(String? pageId) {
     final id = pageId ?? '';
-    return _histories.putIfAbsent(id, _PageHistory.new);
+    return _histories.putIfAbsent(id, PageHistory.new);
   }
 
   // ---- привязка ------------------------------------------------------------

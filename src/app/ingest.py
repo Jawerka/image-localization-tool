@@ -26,6 +26,17 @@ IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"})
 ARCHIVE_SUFFIXES = frozenset({
     ".zip", ".cbz", ".cbr", ".rar", ".cb7", ".7z", ".cbt", ".tar",
 })
+
+
+def unsupported_source_message(path: Path | str) -> str:
+    """Сообщение об одиночном файле, который ingest не принимает."""
+    suffix = Path(path).suffix.lower() or "без расширения"
+    images = ", ".join(sorted(IMAGE_SUFFIXES))
+    archives = ", ".join(sorted(ARCHIVE_SUFFIXES))
+    return (
+        f"Формат {suffix} не поддерживается. "
+        f"Изображения: {images}. Архивы: {archives}."
+    )
 # Папок над файлом не больше этого числа. ``a/b/c/d/e/page.png`` — пятый уровень.
 MAX_ARCHIVE_DEPTH = 5
 

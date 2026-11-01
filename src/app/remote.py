@@ -23,6 +23,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import ipaddress
 import json
 import logging
@@ -157,8 +158,25 @@ def _cors_origin(value: str | None) -> str | None:
     return None
 
 
+def _glossary_fingerprint(path: str) -> str:
+    """Хеш файла глоссария. Путь пустой и файл отсутствует — разные признаки."""
+    text = str(path or "").strip()
+    if not text:
+        return "none"
+    try:
+        data = Path(text).read_bytes()
+    except OSError:
+        return f"missing:{text}"
+    return hashlib.sha256(data).hexdigest()
+
+
 def _pipeline_fingerprint(settings: AppSettings) -> str:
-    """Отпечаток полей, от которых зависит картинка перевода."""
+    """Отпечаток полей, от которых зависит картинка перевода.
+
+    Не входят тема, масштаб, экспорт, таймаут и ключ LLM, лимит кэша
+    рендера и число потоков ORT. Каталоги моделей и компонентов не
+    хешируются: смена пути без смены весов для этого ключа слишком дорога.
+    """
     return fingerprint_settings(
         {
             "ocr_backend": settings.ocr_backend,
@@ -170,8 +188,12 @@ def _pipeline_fingerprint(settings: AppSettings) -> str:
             "reading_order": settings.reading_order,
             "translate_sfx": settings.translate_sfx,
             "auto_stylized_fonts": settings.auto_stylized_fonts,
+            "adaptive_text": settings.adaptive_text,
+            "discover_missing_text": settings.discover_missing_text,
+            "layout_long_side": settings.layout_long_side,
             "device": settings.device,
             "glossary_path": settings.glossary_path,
+            "glossary_sha256": _glossary_fingerprint(settings.glossary_path),
             "detector_conf": settings.detector_conf,
             "detector_mode": settings.detector_mode,
             "ctd_conf": settings.ctd_conf,

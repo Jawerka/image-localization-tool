@@ -398,22 +398,29 @@ function renderPage(state, page) {
     .concat(document?.warnings || [])
     .concat(page.error ? [page.error] : []);
   const warningHtml = warnings.map((item) => `<p class="warn-line">${icon("warning")}<span>${escapeText(item)}</span></p>`).join("");
+  const canReset = page.has_auto !== false;
+  const resetHint = canReset
+    ? ""
+    : '<p class="field-hint">Автоматического снимка нет: сброс правок недоступен.</p>';
   facts.innerHTML = `<dl class="kv">${rows.map(([name, value]) => `<dt>${escapeText(name)}</dt><dd>${escapeText(value)}</dd>`).join("")}</dl>
     ${warningHtml}
+    ${resetHint}
     <div class="region-card__actions">
       <button type="button" class="btn btn-accent" data-page-action="retranslate">Перевести заново</button>
-      <button type="button" class="btn btn-ghost" data-page-action="reset">Сбросить правки</button>
+      <button type="button" class="btn btn-ghost" data-page-action="reset"${canReset ? "" : " disabled"}>Сбросить правки</button>
     </div>`;
   facts.scrollTop = scroll;
   facts.querySelector("[data-page-action='retranslate']").addEventListener("click", () => {
     document.dispatchEvent(new CustomEvent("ilt-translate-page"));
   });
-  facts.querySelector("[data-page-action='reset']").addEventListener("click", reset);
+  const resetButton = facts.querySelector("[data-page-action='reset']");
+  if (canReset) resetButton.addEventListener("click", reset);
 }
 
 async function reset() {
   const pageId = getState().activePageId;
-  if (!pageId) return;
+  const page = getState().pages.find((item) => item.id === pageId);
+  if (!pageId || page?.has_auto === false) return;
   const ok = await confirm({
     title: "Сбросить правки?",
     text: "Ручные правки этой страницы будут заменены результатом пайплайна. Это нельзя отменить.",

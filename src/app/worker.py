@@ -898,7 +898,9 @@ def _dispatch(job: dict, ctx: _Runtime) -> None:
         elif kind in ("recognize", "retranslate", "shorten"):
             _run_region(job, ctx)
         elif kind == "export":
-            result = _run_export(job, ctx)
+            from src.app.job_executor import run_export
+
+            result = run_export(job, ctx)
         else:
             raise RuntimeError(f"Неизвестное задание: {kind}")
     except PipelineCancelled:
@@ -1670,6 +1672,12 @@ def _page_update(store: ProjectStore, job: dict, page_id: str, **extra) -> dict:
     payload["status"] = current.get("status") or ""
     payload["progress"] = int(current.get("progress") or 0)
     payload["stage"] = str(current.get("stage") or "")
+    try:
+        payload["has_auto"] = (
+            store.page_dir(str(job.get("project_id") or ""), page_id) / "auto.json"
+        ).is_file()
+    except (FileNotFoundError, OSError, ValueError):
+        pass
     return payload
 
 

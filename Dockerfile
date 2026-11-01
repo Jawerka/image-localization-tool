@@ -16,6 +16,11 @@ RUN --mount=type=cache,target=/root/.cache/pip pip install -r requirements-conta
 FROM base AS prepared
 COPY src/ ./src/
 COPY web/ ./web/
+COPY LICENSE ./LICENSE
+COPY docs/LICENSE_INVENTORY.md ./LICENSE_INVENTORY.md
+COPY docs/THIRD_PARTY_NOTICES.md ./THIRD_PARTY_NOTICES.md
+COPY docs/FONTS.md ./FONTS.md
+COPY assets/README.md ./ARGOS_WHEEL.md
 COPY assets/argostranslate-1.11.1-py3-none-any.whl ./assets/argostranslate-1.11.1-py3-none-any.whl
 # Проверка выполняется при сборке, до очистки диагностических данных и кэша.
 RUN --mount=type=cache,target=/opt/ilt/.downloads python -m src.app.distribution prepare \

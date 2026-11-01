@@ -96,6 +96,16 @@ class PageFacts extends StatelessWidget {
               ],
             ),
           ),
+        if (!page.hasAuto)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 3),
+            child: Text(
+              'Автоматического снимка нет: сброс правок недоступен.',
+              key: const Key('page-reset-unavailable'),
+              style: theme.textTheme.labelSmall
+                  ?.copyWith(color: palette.textWarning),
+            ),
+          ),
         const SizedBox(height: 10),
         Wrap(
           spacing: 4,
@@ -112,7 +122,7 @@ class PageFacts extends StatelessWidget {
               label: 'Сбросить правки',
               icon: Icons.restore,
               danger: true,
-              onPressed: () => _confirmReset(context),
+              onPressed: page.hasAuto ? () => _confirmReset(context) : null,
             ),
           ],
         ),

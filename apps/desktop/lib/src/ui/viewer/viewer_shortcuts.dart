@@ -85,6 +85,22 @@ KeyEventResult handleViewerShortcut(
   }
   if (!down) return KeyEventResult.ignored;
 
+  final shortcutsOn = workspace.settings['single_key_shortcuts'] != false;
+  final toolKeys = {
+    LogicalKeyboardKey.keyV,
+    LogicalKeyboardKey.keyR,
+    LogicalKeyboardKey.keyB,
+    LogicalKeyboardKey.keyG,
+    LogicalKeyboardKey.keyP,
+    LogicalKeyboardKey.keyH,
+    LogicalKeyboardKey.keyL,
+    LogicalKeyboardKey.keyM,
+    LogicalKeyboardKey.keyN,
+  };
+  if (!shortcutsOn && !control && !alt && !meta && toolKeys.contains(key)) {
+    return KeyEventResult.ignored;
+  }
+
   final direction = _arrowDirection(key);
   if (direction != null) {
     if (alt) {

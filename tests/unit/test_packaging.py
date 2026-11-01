@@ -78,6 +78,23 @@ def test_build_extension_stamps_app_version():
     assert 'firefox["version"] = version' in text
 
 
+def test_pack_notices_copies_license_files(tmp_path):
+    from scripts.pack_notices import copy_notices
+
+    destination = tmp_path / "stage"
+    copy_notices(destination)
+    for name in ("LICENSE", "LICENSE_INVENTORY.md", "THIRD_PARTY_NOTICES.md", "FONTS.md", "ARGOS_WHEEL.md"):
+        assert (destination / name).is_file()
+    assert "MIT License" in (destination / "LICENSE").read_text(encoding="utf-8")
+
+
+def test_docker_workflow_does_not_publish_on_push():
+    text = (ROOT / ".github/workflows/docker.yml").read_text(encoding="utf-8")
+    assert "if: github.event_name != 'push'" in text
+    assert "must not publish a GHCR tag" in text
+    assert "TAG=edge-cpu-full" not in text
+
+
 def test_portable_package_has_windows_update_contract():
 
     script = (ROOT / "scripts" / "package-portable.ps1").read_text(encoding="utf-8")
@@ -98,12 +115,14 @@ def test_portable_package_has_windows_update_contract():
 
     for name in ("update-windows.ps1", "rollback-windows.ps1", "windows-update-common.ps1"):
         assert name in script
+    assert "pack_notices.py" in script
 
 def test_server_package_writes_data_beside_exe():
     script = (ROOT / "scripts" / "package-server.ps1").read_text(encoding="utf-8")
     assert "foreach ($folder in @('data', 'models', 'runtime'))" in script
     assert "ImageLocalizationTool.exe --deploy all" in script
     assert "ImageLocalizationTool.exe --headless --remote" in script
+    assert "pack_notices.py" in script
 
 
 def test_read_app_version_parses_assignment(tmp_path):

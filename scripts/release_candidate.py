@@ -19,6 +19,91 @@ if str(ROOT) not in sys.path:
 from scripts.smoke_dist import read_app_version
 from src.app.downloads import atomic_json, digest
 
+CHECK_STATUSES = frozenset({
+    "implemented", "tested", "accepted", "superseded", "deferred",
+})
+REQUIRED_PASS_STATUSES = frozenset({"tested", "accepted"})
+REQUIRED_PASS_RESULTS = frozenset({"ok", "pass", "passed", "accepted"})
+LEGACY_ACCEPTANCE_VERSIONS = frozenset({"1.0.5", "1.1.0"})
+PASSPORT_KIND = "ilt-acceptance-passport"
+REQUIRED_CHECK_IDS = [
+    "T01", "T03", "T04", "T06", "Q01", "C03",
+    "U07", "Q02", "Q05", "U08", "T02", "Q06",
+    "T05", "H02", "P07", "P08", "P09", "P02", "P01", "P03", "P04", "P05",
+    "H01", "H03",
+]
+
+
+def validate_passport(
+    passport: dict,
+    *,
+    source_sha: str,
+    version: str,
+    artifact_sha256: str | None = None,
+    required_ids: list[str] | None = None,
+    assets: list[dict] | None = None,
+    image_digest: str | None = None,
+) -> None:
+    """Отказать, если паспорт не относится к этому SHA/версии или обязательное не принято."""
+    if not isinstance(passport, dict):
+        raise ValueError("Паспорт должен быть объектом")
+    if str(passport.get("kind") or "") != PASSPORT_KIND:
+        raise ValueError("Ожидался паспорт приёмки кандидата")
+    recorded_version = str(passport.get("version") or "")
+    if recorded_version in LEGACY_ACCEPTANCE_VERSIONS:
+        raise ValueError("Результаты старых приёмок 1.0.5/1.1.0 не засчитываются")
+    if recorded_version != str(version):
+        raise ValueError("Версия паспорта не совпадает с кандидатом")
+    recorded_sha = str(passport.get("source_sha") or "")
+    if recorded_sha != str(source_sha):
+        raise ValueError("SHA исходников паспорта не совпадает с кандидатом")
+    if assets is not None:
+        recorded_assets = passport.get("assets")
+        if not isinstance(recorded_assets, list) or not recorded_assets:
+            raise ValueError("В паспорте нет полного списка контрольных сумм")
+        expected = {(item["name"], item["sha256"], item["size"]) for item in assets}
+        recorded = {(item.get("name"), item.get("sha256"), item.get("size")) for item in recorded_assets}
+        if expected != recorded:
+            raise ValueError("Набор SHA256 паспорта не совпадает с кандидатом")
+        checksums = {item["sha256"] for item in assets}
+        if artifact_sha256 is not None and artifact_sha256 not in checksums:
+            raise ValueError("SHA256 артефакта не входит в комплект кандидата")
+        recorded_single = str(passport.get("artifact_sha256") or "")
+        if recorded_single and recorded_single not in checksums:
+            raise ValueError("SHA256 артефакта паспорта не совпадает с кандидатом")
+    elif artifact_sha256 is not None:
+        recorded_artifact = str(passport.get("artifact_sha256") or "")
+        if recorded_artifact != str(artifact_sha256):
+            raise ValueError("SHA256 артефакта паспорта не совпадает с кандидатом")
+    if image_digest is not None:
+        recorded_digest = str(passport.get("image_digest") or "").strip()
+        if recorded_digest != str(image_digest).strip():
+            raise ValueError("Digest образа паспорта не совпадает с кандидатом")
+    checks = passport.get("checks")
+    if not isinstance(checks, list) or not checks:
+        raise ValueError("В паспорте нет проверок")
+    by_id: dict[str, dict] = {}
+    for item in checks:
+        if not isinstance(item, dict):
+            raise ValueError("Запись проверки должна быть объектом")
+        check_id = str(item.get("id") or "").strip()
+        if not check_id:
+            raise ValueError("У проверки нет id")
+        status = str(item.get("status") or "").strip()
+        if status not in CHECK_STATUSES:
+            raise ValueError(f"Неизвестный статус проверки: {status}")
+        by_id[check_id] = item
+    for check_id in required_ids or []:
+        item = by_id.get(check_id)
+        if item is None:
+            raise ValueError(f"Нет обязательной проверки: {check_id}")
+        status = str(item.get("status") or "")
+        result = str(item.get("result") or "").strip().lower()
+        if status not in REQUIRED_PASS_STATUSES:
+            raise ValueError(f"Обязательная проверка {check_id} не принята: {status}")
+        if result not in REQUIRED_PASS_RESULTS:
+            raise ValueError(f"Обязательная проверка {check_id} провалена или пропущена")
+
 
 def source_digest(root: Path) -> str:
     paths = []
@@ -123,16 +208,50 @@ def verify(root: Path, assets: Path, report: dict, require_smoke: bool = True) -
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=("create", "verify", "approve", "stamp-build", "verify-build"))
+    parser.add_argument(
+        "action",
+        choices=("create", "verify", "approve", "stamp-build", "verify-build", "validate-passport"),
+    )
     parser.add_argument("--assets", default="dist")
     parser.add_argument("--report", default="build/release-candidate.json")
     parser.add_argument("--tag", default="")
     parser.add_argument("--checks-passed", action="store_true")
     parser.add_argument("--complete-windows", action="store_true")
+    parser.add_argument("--passport", default="")
+    parser.add_argument("--source-sha", default="")
+    parser.add_argument("--version", default="")
+    parser.add_argument("--artifact-sha256", default="")
+    parser.add_argument("--candidate", default="")
+    parser.add_argument("--required", action="append", default=[])
     args = parser.parse_args()
     path = ROOT / args.report
     assets = ROOT / args.assets
     try:
+        if args.action == "validate-passport":
+            passport_path = Path(args.passport)
+            passport = json.loads(passport_path.read_text(encoding="utf-8"))
+            report_assets = None
+            image_digest = None
+            artifact_sha = args.artifact_sha256 or None
+            if args.candidate:
+                report = json.loads(Path(args.candidate).read_text(encoding="utf-8"))
+                report_assets = list(report.get("assets") or [])
+                digest_file = assets / "GHCR-DIGEST.txt"
+                if digest_file.is_file():
+                    image_digest = digest_file.read_text(encoding="utf-8").strip()
+                if artifact_sha is None and report_assets:
+                    artifact_sha = str(report_assets[0].get("sha256") or "")
+            validate_passport(
+                passport,
+                source_sha=args.source_sha,
+                version=args.version,
+                artifact_sha256=artifact_sha,
+                required_ids=list(args.required) or list(REQUIRED_CHECK_IDS),
+                assets=report_assets,
+                image_digest=image_digest,
+            )
+            print("Паспорт принят")
+            return 0
         if args.action == "stamp-build":
             atomic_json(ROOT / "build/build-source.json", {"source_sha": source_digest(ROOT)})
             return 0

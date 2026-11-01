@@ -42,6 +42,11 @@ $Python = Resolve-BuildPython -Override $Python
 $verSnippet = 'import sys; from pathlib import Path; root = Path(sys.argv[1]); sys.path.insert(0, str(root)); from scripts.smoke_dist import read_app_version; print(read_app_version(root))'
 $version = (& $Python -c $verSnippet $RepoRoot).Trim()
 Write-Host "==> Version $version"
+function Copy-ReleaseNotices {
+    param([string] $Destination)
+    & $Python (Join-Path $PSScriptRoot 'pack_notices.py') $Destination
+    if ($LASTEXITCODE -ne 0) { throw 'Copying license notices failed' }
+}
 
 if ([string]::IsNullOrWhiteSpace($DistDir)) {
     $DistDir = Join-Path $RepoRoot 'dist\ImageLocalizationTool'
@@ -190,6 +195,8 @@ foreach ($scriptName in @('update-windows.ps1', 'rollback-windows.ps1', 'windows
     }
     Copy-Item -LiteralPath $source -Destination (Join-Path $stage $scriptName) -Force
 }
+
+Copy-ReleaseNotices -Destination $stage
 
 $zip = Join-Path $OutputDir "ImageLocalizationTool-$version-windows-x64-portable.zip"
 if ($FullCpu) { $zip = Join-Path $OutputDir "ImageLocalizationTool-$version-windows-x64-portable-cpu-full.zip" }

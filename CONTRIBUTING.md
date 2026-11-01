@@ -4,7 +4,7 @@
 
 ## Окружение
 
-Python 3.10–3.13. На 3.14 возможны проблемы с `torch`. Для окна на Windows нужен [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/). Сборка Windows-приложения требует Flutter 3.47.7 или новее.
+Python 3.10–3.13: CI гоняет unit-тесты на всех четырёх версиях. На 3.14 возможны проблемы с `torch`. Для окна на Windows нужен [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/). Сборка Windows-приложения требует Flutter 3.47.7 или новее. Локальный `flutter` часто лежит в `%LOCALAPPDATA%\flutter\bin\flutter.bat`.
 
 ```powershell
 python -m venv venv
@@ -98,7 +98,7 @@ Linux-служба: [docs/LINUX_SERVER.md](docs/LINUX_SERVER.md). Обновле
 
 ## CI
 
-- `.github/workflows/ci.yml` на push и pull request в `main`: pytest на Ubuntu (Python 3.12), `npm run test:js` (Node 22), `flutter analyze` и `flutter test` на Windows. Flutter в CI — текущий stable, не закреплённая 3.47.7.
+- `.github/workflows/ci.yml` на push и pull request в `main`: pytest на Ubuntu (Python 3.10–3.13), `npm run test:js` (Node 22), `flutter analyze` и `flutter test` на Windows, job `e2e-browser` с `ILT_REQUIRE_BROWSER=1`. Flutter в CI — канал `stable`; локальный кандидат — 3.47.7 (`apps/desktop/README.md`).
 - `.github/workflows/release.yml` по тегу `v*` собирает Linux server tar.gz.
 - `.github/workflows/docker.yml` на каждый push в `main` публикует `edge-cpu-full` после реальной обработки.
 

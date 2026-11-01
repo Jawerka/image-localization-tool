@@ -6,6 +6,17 @@ from dataclasses import dataclass, field
 
 from src.models import MaskStroke, TextRegion
 
+_DOCUMENT_FIELDS = {
+    "version",
+    "regions",
+    "strokes",
+    "reading_direction",
+    "warnings",
+    "timings",
+    "ocr_engine",
+    "translator_engine",
+}
+
 
 @dataclass
 class PageDocument:
@@ -19,9 +30,10 @@ class PageDocument:
     timings: dict = field(default_factory=dict)
     ocr_engine: str = ""
     translator_engine: str = ""
+    extra: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
-        return {
+        payload = {
             "version": int(self.version),
             "regions": [region.to_dict() for region in self.regions],
             "strokes": [stroke.to_dict() for stroke in self.strokes],
@@ -31,6 +43,10 @@ class PageDocument:
             "ocr_engine": self.ocr_engine or "",
             "translator_engine": self.translator_engine or "",
         }
+        for key, value in self.extra.items():
+            if key not in payload:
+                payload[key] = value
+        return payload
 
     @classmethod
     def from_dict(cls, data: dict | None) -> PageDocument:
@@ -54,6 +70,7 @@ class PageDocument:
         timings = data.get("timings") if isinstance(data.get("timings"), dict) else {}
         warnings = data.get("warnings") if isinstance(data.get("warnings"), list) else []
         direction = str(data.get("reading_direction") or "ltr")
+        extra = {key: value for key, value in data.items() if key not in _DOCUMENT_FIELDS}
         return cls(
             version=version,
             regions=regions,
@@ -63,6 +80,7 @@ class PageDocument:
             timings=dict(timings),
             ocr_engine=str(data.get("ocr_engine") or ""),
             translator_engine=str(data.get("translator_engine") or ""),
+            extra=extra,
         )
 
 

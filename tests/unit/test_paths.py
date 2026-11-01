@@ -65,3 +65,31 @@ class TestPaths:
     def test_components_root_explicit_override_wins(self, tmp_path, monkeypatch):
         monkeypatch.setenv("ILT_COMPONENT_ROOT", str(tmp_path / "chosen"))
         assert components_root() == tmp_path / "chosen"
+
+
+def test_ilt_data_dir_with_spaces_and_cyrillic(tmp_path, monkeypatch):
+    from src.app.paths import data_root, ensure_data_root, settings_path
+
+    root = tmp_path / "Мои данные" / "app data"
+    monkeypatch.setenv("ILT_DATA_DIR", str(root))
+    monkeypatch.setenv("APPDATA", str(tmp_path / "AppData" / "Roaming"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "AppData" / "Local"))
+    assert data_root() == root
+    created = ensure_data_root()
+    assert created == root
+    assert settings_path() == root / "settings.json"
+    assert not (tmp_path / "AppData" / "Roaming").exists()
+    assert not (tmp_path / "AppData" / "Local").exists()
+
+
+def test_default_data_root_stays_in_install_folder(tmp_path, monkeypatch):
+    from src.app import paths as app_paths
+
+    app = tmp_path / "ImageLocalizationTool"
+    monkeypatch.setattr(app_paths, "install_root", lambda: app)
+    monkeypatch.delenv("ILT_DATA_DIR", raising=False)
+    monkeypatch.setenv("APPDATA", str(tmp_path / "AppData" / "Roaming"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "AppData" / "Local"))
+    assert app_paths.data_root() == app / "data"
+    assert app_paths.settings_path() == app / "data" / "settings.json"
+    assert app_paths.projects_dir() == app / "data" / "projects"

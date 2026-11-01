@@ -12,6 +12,8 @@ import pytest
 from PIL import Image
 
 from src.app.ingest import (
+    ARCHIVE_SUFFIXES,
+    IMAGE_SUFFIXES,
     NoImagesError,
     archive_images,
     extract_archive,
@@ -19,6 +21,7 @@ from src.app.ingest import (
     list_images,
     natural_sort_key,
     plan_chapters,
+    unsupported_source_message,
 )
 
 
@@ -324,3 +327,10 @@ def test_plan_chapters_subdir_archive_stem(tmp_path):
         (outside, ""),
     ]
     assert plan_chapters([], "subdir", root=root, archive_stem="Vol.1") == []
+
+
+def test_unsupported_source_message_lists_known_suffixes():
+    text = unsupported_source_message("frame.gif")
+    assert ".gif" in text
+    for suffix in IMAGE_SUFFIXES | ARCHIVE_SUFFIXES:
+        assert suffix in text

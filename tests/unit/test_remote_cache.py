@@ -26,13 +26,15 @@ def test_cache_key_build_and_token():
     assert key.source_lang == "en"
     assert key.target_lang == "ru"
     assert key.fingerprint == "fp"
-    raw = f"{key.image_sha256}|ru|fp"
+    raw = f"v2|{key.image_sha256}|en|ru|fp"
     assert key.token() == hashlib.sha256(raw.encode("utf-8")).hexdigest()
     assert key.token() == CacheKey.build(image, "en", "ru", "fp").token()
     assert key.token() != CacheKey.build(other, "en", "ru", "fp").token()
-    assert key.token() == CacheKey.build(image, "ja", "ru", "fp").token()
+    assert key.token() != CacheKey.build(image, "ja", "ru", "fp").token()
     assert key.token() != CacheKey.build(image, "en", "de", "fp").token()
     assert key.token() != CacheKey.build(image, "en", "ru", "other").token()
+    old = hashlib.sha256(f"{key.image_sha256}|ru|fp".encode("utf-8")).hexdigest()
+    assert key.token() != old
 
 
 def test_fingerprint_settings_sorts_keys_and_changes_with_value():

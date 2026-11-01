@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -17,8 +18,17 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("playwright")
+if os.environ.get("ILT_REQUIRE_BROWSER") == "1":
+    import playwright  # noqa: F401
+else:
+    pytest.importorskip("playwright")
 from playwright.sync_api import sync_playwright
+
+
+def _need_browser(reason: str) -> None:
+    if os.environ.get("ILT_REQUIRE_BROWSER") == "1":
+        pytest.fail(reason)
+    pytest.skip(reason)
 
 pytestmark = pytest.mark.ui
 
@@ -261,9 +271,9 @@ def test_extension_pairs_and_translates(tmp_path):
         try:
             executable = Path(playwright.chromium.executable_path)
         except Exception as exc:
-            pytest.skip(f"Chromium Playwright недоступен: {exc}")
+            _need_browser(f"Chromium Playwright недоступен: {exc}")
         if not executable.is_file():
-            pytest.skip(f"Chromium Playwright не установлен: {executable}")
+            _need_browser(f"Chromium Playwright не установлен: {executable}")
 
         subprocess.run([sys.executable, str(SCRIPT)], check=True, cwd=ROOT)
         server, base = _start_server()
@@ -291,7 +301,7 @@ def test_extension_pairs_and_translates(tmp_path):
             except Exception as exc:
                 message = str(exc)
                 if "Executable doesn't exist" in message or "BrowserType.launch" in message:
-                    pytest.skip(message)
+                    _need_browser(message)
                 raise
 
             context.on("page", lambda page: page.on("console", lambda msg: logs.append(msg.text)))

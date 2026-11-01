@@ -211,7 +211,7 @@ ZIP, CBZ, CBR/RAR, CB7/7Z и CBT/TAR распаковываются в ката�
 | POST | `/api/remote/revoke` | Отозвать устройство: нужен `id`. Слушатель выключен — 409 |
 | POST | `/api/project/reorder` | Новый порядок страниц |
 | GET | `/api/project/package/status` | Можно ли собрать пакет проекта |
-| POST | `/api/project/package/save` | Собрать `.iltproj` |
+| POST | `/api/project/package/save` | Собрать `.ilt.zip` |
 | POST | `/api/project/package/load` | Открыть пакет |
 | POST | `/api/project/close` | Закрыть проект |
 | POST | `/api/dialog/project-package/open` | Диалог открытия пакета |

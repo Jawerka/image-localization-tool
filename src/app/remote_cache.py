@@ -62,8 +62,11 @@ class CacheKey:
         )
 
     def token(self) -> str:
-        """Имя файла без суффикса: sha256 от полей ключа через ``|``."""
-        raw = f"{self.image_sha256}|{self.target_lang}|{self.fingerprint}"
+        """Имя файла без суффикса: версия пространства и поля ключа через ``|``."""
+        raw = (
+            f"v2|{self.image_sha256}|{self.source_lang}|"
+            f"{self.target_lang}|{self.fingerprint}"
+        )
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 

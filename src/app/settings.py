@@ -17,6 +17,7 @@ from pathlib import Path
 from src.config import Config
 
 SCHEMA_VERSION = 1
+_PIPELINE = Config()
 _KEY_FILE_NAME = "llm-api-key.txt"
 
 _THEMES = ("system", "dark", "light")
@@ -255,32 +256,32 @@ class AppSettings:
 
     theme: str = "system"
     ui_scale: int = 100
-    source_lang: str = "en"
-    target_lang: str = "ru"
+    source_lang: str = _PIPELINE.source_lang
+    target_lang: str = _PIPELINE.target_lang
     llm_base_url: str = ""
     llm_model: str = ""
     llm_thinking: bool = False
     llm_timeout: int = 300
-    ocr_backend: str = "vlm"
-    translator_backend: str = "llm"
-    inpainter_backend: str = "lama"
-    reading_order: str = "auto"
+    ocr_backend: str = _PIPELINE.ocr_backend
+    translator_backend: str = _PIPELINE.translator_backend
+    inpainter_backend: str = _PIPELINE.inpainter_backend
+    reading_order: str = _PIPELINE.reading_order
     translate_sfx: bool | None = None
     sfx_mode: str | None = None  # После нормализации skip|replace.
-    auto_stylized_fonts: bool = True
-    adaptive_text: bool = True
-    discover_missing_text: bool = True
+    auto_stylized_fonts: bool = _PIPELINE.auto_stylized_fonts
+    adaptive_text: bool = _PIPELINE.adaptive_text
+    discover_missing_text: bool = _PIPELINE.discover_missing_text
     device: str = "auto"
     glossary_path: str = ""
-    detector_conf: float = 0.3
+    detector_conf: float = _PIPELINE.detector_conf
     detector_mode: str = "ogkalu"  # ogkalu | ctd | both | auto
-    ctd_conf: float = 0.4
-    ort_intra_op_threads: int = 0
-    text_stroke_ratio: float = 0.08
-    text_margin: float = 0.08
-    layout_long_side: int = 2000
-    min_font_size: int = 10
-    max_font_size: int = 128
+    ctd_conf: float = _PIPELINE.ctd_conf
+    ort_intra_op_threads: int = _PIPELINE.ort_intra_op_threads
+    text_stroke_ratio: float = _PIPELINE.text_stroke_ratio
+    text_margin: float = _PIPELINE.text_margin
+    layout_long_side: int = _PIPELINE.layout_long_side
+    min_font_size: int = _PIPELINE.min_font_size
+    max_font_size: int = _PIPELINE.max_font_size
     render_cache_limit_mb: int = 256
     export_format: str = "png"
     export_jpeg_quality: int = 90
@@ -290,8 +291,8 @@ class AppSettings:
     components_previous_dir: str = ""
     single_key_shortcuts: bool = True
     dock_position: str = "bottom"  # top|bottom
-    viewer_show_boxes: bool = True
-    viewer_show_mask: bool = True
+    viewer_show_boxes: bool = _PIPELINE.viewer_show_boxes
+    viewer_show_mask: bool = _PIPELINE.viewer_show_mask
     first_run_complete: bool = False
     window_x: int | None = None
     window_y: int | None = None

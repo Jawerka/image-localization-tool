@@ -79,6 +79,7 @@ jobs:
           cp scripts/rollback-server-linux.sh "$ROOT/"
           cp scripts/linux-deploy-common.sh "$ROOT/"
           cp deploy/ilt.service "$ROOT/ilt.service"
+          python scripts/pack_notices.py "$ROOT"
           printf '{"schema":1,"version":"%s","platform":"linux-x64","executable":"ImageLocalizationTool"}\n' "$VERSION" > "$ROOT/release.json"
           sed -i 's/\r$//' "$ROOT/deploy.sh"
           sed -i 's/\r$//' "$ROOT/"*.sh

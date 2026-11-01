@@ -92,6 +92,8 @@ ImageLocalizationTool.exe --headless --remote
 endlocal
 "@
 Set-Content -LiteralPath (Join-Path $stage 'deploy.cmd') -Value $deployCmd -Encoding ASCII
+& $Python (Join-Path $PSScriptRoot 'pack_notices.py') $stage
+if ($LASTEXITCODE -ne 0) { throw 'Copying license notices failed' }
 
 $zip = Join-Path $OutputDir "ImageLocalizationTool-$version-server-win64.zip"
 if (Test-Path -LiteralPath $zip) {

@@ -63,12 +63,11 @@ class TranslatorService:
         self._error = None
         
         try:
-            from src.app.runtime import configure_argos_paths
+            from src.utils.resources import configure_argos_paths, language_dirs
             configure_argos_paths()
             os.environ["ARGOS_CHUNK_TYPE"] = "MINISBD"
             import argostranslate.package
             import argostranslate.settings
-            from src.app.component_catalog import language_dirs
 
             directories = language_dirs()
             argostranslate.settings.package_dirs = directories
@@ -202,7 +201,7 @@ class TranslatorService:
         """
         try:
             import argostranslate.package
-            from src.app.component_catalog import language_dirs
+            from src.utils.resources import language_dirs
             
             packages = argostranslate.package.get_installed_packages(language_dirs())
             langs = set()

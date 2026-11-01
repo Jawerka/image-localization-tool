@@ -1,0 +1,130 @@
+{
+  "schema": 1,
+  "tolerance": 1e-6,
+  "documents": [
+    {
+      "name": "full-fields",
+      "document": {
+        "version": 4,
+        "reading_direction": "rtl",
+        "warnings": ["demo"],
+        "timings": {"ocr": 1.5},
+        "ocr_engine": "vlm",
+        "translator_engine": "llm",
+        "extra_unknown": {"keep": true},
+        "regions": [
+          {
+            "id": 7,
+            "bbox": [10, 20, 80, 40],
+            "class_name": "text_bubble",
+            "confidence": 0.91,
+            "text": "Hello",
+            "translation": "Привет",
+            "type": "dialogue",
+            "speaker": "A",
+            "speaker_gender": "f",
+            "bubble_bbox": [8, 18, 84, 44],
+            "order": 1,
+            "skip": false,
+            "manual": true,
+            "edited": true,
+            "overflow": true,
+            "translation_locked": false,
+            "document": false,
+            "text_position": [50.5, 41.25],
+            "layout_snapshot": {
+              "version": 1,
+              "layout_key": "k",
+              "font_size": 18,
+              "lines": [["Привет", 12, 22]]
+            },
+            "custom_client_field": 42,
+            "style": {
+              "fill_rgb": [12, 34, 56],
+              "fill_locked": true,
+              "stroke_rgb": [1, 2, 3],
+              "font_size": 18,
+              "alignment": "center",
+              "uppercase": false,
+              "line_height": 20,
+              "font_size_override": 18,
+              "font_id": "heroika",
+              "stroke_mode": "custom",
+              "stroke_width": 1.5,
+              "letter_spacing": 0.2,
+              "line_spacing": 0.1,
+              "rotation": 12.5,
+              "skew_x": 0,
+              "warp": {
+                "version": 2,
+                "kind": "mesh",
+                "bend": 0.0,
+                "quad": null,
+                "mesh": [
+                  [0, 0], [33, 0], [66, 0], [99, 0],
+                  [0, 26], [33, 26], [66, 26], [99, 26],
+                  [0, 53], [33, 53], [66, 53], [99, 53],
+                  [0, 79], [33, 79], [66, 79], [99, 79]
+                ]
+              }
+            }
+          }
+        ],
+        "strokes": [
+          {
+            "mode": "paint",
+            "radius": 4,
+            "points": [[1, 2], [3, 4]],
+            "tolerance": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "warp-v1-arc",
+      "document": {
+        "version": 1,
+        "regions": [
+          {
+            "id": 1,
+            "bbox": [0, 0, 10, 10],
+            "text": "a",
+            "translation": "а",
+            "style": {
+              "warp": {
+                "version": 1,
+                "kind": "arc",
+                "bend": 0.25,
+                "quad": null,
+                "mesh": null
+              }
+            }
+          }
+        ],
+        "strokes": []
+      }
+    },
+    {
+      "name": "unknown-fields-kept",
+      "document": {
+        "version": 2,
+        "future_flag": "keep-me",
+        "regions": [
+          {
+            "id": "3",
+            "bbox": [1, 2, 3, 4],
+            "mystery": {"nested": true},
+            "text_position": [4, 5]
+          }
+        ],
+        "strokes": []
+      }
+    }
+  ],
+  "invalid": [
+    {"name": "text_position-nan", "field": "text_position", "value": ["nan", 1]},
+    {"name": "text_position-inf", "field": "text_position", "value": [1, "Infinity"]},
+    {"name": "text_position-short", "field": "text_position", "value": [1]},
+    {"name": "text_position-huge", "field": "text_position", "value": [2000000, 0]}
+  ]
+}

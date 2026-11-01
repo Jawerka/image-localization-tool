@@ -5,6 +5,7 @@ import sys
 import threading
 import time
 import types
+from pathlib import Path
 
 import pytest
 from PIL import Image
@@ -1793,3 +1794,135 @@ def test_restart_limit_closes_stuck_pages(tmp_path, monkeypatch):
 
     assert store.page_status(project["id"], page_id)["status"] == "error"
     assert any(event.type == "job.failed" for event in events)
+
+
+def test_export_after_edit_writes_requested_visual_version(tmp_path):
+    store, project_id, page_id = _export_page(tmp_path, status="done")
+    document = store.read_document(project_id, page_id)
+    document.regions = [TextRegion(id=1, bbox=(0, 0, 10, 8), text="Hi", translation="Привет")]
+    store.write_document(project_id, page_id, document, base_version=1)
+    red = Image.new("RGB", (24, 16), (200, 10, 10))
+    store.save_image(project_id, page_id, "result", red)
+    store.record_result_provenance(project_id, page_id, document_version=2, region_bounds={})
+    store.update_status(project_id, page_id, status="done")
+    dest = tmp_path / "out"
+    ctx = worker._Runtime(queue.Queue())
+    result = worker._run_export({
+        "id": "export-edit",
+        "kind": "export",
+        "project_id": project_id,
+        "page_id": "",
+        "payload": {
+            "store_root": str(store.root),
+            "dest": str(dest),
+            "page_ids": [page_id],
+            "content": "result",
+            "required_document_versions": {page_id: store.visual_version(project_id, page_id)},
+        },
+    }, ctx)
+    exported = Path(result["paths"][0])
+    assert Image.open(exported).getpixel((0, 0)) == (200, 10, 10)
+
+
+def test_export_cancel_leaves_preexisting_file(tmp_path):
+    from src.errors import PipelineCancelled
+
+    store, project_id, page_id = _export_page(tmp_path, status="done")
+    dest = tmp_path / "out"
+    dest.mkdir()
+    prior = dest / "page.png"
+    Image.new("RGB", (8, 8), (0, 0, 180)).save(prior)
+    ctx = worker._Runtime(queue.Queue())
+    ctx.cancelled_ids.add("export-cancel")
+    ctx.cancel_event.set()
+    with pytest.raises(PipelineCancelled):
+        worker._run_export({
+            "id": "export-cancel",
+            "kind": "export",
+            "project_id": project_id,
+            "page_id": "",
+            "payload": {
+                "store_root": str(store.root),
+                "dest": str(dest),
+                "page_ids": [page_id],
+                "content": "result",
+                "required_document_versions": {page_id: 1},
+            },
+        }, ctx)
+    assert Image.open(prior).getpixel((0, 0)) == (0, 0, 180)
+
+
+def test_export_uses_job_project_not_neighbor(tmp_path):
+    store = ProjectStore(tmp_path)
+    first = store.create_project("Первый", "en", "ru")
+    second = store.create_project("Второй", "en", "ru")
+    a = tmp_path / "a.png"
+    b = tmp_path / "b.png"
+    Image.new("RGB", (24, 16), (10, 200, 10)).save(a)
+    Image.new("RGB", (24, 16), (10, 10, 200)).save(b)
+    page_a = store.add_sources(first["id"], [a])[0]["id"]
+    page_b = store.add_sources(second["id"], [b])[0]["id"]
+    green = Image.new("RGB", (24, 16), (10, 200, 10))
+    blue = Image.new("RGB", (24, 16), (10, 10, 200))
+    store.save_image(first["id"], page_a, "result", green)
+    store.save_image(second["id"], page_b, "result", blue)
+    store.record_result_provenance(first["id"], page_a, document_version=1, region_bounds={})
+    store.record_result_provenance(second["id"], page_b, document_version=1, region_bounds={})
+    store.update_status(first["id"], page_a, status="done")
+    store.update_status(second["id"], page_b, status="done")
+    dest = tmp_path / "out"
+    ctx = worker._Runtime(queue.Queue())
+    result = worker._run_export({
+        "id": "export-a",
+        "kind": "export",
+        "project_id": first["id"],
+        "page_id": "",
+        "payload": {
+            "store_root": str(store.root),
+            "dest": str(dest),
+            "page_ids": [page_a],
+            "content": "result",
+            "required_document_versions": {page_a: 1},
+        },
+    }, ctx)
+    assert Image.open(result["paths"][0]).getpixel((0, 0)) == (10, 200, 10)
+    assert Image.open(store.image_path(second["id"], page_b, "result")).getpixel((0, 0)) == (10, 10, 200)
+
+
+def test_export_crash_does_not_write_other_project(tmp_path, monkeypatch):
+    store = ProjectStore(tmp_path)
+    first = store.create_project("Первый", "en", "ru")
+    second = store.create_project("Второй", "en", "ru")
+    a = tmp_path / "a.png"
+    b = tmp_path / "b.png"
+    Image.new("RGB", (24, 16), "white").save(a)
+    Image.new("RGB", (24, 16), "white").save(b)
+    page_a = store.add_sources(first["id"], [a])[0]["id"]
+    page_b = store.add_sources(second["id"], [b])[0]["id"]
+    store.save_image(first["id"], page_a, "result", Image.new("RGB", (24, 16), (1, 2, 3)))
+    store.save_image(second["id"], page_b, "result", Image.new("RGB", (24, 16), (4, 5, 6)))
+    store.record_result_provenance(first["id"], page_a, document_version=1, region_bounds={})
+    store.update_status(first["id"], page_a, status="done")
+    other = store.image_path(second["id"], page_b, "result")
+    before = other.read_bytes()
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("worker down")
+
+    monkeypatch.setattr("src.app.export.export_pages", boom)
+    ctx = worker._Runtime(queue.Queue())
+    with pytest.raises(RuntimeError, match="worker down"):
+        worker._run_export({
+            "id": "export-crash",
+            "kind": "export",
+            "project_id": first["id"],
+            "page_id": "",
+            "payload": {
+                "store_root": str(store.root),
+                "dest": str(tmp_path / "out"),
+                "page_ids": [page_a],
+                "content": "result",
+                "required_document_versions": {page_a: 1},
+            },
+        }, ctx)
+    assert other.read_bytes() == before

@@ -87,3 +87,155 @@ def test_build_proof_rejects_stale_binary_and_source(tmp_path):
     (tmp_path / "src/app/new.py").write_text("new source")
     with pytest.raises(ValueError, match="исходников"):
         release_candidate.verify_build(tmp_path, tmp_path)
+
+
+def _passport(**overrides) -> dict:
+    payload = {
+        "kind": "ilt-acceptance-passport",
+        "version": "1.0.1",
+        "source_sha": "abc123",
+        "artifact_sha256": "def456",
+        "environment": "windows-ci",
+        "checks": [
+            {
+                "id": "R01",
+                "status": "accepted",
+                "command": "pytest tests/unit/test_release_candidate.py",
+                "result": "pass",
+                "constraints": "",
+            }
+        ],
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_passport_rejects_substituted_sha():
+    passport = _passport()
+    with pytest.raises(ValueError, match="SHA исходников"):
+        release_candidate.validate_passport(
+            passport,
+            source_sha="other",
+            version="1.0.1",
+            artifact_sha256="def456",
+            required_ids=["R01"],
+        )
+
+
+def test_passport_rejects_legacy_acceptance_and_failed_required():
+    with pytest.raises(ValueError, match="1.0.5"):
+        release_candidate.validate_passport(
+            _passport(version="1.0.5"),
+            source_sha="abc123",
+            version="1.0.5",
+        )
+    with pytest.raises(ValueError, match="1.1.0"):
+        release_candidate.validate_passport(
+            _passport(version="1.1.0"),
+            source_sha="abc123",
+            version="1.1.0",
+        )
+    failed = _passport(checks=[{
+        "id": "R01",
+        "status": "deferred",
+        "command": "pytest",
+        "result": "skip",
+    }])
+    with pytest.raises(ValueError, match="не принята"):
+        release_candidate.validate_passport(
+            failed,
+            source_sha="abc123",
+            version="1.0.1",
+            required_ids=["R01"],
+        )
+    release_candidate.validate_passport(
+        _passport(),
+        source_sha="abc123",
+        version="1.0.1",
+        artifact_sha256="def456",
+        required_ids=["R01"],
+    )
+
+
+def test_passport_skip_is_not_success():
+    skipped = _passport(checks=[{
+        "id": "P01",
+        "status": "tested",
+        "command": "manual",
+        "result": "skipped",
+    }])
+    with pytest.raises(ValueError, match="пропущ"):
+        release_candidate.validate_passport(
+            skipped,
+            source_sha="abc123",
+            version="1.0.1",
+            required_ids=["P01"],
+        )
+
+
+def test_passport_requires_full_asset_checksums_and_digest():
+    assets = [
+        {"name": "a.zip", "sha256": "aaa", "size": 1},
+        {"name": "b.zip", "sha256": "bbb", "size": 2},
+        {"name": "GHCR-DIGEST.txt", "sha256": "ccc", "size": 3},
+    ]
+    digest = "ghcr.io/jawerka/image-localization-tool@sha256:" + ("a" * 64)
+    passport = _passport(
+        artifact_sha256="aaa",
+        assets=assets,
+        image_digest=digest,
+        checks=[{
+            "id": "P05",
+            "status": "accepted",
+            "command": "docker pull",
+            "result": "pass",
+        }],
+    )
+    release_candidate.validate_passport(
+        passport,
+        source_sha="abc123",
+        version="1.0.1",
+        artifact_sha256="aaa",
+        required_ids=["P05"],
+        assets=assets,
+        image_digest=digest,
+    )
+    changed = [dict(assets[0], sha256="other"), assets[1], assets[2]]
+    with pytest.raises(ValueError, match="SHA256"):
+        release_candidate.validate_passport(
+            passport,
+            source_sha="abc123",
+            version="1.0.1",
+            assets=changed,
+            image_digest=digest,
+            required_ids=["P05"],
+        )
+    with pytest.raises(ValueError, match="Digest"):
+        release_candidate.validate_passport(
+            passport,
+            source_sha="abc123",
+            version="1.0.1",
+            assets=assets,
+            image_digest=digest.replace("a", "b", 1),
+            required_ids=["P05"],
+        )
+
+
+def test_passport_rejects_implemented_blocked():
+    checks = [
+        {
+            "id": check_id,
+            "status": "implemented",
+            "command": "manual",
+            "result": "blocked-no-run",
+        }
+        for check_id in release_candidate.REQUIRED_CHECK_IDS
+    ]
+    blocked = _passport(checks=checks)
+    with pytest.raises(ValueError, match="не принята"):
+        release_candidate.validate_passport(
+            blocked,
+            source_sha="abc123",
+            version="1.0.1",
+            required_ids=list(release_candidate.REQUIRED_CHECK_IDS),
+        )

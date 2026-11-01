@@ -119,7 +119,7 @@ class ScenePainter extends CustomPainter {
         if (meshPoints != null &&
             meshPoints.length == 16 &&
             region?.warp?['kind'] == 'mesh') {
-          _drawMeshPreview(canvas, preview, meshPoints);
+          // Черновой mesh ждёт RGBA-слой текста (hasLocalPreview), а не кроп с фоном.
         } else {
           canvas.drawImageRect(
             preview,
@@ -146,31 +146,6 @@ class ScenePainter extends CustomPainter {
       image.height.toDouble(),
     );
     canvas.drawImageRect(image, rect, rect, _imagePaint);
-  }
-
-  // shortcut: черновой mesh-превью искажает точный crop вместе с фоном.
-  // Заменить на RGBA base-layer: см. расхождение в specs/001-current-state.
-  void _drawMeshPreview(Canvas canvas, ui.Image image, List<Offset> points) {
-    final vertices = ui.Vertices(
-      ui.VertexMode.triangles,
-      points,
-      textureCoordinates: meshTextureCoordinates(image.width, image.height),
-      indices: meshPreviewIndices(),
-    );
-    final shader = ui.ImageShader(
-      image,
-      ui.TileMode.clamp,
-      ui.TileMode.clamp,
-      Matrix4.identity().storage,
-      filterQuality: FilterQuality.medium,
-    );
-    canvas.drawVertices(
-      vertices,
-      BlendMode.srcOver,
-      Paint()
-        ..shader = shader
-        ..filterQuality = FilterQuality.medium,
-    );
   }
 
   /// Надписи, которые по порядку документа лежат выше выбранной.

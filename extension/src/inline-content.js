@@ -202,8 +202,17 @@
     return { left: rect.right - size - gap, top: rect.top + gap };
   }
 
+  function imageRect(node) {
+    const box = node.getBoundingClientRect();
+    const css = getComputedStyle(node);
+    if (typeof model.visibleImageRect === "function") {
+      return model.visibleImageRect(box, node.naturalWidth, node.naturalHeight, css.objectFit, css.objectPosition);
+    }
+    return box;
+  }
+
   function chooseCorner(record) {
-    const rect = record.node.getBoundingClientRect();
+    const rect = imageRect(record.node);
     const blocked = {};
     for (const name of ["tr", "tl", "br", "bl"]) {
       const origin = cornerOrigin(rect, name);

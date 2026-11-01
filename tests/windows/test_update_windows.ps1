@@ -3,7 +3,8 @@
 param(
     [string] $SourceRoot = '',
     [ValidateSet('all', 'update', 'rollback')]
-    [string] $Scenario = 'all'
+    [string] $Scenario = 'all',
+    [switch] $Fixture
 )
 
 $ErrorActionPreference = 'Stop'
@@ -16,23 +17,27 @@ foreach ($path in @($UpdateScript, $RollbackScript, $CommonScript)) {
     if (-not (Test-Path -LiteralPath $path)) { throw "Missing updater file: $path" }
 }
 . $CommonScript
-foreach ($path in @(
-    (Join-Path $SourceRoot 'desktop\ImageLocalizationTool.exe'),
-    (Join-Path $SourceRoot 'sidecar\ImageLocalizationTool.exe'),
-    (Join-Path $SourceRoot 'web\index.html')
-)) {
-    if (-not (Test-Path -LiteralPath $path)) { throw "Packaged source is incomplete: $path" }
+if (-not $Fixture) {
+    foreach ($path in @(
+        (Join-Path $SourceRoot 'desktop\ImageLocalizationTool.exe'),
+        (Join-Path $SourceRoot 'sidecar\ImageLocalizationTool.exe'),
+        (Join-Path $SourceRoot 'web\index.html')
+    )) {
+        if (-not (Test-Path -LiteralPath $path)) { throw "Packaged source is incomplete: $path" }
+    }
 }
 
 $Work = Join-Path ([IO.Path]::GetTempPath()) ('ilt-update-test-' + [guid]::NewGuid().ToString('N'))
+if ($Fixture -and -not $SourceRoot) {
+    $SourceRoot = Join-Path $Work 'fake-source'
+}
 $GoodBundle = Join-Path $Work 'bundle-good'
 $BadBundle = Join-Path $Work 'bundle-bad'
 $InstallRoot = Join-Path $Work 'ImageLocalizationTool'
 $runUpdate = $Scenario -in @('all', 'update')
 $runRollback = $Scenario -in @('all', 'rollback')
 $timer = [Diagnostics.Stopwatch]::StartNew()
-New-Item -ItemType Directory -Path $GoodBundle -Force | Out-Null
-New-Item -ItemType Directory -Path $BadBundle -Force | Out-Null
+New-Item -ItemType Directory -Path $Work, $GoodBundle, $BadBundle -Force | Out-Null
 
 function Copy-TestBundle([string] $Destination, [string] $Version, [switch] $FailHealth) {
     New-Item -ItemType Directory -Path $Destination -Force | Out-Null
@@ -142,6 +147,17 @@ function Assert-DataUnchanged {
 }
 
 try {
+    if ($Fixture) {
+        Copy-TestBundle $SourceRoot '1.0.0' -FailHealth
+        Copy-TestBundle $InstallRoot '1.0.1' -FailHealth
+        $badMetadata = Join-Path $Work 'bundle-malformed'
+        Copy-TestBundle $badMetadata '1.0.5' -FailHealth
+        Set-Content -LiteralPath (Join-Path $badMetadata 'release.json') -Encoding utf8 -Value '{bad json'
+        $code = Invoke-Updater $UpdateScript @('-Bundle', $badMetadata, '-InstallRoot', $InstallRoot, '-HealthTimeoutSec', '5')
+        if ($code -eq 0) { throw 'Malformed metadata unexpectedly passed validation' }
+        Write-Host 'Windows updater fixture checks passed.' -ForegroundColor Green
+        exit 0
+    }
     Copy-TestBundle $GoodBundle '1.0.3'
     Copy-TestBundle $BadBundle '1.0.4' -FailHealth
     Copy-TestBundle $InstallRoot '1.0.1'

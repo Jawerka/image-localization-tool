@@ -20,6 +20,7 @@ from src.app.remote import (
     RemoteQueue,
     RemoteServer,
     _lan_ipv4,
+    _pipeline_fingerprint,
     body_too_large,
     parse_multipart,
     pixel_too_large,
@@ -828,3 +829,47 @@ def test_queue_full_without_http(tmp_path):
         queue.submit(make(b"b"))
     server = RemoteServer(AppSettings(), cache_dir=tmp_path / "solo")
     assert server.queue.max_pending == 8
+
+
+def test_pipeline_fingerprint_tracks_result_fields(tmp_path):
+    base = _pipeline_fingerprint(AppSettings())
+    assert _pipeline_fingerprint(AppSettings(adaptive_text=False)) != base
+    assert _pipeline_fingerprint(AppSettings(discover_missing_text=False)) != base
+    assert _pipeline_fingerprint(AppSettings(layout_long_side=1500)) != base
+    assert _pipeline_fingerprint(AppSettings(theme="dark")) == base
+    assert _pipeline_fingerprint(AppSettings(ui_scale=125)) == base
+    glossary = tmp_path / "terms.txt"
+    glossary.write_text("old\n", encoding="utf-8")
+    with_file = _pipeline_fingerprint(AppSettings(glossary_path=str(glossary)))
+    assert with_file != base
+    glossary.write_text("new\n", encoding="utf-8")
+    assert _pipeline_fingerprint(AppSettings(glossary_path=str(glossary))) != with_file
+    missing = _pipeline_fingerprint(AppSettings(glossary_path=str(tmp_path / "no.txt")))
+    assert missing != with_file
+    assert missing != base
+
+
+def test_cache_miss_when_source_lang_or_settings_change(tmp_path):
+    calls: list[str] = []
+
+    def runner(job):
+        calls.append(job.source_lang)
+        job.finish(_png((0, 255, 0)))
+
+    server = RemoteServer(AppSettings(), cache_dir=tmp_path / "keys", runner=runner)
+    device = make_device("token-cache", name="phone")
+    image = _png((9, 8, 7))
+    first = _wait_remote(server.submit_image(device, image, "en", "ru"))
+    assert first.status == "done"
+    assert first.stage != "cache"
+    ja = _wait_remote(server.submit_image(device, image, "ja", "ru"))
+    assert ja.stage != "cache"
+    hit = server.submit_image(device, image, "en", "ru")
+    assert hit.stage == "cache"
+    server.settings.theme = "dark"
+    themed = server.submit_image(device, image, "en", "ru")
+    assert themed.stage == "cache"
+    server.settings.adaptive_text = False
+    changed = _wait_remote(server.submit_image(device, image, "en", "ru"))
+    assert changed.stage != "cache"
+    assert calls == ["en", "ja", "en"]

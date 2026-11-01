@@ -7,6 +7,8 @@ from pathlib import Path
 
 import yaml
 
+from scripts.pack_notices import NOTICE_FILES, ROOT as REPO_ROOT
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
@@ -54,6 +56,8 @@ docker compose down сохраняет данные. Команда down -v уд
         archive.write(image, image.name)
         archive.writestr("compose.yaml", yaml.safe_dump(compose, allow_unicode=True, sort_keys=False))
         archive.writestr("README.txt", readme)
+        for source_name, target_name in NOTICE_FILES:
+            archive.write(REPO_ROOT / source_name, target_name)
     print(output / name)
     return 0
 

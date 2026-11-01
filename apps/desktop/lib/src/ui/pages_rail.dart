@@ -49,8 +49,9 @@ class _PagesRailState extends State<PagesRail> {
             _Search(workspace: workspace),
             Expanded(child: _PageList(workspace: workspace)),
             _Footer(workspace: workspace),
-          ] else ...[
+          ]           else ...[
             _BatchBlock(workspace: workspace),
+            _QueueFilters(workspace: workspace),
             Expanded(child: _QueueList(workspace: workspace)),
             _Footer(workspace: workspace),
           ],
@@ -65,6 +66,14 @@ class _RailTabs extends StatelessWidget {
 
   final String active;
   final ValueChanged<String> onChanged;
+
+  static const _order = ['pages', 'queue'];
+
+  void _move(int delta) {
+    final index = _order.indexOf(active);
+    final next = (index + delta).clamp(0, _order.length - 1);
+    onChanged(_order[next]);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -99,19 +108,42 @@ class _RailTabs extends StatelessWidget {
       );
     }
 
-    return Container(
-      margin: const EdgeInsets.fromLTRB(8, 6, 8, 2),
-      padding: const EdgeInsets.all(2),
-      decoration: BoxDecoration(
-        color: palette.bgSecondary,
-        borderRadius: BorderRadius.circular(7),
-        border: Border.all(color: palette.line),
-      ),
-      child: Row(
-        children: [
-          tab('pages', 'Страницы', const Key('pages-tab-pages')),
-          tab('queue', 'Очередь', const Key('pages-tab-queue')),
-        ],
+    return Focus(
+      autofocus: false,
+      onKeyEvent: (node, event) {
+        if (event is! KeyDownEvent) return KeyEventResult.ignored;
+        if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+          _move(-1);
+          return KeyEventResult.handled;
+        }
+        if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+          _move(1);
+          return KeyEventResult.handled;
+        }
+        if (event.logicalKey == LogicalKeyboardKey.home) {
+          onChanged(_order.first);
+          return KeyEventResult.handled;
+        }
+        if (event.logicalKey == LogicalKeyboardKey.end) {
+          onChanged(_order.last);
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(8, 6, 8, 2),
+        padding: const EdgeInsets.all(2),
+        decoration: BoxDecoration(
+          color: palette.bgSecondary,
+          borderRadius: BorderRadius.circular(7),
+          border: Border.all(color: palette.line),
+        ),
+        child: Row(
+          children: [
+            tab('pages', 'Страницы', const Key('pages-tab-pages')),
+            tab('queue', 'Очередь', const Key('pages-tab-queue')),
+          ],
+        ),
       ),
     );
   }
@@ -333,6 +365,41 @@ class _BatchBlock extends StatelessWidget {
   }
 }
 
+class _QueueFilters extends StatelessWidget {
+  const _QueueFilters({required this.workspace});
+
+  final WorkspaceState workspace;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget chip(String id, String label) {
+      final selected = workspace.queueFilter == id;
+      return Padding(
+        padding: const EdgeInsets.only(right: 4),
+        child: FilterChip(
+          key: Key('queue-filter-$id'),
+          label: Text(label),
+          selected: selected,
+          onSelected: (_) => workspace.setQueueFilter(selected ? 'all' : id),
+          visualDensity: VisualDensity.compact,
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
+      child: Wrap(
+        children: [
+          chip('error', 'Ошибки'),
+          chip('fit', 'Не влезло'),
+          chip('offline', 'Без LLM'),
+          chip('edit', 'Правки'),
+        ],
+      ),
+    );
+  }
+}
+
 class _QueueList extends StatelessWidget {
   const _QueueList({required this.workspace});
 
@@ -340,10 +407,7 @@ class _QueueList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final rows = [
-      for (final page in workspace.pages)
-        if (page.isQueued || page.isRunning || page.isProblem) page,
-    ];
+    final rows = workspace.queuePages;
     if (rows.isEmpty) {
       return Center(
         child: Text(

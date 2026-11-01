@@ -102,6 +102,12 @@ if ($Prepare) {
 if ($SmokePassed) {
     Checked { & $Python 'scripts\release_candidate.py' approve } 'record manual smoke acknowledgement'
 }
+$passport = Join-Path $RepoRoot "docs\ACCEPTANCE_$version.json"
+if (-not (Test-Path -LiteralPath $passport)) { throw "Missing acceptance passport: $passport" }
+$sourceSha = (& git rev-parse HEAD).Trim()
+Checked {
+    & $Python 'scripts\release_candidate.py' validate-passport --passport $passport --source-sha $sourceSha --version $version --candidate 'build\release-candidate.json' --assets dist
+} 'validate acceptance passport'
 Checked { & $Python 'scripts\release_candidate.py' verify } 'verify same candidate bytes'
 $report = Get-Content 'build\release-candidate.json' -Raw | ConvertFrom-Json
 if ($report.tag -ne $Tag) { throw 'Tag does not match the prepared candidate.' }

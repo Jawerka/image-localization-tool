@@ -21,7 +21,14 @@ from PIL import Image
 
 from src.app.document import PageDocument
 from src.app.glossary import glossary_from_pages, normalize_glossary
-from src.app.ingest import extract_archive, is_archive, is_image, list_images, plan_chapters
+from src.app.ingest import (
+    extract_archive,
+    is_archive,
+    is_image,
+    list_images,
+    plan_chapters,
+    unsupported_source_message,
+)
 
 _IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}
 _ID_RE = re.compile(r"^[0-9a-f]{8}$")
@@ -278,6 +285,8 @@ class ProjectStore:
             planned = plan_chapters(images, mode, root=source)
         elif source.is_file() and is_image(source):
             planned = [(source, "")]
+        elif source.is_file():
+            raise ValueError(unsupported_source_message(source))
         else:
             raise ValueError(f"Не изображение и не архив: {source}")
         items = [
@@ -427,7 +436,7 @@ class ProjectStore:
         if page_id:
             chosen = _check_id(page_id)
             if chosen in taken:
-                chosen = _new_id(taken)
+                raise ValueError(f"Повторный идентификатор страницы: {chosen}")
         else:
             chosen = _new_id(taken)
         taken.add(chosen)
@@ -480,6 +489,12 @@ class ProjectStore:
                 continue
             path = Path(source)
             if not path.is_file():
+                continue
+            try:
+                with Image.open(path) as img:
+                    img.verify()
+            except Exception:
+                warnings.append(f"{page_id}/{kind}: повреждённый файл")
                 continue
             target = page_dir / filename
             try:

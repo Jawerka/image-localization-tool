@@ -13,6 +13,19 @@ handshake (`api.json` / stdout), ходит в локальный HTTP с cookie
 
 ## Команды
 
+Локальный SDK кандидата: **Flutter 3.47.7** stable (как pin ниже). CI берёт канал `stable`. На машине разработчика `flutter` может быть не в PATH; сборка и `scripts/release.ps1` вызывают `%LOCALAPPDATA%\flutter\bin\flutter.bat`.
+
+Диагностика зависания (не снимать чужие lock SDK):
+
+```powershell
+$flutter = "$env:LOCALAPPDATA\flutter\bin\flutter.bat"
+& $flutter --version
+& $flutter analyze
+& $flutter test
+```
+
+Прогон 2026-11-01: analyze без замечаний, 192 теста прошли. Логи: `data/flutter-analyze.log`, `data/flutter-test.log` (каталог data локальный).
+
 ```powershell
 flutter pub get
 flutter analyze
