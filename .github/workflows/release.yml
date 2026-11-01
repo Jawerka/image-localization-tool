@@ -22,6 +22,8 @@ jobs:
     timeout-minutes: 150
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # До checkout нет git-корня: без репозитория `gh` пишет "not a git repository".
+      GH_REPO: ${{ github.repository }}
     steps:
       - name: Guard published tag
         id: gate
@@ -33,7 +35,7 @@ jobs:
             TAG="${GITHUB_REF_NAME}"
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          DRAFT="$(gh release view "$TAG" --json isDraft --jq '.isDraft' 2>/dev/null || true)"
+          DRAFT="$(gh release view "$TAG" --json isDraft --jq '.isDraft' --repo "$GITHUB_REPOSITORY" 2>/dev/null || true)"
           if [ "$DRAFT" = "false" ]; then
             if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
               echo "Published releases are immutable; use a new version."
@@ -146,13 +148,13 @@ jobs:
           set -eux
           TAG="${{ steps.meta.outputs.tag }}"
           VERSION="${{ steps.meta.outputs.version }}"
-          if [ "$(gh release view "$TAG" --json isDraft --jq '.isDraft' 2>/dev/null || true)" = "false" ]; then
+          if [ "$(gh release view "$TAG" --json isDraft --jq '.isDraft' --repo "$GITHUB_REPOSITORY" 2>/dev/null || true)" = "false" ]; then
             echo "Published releases are immutable; use a new version."
             exit 1
           fi
-          gh release view "$TAG" >/dev/null 2>&1 \
-            || gh release create "$TAG" --draft --title "$VERSION" --notes "Linux assets for $TAG"
-          gh release upload "$TAG" \
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --title "$VERSION" --notes "Linux assets for $TAG"
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" \
             dist/ImageLocalizationTool-*-server-linux-x64.tar.gz \
             dist/packs-linux.json \
             dist/SHA256SUMS-linux.txt \
