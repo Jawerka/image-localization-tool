@@ -102,7 +102,7 @@ flowchart LR
 
 ### Windows: готовое приложение
 
-Выпуск 1.0.0 ещё не опубликован, готового ZIP на GitHub нет. Windows поставляется только portable ZIP, без установщика. Когда архив появится, `Source code.zip` по-прежнему будет исходниками, а не приложением.
+Выпуск 1.0.0 — [GitHub Releases](https://github.com/Jawerka/image-localization-tool/releases). Windows поставляется только portable ZIP, без установщика. `Source code.zip` — исходники, а не приложение.
 
 - **Полный CPU-пакет:** `ImageLocalizationTool-1.0.0-windows-x64-portable-cpu-full.zip`. Модели и зависимости уже внутри, начальная загрузка не нужна. OCR, очистка и перевод en↔ru работают офлайн.
 - **Лёгкий пакет:** `ImageLocalizationTool-1.0.0-windows-x64-portable.zip`. При первом запуске выберите языки и нажмите «Подготовить»; для скачивания компонентов нужен интернет.
@@ -117,7 +117,7 @@ flowchart LR
 
 ### Docker: приложение в браузере
 
-Готовый архив `ImageLocalizationTool-1.0.0-docker-cpu-full.zip` ещё не опубликован. Когда он появится, распакуйте его и откройте терминал в полученной папке:
+Распакуйте `ImageLocalizationTool-1.0.0-docker-cpu-full.zip` и откройте терминал в полученной папке:
 
 ```sh
 docker load -i ImageLocalizationTool-1.0.0-linux-amd64-cpu-full.tar.gz
@@ -128,7 +128,7 @@ docker compose up -d --no-build
 
 Данные сохраняются в Docker volume. `docker compose down` останавливает приложение с сохранением данных; **`docker compose down -v` удаляет данные**. Для LAN, другого порта, резервирования и обновления см. [инструкцию Docker](docs/DISTRIBUTIONS.md#docker-браузерный-редактор).
 
-[compose.ghcr.yaml](compose.ghcr.yaml) указывает образ `ghcr.io/jawerka/image-localization-tool:1.0.0-cpu-full`. Наличие этого образа в реестре не проверено. Когда он будет опубликован, скачайте файл в отдельную папку как `compose.yaml`, затем выполните `docker compose pull` и `docker compose up -d`. При обновлении меняйте тег версии и сохраняйте volume.
+[compose.ghcr.yaml](compose.ghcr.yaml) указывает образ `ghcr.io/jawerka/image-localization-tool:1.0.0-cpu-full`. Скачайте файл в отдельную папку как `compose.yaml`, затем выполните `docker compose pull` и `docker compose up -d`. При обновлении меняйте тег версии и сохраняйте volume.
 
 Из корня актуальных исходников можно собрать образ самостоятельно (для сборки нужен интернет):
 

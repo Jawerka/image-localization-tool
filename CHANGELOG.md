@@ -2,7 +2,7 @@
 
 Заметные изменения Image Localization Tool. Формат основан на [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), версии — на [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-Полный текст заметок к версии 1.0.0 — [docs/RELEASE_NOTES_1.0.0.md](docs/RELEASE_NOTES_1.0.0.md). Это первая версия опубликованного дерева. Готового выпуска на GitHub ещё нет.
+Полный текст заметок к версии 1.0.0 — [docs/RELEASE_NOTES_1.0.0.md](docs/RELEASE_NOTES_1.0.0.md). Это первая версия опубликованного дерева.
 
 ## [1.0.0] - 2026-11-01
 

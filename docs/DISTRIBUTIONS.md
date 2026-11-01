@@ -2,7 +2,7 @@
 
 Два канала используют один пайплайн v2: Linux amd64 CPU-контейнер с браузерным редактором и Windows x64 portable CPU с Flutter-окном. Профиль включает детектор, RapidOCR, LaMa, шрифты, Torch CPU, Argos и языковые модели en↔ru. LLM подключается отдельно. CUDA и ARM не входят в этот профиль.
 
-Текущая версия — 1.0.0. Готовые ZIP ещё не опубликованы: их собирает выпуск. Образ `ghcr.io/jawerka/image-localization-tool:1.0.0-cpu-full` в реестре не проверялся.
+Текущая версия — 1.0.0. Готовые ZIP собирает выпуск. Образ — `ghcr.io/jawerka/image-localization-tool:1.0.0-cpu-full`.
 
 ## Windows portable CPU full
 
@@ -39,7 +39,7 @@ venv/Scripts/python scripts/smoke-portable-desktop.py --app build/frozen-smoke-<
 
 ### Из готового образа
 
-Готовый `ImageLocalizationTool-1.0.0-docker-cpu-full.zip` содержит образ `.tar.gz`, Compose без стадии сборки и README. Выпуск 1.0.0 ещё не опубликован. Когда архив будет, распакуйте его и выполняйте команды в этой папке. Исходники и пользовательские данные в пакет не входят.
+Готовый `ImageLocalizationTool-1.0.0-docker-cpu-full.zip` содержит образ `.tar.gz`, Compose без стадии сборки и README. Распакуйте его и выполняйте команды в этой папке. Исходники и пользовательские данные в пакет не входят.
 
 ```sh
 docker load -i ImageLocalizationTool-1.0.0-linux-amd64-cpu-full.tar.gz

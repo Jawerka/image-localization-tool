@@ -1,6 +1,6 @@
 # Image Localization Tool 1.0.0
 
-Первая публичная версия этого дерева. Расширение показывает перевод изображения прямо на странице: без боковой панели и без изменения `src`/`srcset` сайта. В поставку входят полные Windows и Docker-пакеты, Linux-сервер и расширения Chromium/Firefox. Готовые архивы и образ реестра этой версии ещё не опубликованы.
+Первая публичная версия этого дерева. Расширение показывает перевод изображения прямо на странице: без боковой панели и без изменения `src`/`srcset` сайта. В поставку входят полные Windows и Docker-пакеты, Linux-сервер и расширения Chromium/Firefox. Готовые архивы и образ реестра приложены к этому выпуску.
 
 ## Что нового
 
@@ -14,11 +14,11 @@
 
 ## Установка
 
-Готовые файлы появятся в выпуске 1.0.0. Пока их нет, приложение собирается из исходников.
+Готовые файлы — в этом выпуске.
 
 - **Windows, полный CPU-пакет:** `ImageLocalizationTool-1.0.0-windows-x64-portable-cpu-full.zip`. Модели и runtime уже внутри, начальная загрузка не нужна.
 - **Windows, лёгкий пакет:** `ImageLocalizationTool-1.0.0-windows-x64-portable.zip`. Компоненты скачиваются при первом запуске.
-- **Docker:** `ImageLocalizationTool-1.0.0-docker-cpu-full.zip` или образ `ghcr.io/jawerka/image-localization-tool:1.0.0-cpu-full`. Наличие образа в реестре не проверено. Готовый Compose — `compose.ghcr.yaml`.
+- **Docker:** `ImageLocalizationTool-1.0.0-docker-cpu-full.zip` или образ `ghcr.io/jawerka/image-localization-tool:1.0.0-cpu-full`. Готовый Compose — `compose.ghcr.yaml`.
 - **Расширение:** `ilt-extension-chromium-1.0.0.zip`, `ilt-extension-firefox-1.0.0.zip`. После обновления распакованного расширения нажмите «Перезагрузить» и обновите вкладки сайтов.
 
 ## Ограничения
