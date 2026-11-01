@@ -590,6 +590,7 @@ def test_mesh_drag_cancels_on_escape_and_pointercancel(page, desktop):
     page.mouse.up()
     assert point.get_attribute("style") == before
 
+    expect(point).to_be_visible()
     page.evaluate("""() => {
       const frame = document.querySelector('[data-role="frame"]');
       frame.addEventListener('pointerdown', event => { window.__iltMeshPointerId = event.pointerId; }, { once: true });

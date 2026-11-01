@@ -125,12 +125,32 @@
     records.delete(record.node);
     record.revision += 1;
     record.observer?.disconnect();
+    record.addressObserver?.disconnect();
     if (record.node instanceof HTMLImageElement) globalThis.iltNativeSwap?.restore(record.node);
     try { record.button?.hidePopover?.(); } catch (_) {}
     try { record.host.hidePopover?.(); } catch (_) {}
     record.host.remove();
     record.bitmap?.close();
     record.bitmap = null;
+  }
+
+  function absoluteUrl(value) {
+    try { return new URL(value, document.baseURI).href; }
+    catch (_) { return String(value || ""); }
+  }
+
+  // Атрибут src меняется раньше currentSrc. Пока подмена ещё не blob, это новая картинка.
+  function watchAddress(record) {
+    record.addressObserver?.disconnect();
+    if (!(record.node instanceof HTMLImageElement) || typeof MutationObserver !== "function") return;
+    const observer = new MutationObserver(() => {
+      if (records.get(record.node) !== record || record.mode === "swap") return;
+      const next = absoluteUrl(record.node.getAttribute("src") || "");
+      if (!next || next.startsWith("blob:") || next === record.imageUrl) return;
+      remove(record);
+    });
+    observer.observe(record.node, { attributes: true, attributeFilter: ["src", "srcset"] });
+    record.addressObserver = observer;
   }
 
   function liveSource(record) {
@@ -734,6 +754,7 @@
     record.imageUrl = choice.url || "";
     record.pageUrl = location.href.split("#")[0];
     record.source = choice.source || (() => record.imageUrl);
+    watchAddress(record);
     record.permitted = permitted;
     record.phase = "queued";
     const bytes = await readInlineBytes(choice);
