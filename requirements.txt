@@ -3,10 +3,10 @@ argostranslate @ https://raw.githubusercontent.com/Jawerka/image-localization-to
 
 # Image processing / ML
 torch>=2.0.0
-# Геометрия и растеризация масок проверены на OpenCV 4; major 5 меняет результаты.
-# RapidOCR ставит headless-вариант в тот же cv2, поэтому ограничены оба пакета.
-opencv-python>=4.8.0,<5
-opencv-python-headless>=4.8.0,<5
+# По итогам A/B остаёмся на проверенной OpenCV 4.13.
+# RapidOCR ставит headless-вариант в тот же cv2, поэтому закреплены оба пакета.
+opencv-python==4.13.0.92
+opencv-python-headless==4.13.0.92
 Pillow>=10.0.0
 fonttools
 numpy>=1.24.0

@@ -10,7 +10,7 @@ subprocess. Результат кэшируется в ``deep.json`` по sha256
 (portable/server/manifest), чтобы повторный прогон не переигрывался.
 
 Запуск:
-    python scripts/check_release.py --manifest dist/ilt-runtime-manifest-1.0.1.json
+    python scripts/check_release.py --manifest dist/ilt-runtime-manifest-1.0.2.json
     python scripts/check_release.py --manifest … --assets dist --deep
 """
 
