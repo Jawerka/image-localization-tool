@@ -62,7 +62,7 @@
     }
   ],
   "recorded_at": "2026-11-01",
-  "notes": "Published https://github.com/Jawerka/image-localization-tool/releases/tag/v1.0.2 on 240c3e3. CI PR #7. Docker promote 41338356969. cpu-full and 1.0.2-cpu-full are sha256:a4d874bd9bd072dfcb3306cc63401d2b496b5ebaf6d7fbb5237dd260cb1dd1c4. v1.0.1 kept. Local unit flake retried. sound-ref 1/5 OCR misses remain.",
+  "notes": "Published https://github.com/Jawerka/image-localization-tool/releases/tag/v1.0.2 on 240c3e3. CI PR #7. Docker promote 41338356969. cpu-full and 1.0.2-cpu-full are sha256:a4d874bd9bd072dfcb3306cc63401d2b496b5ebaf6d7fbb5237dd260cb1dd1c4. v1.0.1 kept. Tag-push Release Linux 41338356570 built from the tag then refused upload to the public release. H03 clone sidecar rebuild and U08 extension→Docker added after publish without changing 1.0.2 assets. Q06 p95 is n=3 observation. sound-ref 1/5 OCR misses remain.",
   "checks": [
     {
       "id": "T01",
@@ -130,9 +130,9 @@
     {
       "id": "U08",
       "status": "accepted",
-      "command": "Chromium ZIP 1.0.2 unpacked; E2E Windows backend; Docker browser editor upload/translate/export on 1.0.2-cpu-full",
+      "command": "Chromium ZIP 1.0.2 (sha256 e75ecd8f…) unpacked; Playwright pair/health/translate against Docker --headless --remote ghcr 1.0.2-cpu-full a4d874bd on pve-docker.42:18765; plus prior Windows-backend E2E and Docker browser editor",
       "result": "pass",
-      "constraints": "Firefox experimental. Extension live update profile not a store install"
+      "constraints": "Firefox experimental. Extension live update profile not a store install. Docker default ENTRYPOINT is --server; LAN /v1 used --headless --remote override"
     },
     {
       "id": "T02",
@@ -146,7 +146,7 @@
       "status": "accepted",
       "command": "cold EXE start 3.625s; 3 pipeline runs on offline-source from cpu-full ZIP; RAM RSS host+children; data/ size",
       "result": "pass",
-      "constraints": "p50=10.216s p95=34.128s on 3 samples; host RSS 580591616 children 2014908416 data 198171 bytes; Windows 10 x64"
+      "constraints": "n=3 observational p50=10.216s p95=34.128s — not a robust p95; host RSS 580591616 children 2014908416 data 198171 bytes; Windows 10 x64"
     },
     {
       "id": "T05",
@@ -228,9 +228,9 @@
     {
       "id": "H03",
       "status": "accepted",
-      "command": "git clone SHA 240c3e3 to %TEMP%/ilt-102-clean-clone; py -3.10 venv requirements-release; cv2 4.13.0 both wheels; __version__ 1.0.2",
+      "command": "Anonymous clone of tag v1.0.2 = 240c3e3 to %TEMP%/ilt-102-h03-build; py3.10 venv requirements-release both OpenCV 4.13.0.92; catalogs unchanged; PyInstaller sidecar ImageLocalizationTool.exe 7107527 bytes; check_release --anonymous HEAD 166 URLs; Actions 41338356570 Linux sidecar from the same tag",
       "result": "pass",
-      "constraints": "Did not rerun Prepare from clone"
+      "constraints": "Did not rerun Prepare from clone; Linux job after publish did not upload"
     },
     {
       "id": "P06",
