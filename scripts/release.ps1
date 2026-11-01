@@ -41,7 +41,9 @@ if ($Prepare) {
     Checked { & $Python 'scripts\build-runtime-manifest.py' } 'final catalogs before packaging'
     Copy-Item -LiteralPath 'src\app\component_manifest.json' -Destination $components -Force
     Checked { & $Python 'scripts\check_release.py' --manifest $manifest --components $components --anonymous } 'anonymous dependency gate'
-    Checked { & $Python -m pytest -q } 'Python tests'
+    Checked { & $Python -m pytest tests/unit -m "not slow and not ui and not requires_llm and not requires_argos" -q } 'Python unit tests'
+    $env:ILT_REQUIRE_BROWSER = '1'
+    Checked { & $Python -m pytest tests/e2e/test_browser_server.py tests/e2e/test_extension.py -m ui -q --tb=short } 'required browser E2E'
     $flutter = Join-Path $env:LOCALAPPDATA 'flutter\bin\flutter.bat'
     Push-Location 'apps\desktop'
     try {
