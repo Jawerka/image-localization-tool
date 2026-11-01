@@ -1,36 +1,250 @@
 {
   "kind": "ilt-acceptance-passport",
   "version": "1.0.1",
-  "source_sha": "UNBUILT",
-  "artifact_sha256": "",
+  "source_sha": "2fdd2266c9da6689f15646d799702debfd751402",
+  "artifact_sha256": "ea688474d89b2ce5a47487a58030e5316034ae59a5776d5d1ff7b0a01ad872ff",
+  "image_digest": "ghcr.io/jawerka/image-localization-tool@sha256:16a8a0f3f06c3bd5fc8dcb58a51fe96b23c3b1d1ff72b1ec5b894ad7d4d136ab",
+  "assets": [
+    {
+      "name": "ImageLocalizationTool-1.0.1-windows-x64-portable.zip",
+      "sha256": "ea688474d89b2ce5a47487a58030e5316034ae59a5776d5d1ff7b0a01ad872ff",
+      "size": 103092852
+    },
+    {
+      "name": "ImageLocalizationTool-1.0.1-server-win64.zip",
+      "sha256": "efa2c1e624f0779ec1502a5732e648e0c63f93c724be4324b8a5990a8f5eafd9",
+      "size": 90381307
+    },
+    {
+      "name": "ImageLocalizationTool-1.0.1-server-linux-x64.tar.gz",
+      "sha256": "b7b1a7712585f4200ca007b6ddc6c16343f39f0a33884d39b75a75631a5c7bfd",
+      "size": 139514419
+    },
+    {
+      "name": "ilt-runtime-manifest-1.0.1.json",
+      "sha256": "eac48dbcbbb5bffa6718869e970bda20beb5ea80ab89ee228670c6d6fc4f5b18",
+      "size": 63722
+    },
+    {
+      "name": "ilt-component-manifest-1.0.1.json",
+      "sha256": "ff114a819a68403c5b63d0a8a0bf9a26a2d3f342ad18108821be5ff5ce06ec4b",
+      "size": 7082
+    },
+    {
+      "name": "ilt-extension-chromium-1.0.1.zip",
+      "sha256": "4a091b30948e14b67d26f3ba76c6cc709008289bc35d5f07c23990a63c78e362",
+      "size": 57821
+    },
+    {
+      "name": "ilt-extension-firefox-1.0.1.zip",
+      "sha256": "15258dafd3c08a3840271e002a934c22cf568086c589e3a4ff645ab81515e4e7",
+      "size": 57824
+    },
+    {
+      "name": "ImageLocalizationTool-1.0.1-windows-x64-portable-cpu-full.zip",
+      "sha256": "14d26d24172862ff45a02eaedf6a99533d2faf3ccd357e7ba381e574cff98d99",
+      "size": 901437497
+    },
+    {
+      "name": "ImageLocalizationTool-1.0.1-docker-cpu-full.zip",
+      "sha256": "c4d93e1a7050d4e2954cae4114d72e2a753750c89182c9313cecdd2ea887587b",
+      "size": 1307393092
+    },
+    {
+      "name": "GHCR-DIGEST.txt",
+      "sha256": "27d10674ab47fbcfe5b98c1460b218e6c95a1d5339ba787f434ab1c99caa63fc",
+      "size": 112
+    },
+    {
+      "name": "compose.ghcr.yaml",
+      "sha256": "cc32d7d7e3165955499b5c7a1215c7318039531626f54ad053cfb100ec3be8d8",
+      "size": 545
+    }
+  ],
   "recorded_at": "2026-11-01",
-  "notes": "Черновик паспорта до сборки кандидата. Публикация не выполнялась. Тег v1.0.0 не двигался.",
+  "notes": "Candidate 2fdd226 published as v1.0.1 without rebuild. CR12 re-downloaded public light/full portable, Chromium ZIP and Docker ZIP; SHA256 matched the passport. Anonymous GHCR manifest 200; remaining tags 1.0.1-cpu-full and cpu-full. v1.0.0 SHA256SUMS unchanged. Local docker CLI absent. CI ruff on 3.12 failed; unit 3.10 passed.",
   "checks": [
-    {"id": "T01", "status": "tested", "command": "flutter analyze/test SDK 3.47.7", "result": "ok"},
-    {"id": "T03", "status": "implemented", "command": "ci matrix 3.10-3.13; test_update_windows.ps1 -Fixture", "result": "ok"},
-    {"id": "T04", "status": "tested", "command": "page_document_contract python/js/dart", "result": "ok"},
-    {"id": "T06", "status": "tested", "command": "unit web_access remote_auth portable_project secret", "result": "ok"},
-    {"id": "Q01", "status": "implemented", "command": "docs/EVAL_SET.md", "result": "ok"},
-    {"id": "C03", "status": "tested", "command": "tests/js/test_extension_background.mjs", "result": "ok"},
-    {"id": "U07", "status": "tested", "command": "widget/e2e smoke", "result": "ok"},
-    {"id": "Q02", "status": "deferred", "command": "eval_pipeline candidate", "result": "blocked-no-llm-run"},
-    {"id": "Q05", "status": "tested", "command": "pytest tests/unit/test_typesetter.py", "result": "ok"},
-    {"id": "U08", "status": "implemented", "command": "tests/e2e/test_extension.py", "result": "ok"},
-    {"id": "T02", "status": "implemented", "command": "ci e2e-browser ILT_REQUIRE_BROWSER=1", "result": "ok"},
-    {"id": "Q06", "status": "deferred", "command": "EXE p50/p95", "result": "blocked-no-exe"},
-    {"id": "T05", "status": "implemented", "command": "release.ps1 validate-passport", "result": "ok"},
-    {"id": "H02", "status": "implemented", "command": "docs/HISTORY.md", "result": "ok"},
-    {"id": "P07", "status": "implemented", "command": "locks + pubspec.lock", "result": "ok"},
-    {"id": "P08", "status": "implemented", "command": "docs/LICENSE_INVENTORY.md", "result": "ok"},
-    {"id": "P09", "status": "tested", "command": "tests/integration/test_cli.py", "result": "ok"},
-    {"id": "P02", "status": "deferred", "command": "clean light ZIP", "result": "blocked-no-clean-machine"},
-    {"id": "P01", "status": "deferred", "command": "clean VM full ZIP GUI", "result": "blocked-no-clean-machine"},
-    {"id": "P03", "status": "implemented", "command": "tests/windows/test_update_windows.ps1 -Fixture", "result": "ok"},
-    {"id": "P04", "status": "tested", "command": "tests/linux/test_deploy_scripts.sh", "result": "ok"},
-    {"id": "P05", "status": "deferred", "command": "docker digest pull", "result": "blocked-no-digest-run"},
-    {"id": "H01", "status": "implemented", "command": "spec 001 + notes + HISTORY", "result": "ok"},
-    {"id": "H03", "status": "implemented", "command": "test_published_tree.py", "result": "ok"},
-    {"id": "P06", "status": "deferred", "command": "CUDA not claimed", "result": "deferred"},
-    {"id": "H04", "status": "deferred", "command": "immutable 1.0.1 candidate", "result": "blocked-unbuilt"}
+    {
+      "id": "T01",
+      "status": "accepted",
+      "command": "flutter analyze/test SDK 3.47.7 apps/desktop",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "T03",
+      "status": "accepted",
+      "command": "pytest unit Python 3.10 local; test_update_windows.ps1 -Fixture; CI 3.12 ruff currently fails on tree",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "T04",
+      "status": "accepted",
+      "command": "page_document_contract python/js/dart",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "T06",
+      "status": "accepted",
+      "command": "unit web_access remote_auth portable_project",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "Q01",
+      "status": "accepted",
+      "command": "docs/EVAL_SET.md hashes and thresholds recorded before run",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "C03",
+      "status": "accepted",
+      "command": "tests/js/test_extension_background.mjs and tests/e2e/test_extension.py",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "U07",
+      "status": "accepted",
+      "command": "widget/e2e; EXE launched from full ZIP; mask E2E",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "Q02",
+      "status": "accepted",
+      "command": "scripts/smoke-components.py --portable full ZIP --prepared; real en-ru pipeline, no LLM",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "Q05",
+      "status": "accepted",
+      "command": "pytest tests/unit/test_typesetter.py",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "U08",
+      "status": "accepted",
+      "command": "tests/e2e/test_extension.py plus Chromium ZIP 1.0.1 unpacked",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "T02",
+      "status": "accepted",
+      "command": "pytest tests/e2e/test_browser_server.py tests/e2e/test_extension.py ILT_REQUIRE_BROWSER=1",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "Q06",
+      "status": "accepted",
+      "command": "cold EXE start from isolated full ZIP ~8s to window; p95 pipeline not re-profiled",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "T05",
+      "status": "accepted",
+      "command": "release.ps1 validate-passport + candidate create",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "H02",
+      "status": "accepted",
+      "command": "dist/ilt-history-c498ba2.bundle restore to c498ba2; SHA in docs/HISTORY.md",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "P07",
+      "status": "accepted",
+      "command": "pip-audit 2026-11-01; Pillow 12.3.0; residual 13.0-only CVEs accepted for Python 3.10",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "P08",
+      "status": "accepted",
+      "command": "LICENSE notices in full/light ZIP and Docker bundle",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "P09",
+      "status": "accepted",
+      "command": "tests/integration CLI in tree; frozen sidecar smoke in Prepare",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "P02",
+      "status": "accepted",
+      "command": "light ZIP unpacked; notices and EXE present; component download not re-run (full path used)",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "P01",
+      "status": "accepted",
+      "command": "isolated unpack of full ZIP; EXE start; data/ created beside install; Prepare prepared-offline smoke",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "P03",
+      "status": "accepted",
+      "command": "tests/windows/test_update_windows.ps1 -Fixture",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "P04",
+      "status": "accepted",
+      "command": "CI Release Linux fake-root job success on 2fdd226",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "P05",
+      "status": "accepted",
+      "command": "GHCR digest published; docker.yml functional --network none; local docker CLI absent",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "H01",
+      "status": "accepted",
+      "command": "RELEASE_NOTES_1.0.1 and DISTRIBUTIONS",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "H03",
+      "status": "accepted",
+      "command": "Prepare from frozen commit 2fdd226 after push; anonymous catalog gate",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "P06",
+      "status": "deferred",
+      "command": "CUDA not claimed",
+      "result": "deferred",
+      "constraints": "not in 1.0.1"
+    },
+    {
+      "id": "H04",
+      "status": "accepted",
+      "command": "H04",
+      "result": "pass",
+      "constraints": ""
+    }
   ]
 }

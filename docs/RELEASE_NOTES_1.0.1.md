@@ -14,7 +14,7 @@
 
 Windows x64 portable CPU full и light, Linux amd64 Docker CPU full, Chromium ZIP, серверные архивы Windows/Linux, CLI. Firefox ZIP экспериментален и входит в gate. CUDA, ARM, магазин расширений и новые возможности roadmap не входят.
 
-После публикации в GHCR остаётся только принятый образ `1.0.1-cpu-full` (и стабильный тег `cpu-full` на том же digest). Образ `1.0.0-cpu-full` из реестра снимается; офлайн ZIP 1.0.0 остаётся на релизе `v1.0.0`.
+После публикации в GHCR остаётся только принятый образ `1.0.1-cpu-full` (и стабильный тег `cpu-full` на том же digest `sha256:16a8a0f3f06c3bd5fc8dcb58a51fe96b23c3b1d1ff72b1ec5b894ad7d4d136ab`). Образ `1.0.0-cpu-full` из реестра снят; офлайн ZIP 1.0.0 остаётся на релизе `v1.0.0`.
 
 ## Отсрочки 1.0.1
 
