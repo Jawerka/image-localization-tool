@@ -1,38 +1,250 @@
 {
   "kind": "ilt-acceptance-passport",
   "version": "1.0.2",
-  "source_sha": "",
-  "artifact_sha256": "",
-  "image_digest": "",
-  "assets": [],
-  "recorded_at": "",
-  "notes": "Шаблон до сборки кандидата 1.0.2. SHA, digest, контрольные суммы и принятые статусы 1.0.1 не перенесены.",
+  "source_sha": "240c3e31990eb082c7567f7919a0da9304b344cf",
+  "artifact_sha256": "19aaa1f1d919d15ed3fc643af4eb93db49ab31682f7b8d763847956874fdd894",
+  "image_digest": "ghcr.io/jawerka/image-localization-tool@sha256:a4d874bd9bd072dfcb3306cc63401d2b496b5ebaf6d7fbb5237dd260cb1dd1c4",
+  "assets": [
+    {
+      "name": "ImageLocalizationTool-1.0.2-windows-x64-portable.zip",
+      "sha256": "29a015dae396ff2fcc2137b8e34ba3a4f1b3cfb2b59ec493367fb7e32257f892",
+      "size": 102957226
+    },
+    {
+      "name": "ImageLocalizationTool-1.0.2-server-win64.zip",
+      "sha256": "262d99969aec56a9fdaf2b13b90c09decff4180fe849b95ebca203a9d745fba6",
+      "size": 90245678
+    },
+    {
+      "name": "ImageLocalizationTool-1.0.2-server-linux-x64.tar.gz",
+      "sha256": "7ffb24758275d59c2b27b41856078f23116eeb9b1df804181a6895a1340d3b69",
+      "size": 139517233
+    },
+    {
+      "name": "ilt-runtime-manifest-1.0.2.json",
+      "sha256": "f1c11c3642e9f8ef042ca0b6691338984380710a5fa2177d2e03a7d944411724",
+      "size": 63722
+    },
+    {
+      "name": "ilt-component-manifest-1.0.2.json",
+      "sha256": "ff114a819a68403c5b63d0a8a0bf9a26a2d3f342ad18108821be5ff5ce06ec4b",
+      "size": 7082
+    },
+    {
+      "name": "ilt-extension-chromium-1.0.2.zip",
+      "sha256": "e75ecd8f940c9709c0513a4ad3e9947f5f329eced9550fd1476e2a7ab2e784fe",
+      "size": 57821
+    },
+    {
+      "name": "ilt-extension-firefox-1.0.2.zip",
+      "sha256": "b2124089a49a8ca9fe348b10b584ef26c946eb739584109dbf5aa6fe935aed1e",
+      "size": 57824
+    },
+    {
+      "name": "ImageLocalizationTool-1.0.2-windows-x64-portable-cpu-full.zip",
+      "sha256": "19aaa1f1d919d15ed3fc643af4eb93db49ab31682f7b8d763847956874fdd894",
+      "size": 901287635
+    },
+    {
+      "name": "ImageLocalizationTool-1.0.2-docker-cpu-full.zip",
+      "sha256": "2cc2382198ae231033ec7ac230faee78013938664bfdac84796adb464285c7e0",
+      "size": 1340390333
+    },
+    {
+      "name": "GHCR-DIGEST.txt",
+      "sha256": "d1106ce0963f7307f828d03c3f955fc887f06c0a1731d4ab7eb0646bad4cb416",
+      "size": 112
+    },
+    {
+      "name": "compose.ghcr.yaml",
+      "sha256": "e2b4343352c1d0f4820e5b5f616438ba2b3d6b634b0ede37392fe4265741726b",
+      "size": 545
+    }
+  ],
+  "recorded_at": "2026-11-01",
+  "notes": "Published https://github.com/Jawerka/image-localization-tool/releases/tag/v1.0.2 on 240c3e3. CI PR #7. Docker promote 41338356969. cpu-full and 1.0.2-cpu-full are sha256:a4d874bd9bd072dfcb3306cc63401d2b496b5ebaf6d7fbb5237dd260cb1dd1c4. v1.0.1 kept. Local unit flake retried. sound-ref 1/5 OCR misses remain.",
   "checks": [
-    {"id": "T01", "status": "open", "command": "", "result": "incomplete", "constraints": "ожидает доказательства кандидата 1.0.2"},
-    {"id": "T03", "status": "open", "command": "", "result": "incomplete", "constraints": "ожидает доказательства кандидата 1.0.2"},
-    {"id": "T04", "status": "open", "command": "", "result": "incomplete", "constraints": "ожидает доказательства кандидата 1.0.2"},
-    {"id": "T06", "status": "open", "command": "", "result": "incomplete", "constraints": "ожидает доказательства кандидата 1.0.2"},
-    {"id": "Q01", "status": "open", "command": "", "result": "incomplete", "constraints": "ожидает доказательства кандидата 1.0.2"},
-    {"id": "C03", "status": "open", "command": "", "result": "incomplete", "constraints": "ожидает доказательства кандидата 1.0.2"},
-    {"id": "U07", "status": "open", "command": "", "result": "incomplete", "constraints": "ожидает доказательства кандидата 1.0.2"},
-    {"id": "Q02", "status": "open", "command": "", "result": "incomplete", "constraints": "ожидает доказательства кандидата 1.0.2"},
-    {"id": "Q05", "status": "open", "command": "", "result": "incomplete", "constraints": "ожидает доказательства кандидата 1.0.2"},
-    {"id": "U08", "status": "open", "command": "", "result": "incomplete", "constraints": "ожидает доказательства кандидата 1.0.2"},
-    {"id": "T02", "status": "open", "command": "", "result": "incomplete", "constraints": "ожидает доказательства кандидата 1.0.2"},
-    {"id": "Q06", "status": "open", "command": "", "result": "incomplete", "constraints": "ожидает доказательства кандидата 1.0.2"},
-    {"id": "T05", "status": "open", "command": "", "result": "incomplete", "constraints": "ожидает доказательства кандидата 1.0.2"},
-    {"id": "H02", "status": "open", "command": "", "result": "incomplete", "constraints": "ожидает доказательства кандидата 1.0.2"},
-    {"id": "P07", "status": "open", "command": "", "result": "incomplete", "constraints": "ожидает доказательства кандидата 1.0.2"},
-    {"id": "P08", "status": "open", "command": "", "result": "incomplete", "constraints": "ожидает доказательства кандидата 1.0.2"},
-    {"id": "P09", "status": "open", "command": "", "result": "incomplete", "constraints": "ожидает доказательства кандидата 1.0.2"},
-    {"id": "P02", "status": "open", "command": "", "result": "incomplete", "constraints": "ожидает доказательства кандидата 1.0.2"},
-    {"id": "P01", "status": "open", "command": "", "result": "incomplete", "constraints": "ожидает доказательства кандидата 1.0.2"},
-    {"id": "P03", "status": "open", "command": "", "result": "incomplete", "constraints": "ожидает доказательства кандидата 1.0.2"},
-    {"id": "P04", "status": "open", "command": "", "result": "incomplete", "constraints": "ожидает доказательства кандидата 1.0.2"},
-    {"id": "P05", "status": "open", "command": "", "result": "incomplete", "constraints": "ожидает доказательства кандидата 1.0.2"},
-    {"id": "H01", "status": "open", "command": "", "result": "incomplete", "constraints": "ожидает доказательства кандидата 1.0.2"},
-    {"id": "H03", "status": "open", "command": "", "result": "incomplete", "constraints": "ожидает доказательства кандидата 1.0.2"},
-    {"id": "P06", "status": "deferred", "command": "CUDA not claimed", "result": "deferred", "constraints": "not in 1.0.2"},
-    {"id": "H04", "status": "open", "command": "", "result": "incomplete", "constraints": "ожидает доказательства кандидата 1.0.2"}
+    {
+      "id": "T01",
+      "status": "accepted",
+      "command": "flutter analyze/test SDK 3.47.7 apps/desktop on PR #7 and Prepare",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "T03",
+      "status": "accepted",
+      "command": "CI unit Python 3.10-3.13 PR #7 run 41321978019; frozen sidecar functional-distribution and desktop smoke on cpu-full ZIP",
+      "result": "pass",
+      "constraints": "One local flake: test_export_download_and_saved_status PermissionError on temp json, passed on retry"
+    },
+    {
+      "id": "T04",
+      "status": "accepted",
+      "command": "page_document_contract python/js/dart in CI and local unit",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "T06",
+      "status": "accepted",
+      "command": "unit web_access remote_auth portable_project in CI 904 passed",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "Q01",
+      "status": "accepted",
+      "command": "docs/EVAL_SET.md plus local 20-pair eval output/release-1.0.2",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "C03",
+      "status": "accepted",
+      "command": "tests/js + tests/e2e/test_extension.py CI and local ILT_REQUIRE_BROWSER=1",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "U07",
+      "status": "accepted",
+      "command": "widget/e2e; EXE from full ZIP via smoke-portable-desktop.py",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "Q02",
+      "status": "accepted",
+      "command": "offline Argos en-ru in prepared ZIP; LLM VLM ocr+translate qwen36-27b-mtp-q6k-2x5060ti via tunnel 18989; mask eval 20 pairs",
+      "result": "pass",
+      "constraints": "Argos missing in source venv eval (warnings); LLM path used LAN llama-server. sound-ref 1/5 OCR misses remain limitations"
+    },
+    {
+      "id": "Q05",
+      "status": "accepted",
+      "command": "pytest tests/unit/test_typesetter.py in unit suite",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "U08",
+      "status": "accepted",
+      "command": "Chromium ZIP 1.0.2 unpacked; E2E Windows backend; Docker browser editor upload/translate/export on 1.0.2-cpu-full",
+      "result": "pass",
+      "constraints": "Firefox experimental. Extension live update profile not a store install"
+    },
+    {
+      "id": "T02",
+      "status": "accepted",
+      "command": "pytest browser/extension E2E ILT_REQUIRE_BROWSER=1 local and CI",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "Q06",
+      "status": "accepted",
+      "command": "cold EXE start 3.625s; 3 pipeline runs on offline-source from cpu-full ZIP; RAM RSS host+children; data/ size",
+      "result": "pass",
+      "constraints": "p50=10.216s p95=34.128s on 3 samples; host RSS 580591616 children 2014908416 data 198171 bytes; Windows 10 x64"
+    },
+    {
+      "id": "T05",
+      "status": "accepted",
+      "command": "release.ps1 validate-passport on this file",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "H02",
+      "status": "accepted",
+      "command": "ilt-history-c498ba2.bundle remains on v1.0.1; not required in 1.0.2 patch kit",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "P07",
+      "status": "accepted",
+      "command": "opencv-python and opencv-python-headless 4.13.0.92 in requirements-base, container lock, clean clone venv, Docker image",
+      "result": "pass",
+      "constraints": "venv-release had headless 5.0.0.93 before reinstall from pin"
+    },
+    {
+      "id": "P08",
+      "status": "accepted",
+      "command": "LICENSE LICENSE_INVENTORY THIRD_PARTY_NOTICES FONTS ARGOS_WHEEL in cpu-full ZIP",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "P09",
+      "status": "accepted",
+      "command": "CLI integration tests; frozen sidecar smoke in Prepare",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "P02",
+      "status": "accepted",
+      "command": "Prepare smoke-components light ZIP deploy+offline; isolated light ZIP --deploy cpu with ILT_RUNTIME_MANIFEST_URL=http://127.0.0.1:1 failed with clear catalog error",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "P01",
+      "status": "accepted",
+      "command": "isolated cpu-full ZIP; smoke-portable-desktop translate+export; package save/close/load .ilt.zip; CPU sidecar processing",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "P03",
+      "status": "accepted",
+      "command": "staged update-windows.ps1 1.0.1 light -> 1.0.2 light; data/p03-marker.txt kept; previous folder saved",
+      "result": "pass",
+      "constraints": "Full ZIP uses new-folder+data copy contract; light updater not applied to full"
+    },
+    {
+      "id": "P04",
+      "status": "accepted",
+      "command": "Linux fake-root job in release.yml on SHA 240c3e3 during Prepare",
+      "result": "pass",
+      "constraints": "CT113 ilt.service not used as destructive stand"
+    },
+    {
+      "id": "P05",
+      "status": "accepted",
+      "command": "pve-docker.42 compose ilt-accept-102: 1.0.1 then 1.0.2-cpu-full digest a4d874bd..., volume marker keep-1.0.1 after upgrade and restart, healthz, browser upload/translate/export ZIP; compose down without -v",
+      "result": "pass",
+      "constraints": "No Docker Desktop on builder; LAN docker host used. Production sillytavern/portainer/ilt-test-054 untouched"
+    },
+    {
+      "id": "H01",
+      "status": "accepted",
+      "command": "RELEASE_NOTES_1.0.2 CHANGELOG DISTRIBUTIONS examples",
+      "result": "pass",
+      "constraints": "Published-line 1.0.2 in DISTRIBUTIONS after publish PR"
+    },
+    {
+      "id": "H03",
+      "status": "accepted",
+      "command": "git clone SHA 240c3e3 to %TEMP%/ilt-102-clean-clone; py -3.10 venv requirements-release; cv2 4.13.0 both wheels; __version__ 1.0.2",
+      "result": "pass",
+      "constraints": "Did not rerun Prepare from clone"
+    },
+    {
+      "id": "P06",
+      "status": "deferred",
+      "command": "CUDA not claimed",
+      "result": "deferred",
+      "constraints": "not in 1.0.2"
+    },
+    {
+      "id": "H04",
+      "status": "accepted",
+      "command": "Prepare candidate 240c3e3; passport matches assets and digest; Publish without rebuild",
+      "result": "pass",
+      "constraints": ""
+    }
   ]
 }
