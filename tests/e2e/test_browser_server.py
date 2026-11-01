@@ -31,9 +31,8 @@ def test_browser_login_upload_edit_download(tmp_path):
             browser = playwright.chromium.launch(headless=True)
             page = browser.new_page(viewport={"width": 1440, "height": 1000}, accept_downloads=True)
             page.on("pageerror", lambda error: errors.append(str(error)))
-            with page.expect_response("**/api/bootstrap") as boot:
-                page.goto(f"http://127.0.0.1:{port}")
-            assert boot.value.ok
+            page.goto(f"http://127.0.0.1:{port}", wait_until="domcontentloaded")
+            expect(page.locator("[data-role='empty'] [data-role='open-files']")).to_be_visible(timeout=30000)
             expect(page.locator("[data-role='screen-error']")).to_be_hidden()
             with page.expect_file_chooser() as chooser:
                 page.locator("[data-role='empty'] [data-role='open-files']").click()
