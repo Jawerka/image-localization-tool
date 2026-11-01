@@ -511,14 +511,16 @@ async function resolveDeferredOrAbort() {
 
 async function openFiles() {
   closeMenus();
+  // Выбор файла должен начаться в том же щелчке: await гасит user activation.
+  const picked = browserFiles() ? chooseFiles() : null;
   if (!(await resolveDeferredOrAbort())) return;
   if (!(await confirmDiscardDirtyPackage(
     "Открыть файлы?",
     "Есть несохранённые изменения. Открытие может заменить текущий проект (например, .ilt.zip). Продолжить без сохранения?",
   ))) return;
   try {
-      const data = browserFiles()
-        ? await uploadFiles(await chooseFiles(), takeProject)
+      const data = picked
+        ? await uploadFiles(await picked, takeProject)
         : await dialogFiles();
     takeProject(data);
   } catch (error) {
@@ -528,14 +530,15 @@ async function openFiles() {
 
 async function openFolder() {
   closeMenus();
+  const picked = browserFiles() ? chooseFiles({ folder: true }) : null;
   if (!(await resolveDeferredOrAbort())) return;
   if (!(await confirmDiscardDirtyPackage(
     "Открыть папку?",
     "Есть несохранённые изменения. Открытие может заменить текущий проект. Продолжить без сохранения?",
   ))) return;
   try {
-      const data = browserFiles()
-        ? await uploadFiles(await chooseFiles({ folder: true }), takeProject)
+      const data = picked
+        ? await uploadFiles(await picked, takeProject)
         : await dialogFolder();
     takeProject(data);
   } catch (error) {
@@ -561,14 +564,15 @@ function takeProject(data) {
 
 async function loadProject() {
   closeMenus();
+  const picked = browserFiles() ? chooseFiles({ project: true }) : null;
   if (!(await resolveDeferredOrAbort())) return;
   if (!(await confirmDiscardDirtyPackage(
     "Загрузить проект?",
     "Есть несохранённые изменения. Загрузка заменит текущий проект. Продолжить без сохранения?",
   ))) return;
   try {
-      const data = browserFiles()
-        ? await uploadFiles(await chooseFiles({ project: true }), takeProject)
+      const data = picked
+        ? await uploadFiles(await picked, takeProject)
         : await dialogOpenPackage();
     takeProject(data);
   } catch (error) {

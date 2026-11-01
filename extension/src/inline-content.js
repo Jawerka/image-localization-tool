@@ -481,6 +481,12 @@
     const revision = ++record.revision;
     connectPort();
     show(record, "queued", "В очереди");
+    // Смена src или адреса страницы во время очереди не должна оставлять чужой результат.
+    const abandon = () => {
+      if (alive(record, revision)) return false;
+      if (records.get(record.node) === record && record.revision === revision) remove(record);
+      return true;
+    };
     try {
       const request = {
         type: "translate-url",
@@ -499,21 +505,24 @@
           throw error;
         }
         if (payload.status === "done") {
-          if (!alive(record, revision)) return;
+          if (abandon()) return;
           await finishResult(record, bytesFrom(payload));
           if (payload.stage === "cache") show(record, "done", "Из кэша");
           return;
         }
         applyPayload(record, payload);
         const next = await waitUpdate(record, revision);
-        if (!alive(record, revision)) return;
+        if (abandon()) return;
         payload = next || await send({ type: "get-status", imageUrl: record.imageUrl, pageUrl: record.pageUrl });
       }
+      abandon();
     } catch (error) {
-      if (!alive(record, revision)) return;
+      if (abandon()) return;
       record.errorCode = error.code || "";
       show(record, "error", error.message || "Ошибка перевода");
       record.note.textContent = [error.message, record.errorCode].filter(Boolean).join(" · ");
+      record.detail.hidden = false;
+      place(record);
       log("translate-error", error.message || "ошибка", { code: record.errorCode });
     }
   }

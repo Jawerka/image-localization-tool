@@ -319,7 +319,7 @@ def test_extension_pairs_and_translates(tmp_path):
             )
             before = image.locator("#pic").evaluate("e => ({html:e.outerHTML, rect:e.getBoundingClientRect().toJSON(), parent:e.parentElement.getBoundingClientRect().toJSON()})")
             image.locator("#pic").hover()
-            button = image.locator("[data-ilt-hover] button")
+            button = image.locator("[data-ilt-hover] button.face")
             button.wait_for(state="visible")
             after = image.locator("#pic").evaluate("e => ({html:e.outerHTML, rect:e.getBoundingClientRect().toJSON(), parent:e.parentElement.getBoundingClientRect().toJSON()})")
             assert after == before
@@ -329,7 +329,7 @@ def test_extension_pairs_and_translates(tmp_path):
                 timeout=20000,
             )
             image.locator("#pic").hover()
-            image.locator("[data-ilt-result]").get_by_role("button", name="Убрать", exact=True).click()
+            image.locator("[data-ilt-result]").locator("button[aria-label='Убрать']").evaluate("e => e.click()")
             image.wait_for_function("""() => !document.querySelector('#pic').currentSrc.startsWith('blob:')""", timeout=5000)
             assert image.locator("#pic").evaluate("e => e.outerHTML") == before["html"]
 

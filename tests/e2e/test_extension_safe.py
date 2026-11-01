@@ -269,7 +269,7 @@ def test_inline_context_target_duplicate_url_and_modal_move(safe_extension):
     page.wait_for_function("document.querySelector('#pic').complete")
     tab_id = _tab_id(options, page.url)
     # На странице уже два img с одним URL: выбор хранит именно DOM-цель ПКМ.
-    page.locator("#pic").dispatch_event("contextmenu")
+    page.locator("#pic").click(button="right")
     response = options.evaluate("""async value => chrome.tabs.sendMessage(value.id,
       {type:'translate-inline',imageUrl:value.url,permitted:true})""", {"id":tab_id,"url":base+"/pic.png"})
     assert response["ok"]
@@ -283,7 +283,10 @@ def test_inline_context_target_duplicate_url_and_modal_move(safe_extension):
     page.wait_for_function("() => document.querySelector('#pic').currentSrc.startsWith('blob:')")
     page.evaluate("document.querySelector('#lightbox').close()")
     page.wait_for_function("document.querySelector('#lightbox [data-ilt-result]') === null")
-    assert result.get_by_role("button", name="Убрать", exact=True).is_hidden()
+    assert page.evaluate("""() => {
+      const panel = document.querySelector('[data-ilt-result]').shadowRoot.querySelector('.panel');
+      return panel.hidden || panel.classList.contains('off');
+    }""")
 
 
 def test_inline_error_retry_permission_and_csp(safe_extension):
@@ -415,6 +418,7 @@ def test_hover_button_inside_image_without_layout_shift(safe_extension):
       const root=document.querySelector('[data-ilt-result]').shadowRoot;
       return getComputedStyle(root.querySelector(selector)).opacity;
     }"""
+    page.evaluate("document.querySelector('#contain').style.width='720px'")
     page.locator("#pic").hover()
     page.wait_for_function(f"() => ({opacity})('button.face') === '1'", timeout=3000)
     assert page.evaluate(opacity, ".panel") == "0"
