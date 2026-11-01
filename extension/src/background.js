@@ -1248,8 +1248,7 @@ async function saveTranslation(info, tab) {
 function onContextMenuClick(info, tab) {
   if (!info) return;
   if (info.menuItemId === SAVE_ID) {
-    void saveTranslation(info, tab);
-    return;
+    return saveTranslation(info, tab);
   }
   if (info.menuItemId !== MENU_ID) return;
   if (!info.srcUrl || tab?.id == null) return;

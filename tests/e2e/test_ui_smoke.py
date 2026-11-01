@@ -786,7 +786,10 @@ def test_web_retry_after_terminal_bake_error_requests_rebake_once(page):
 def test_mask_draft_then_done_commits(page):
     """Кисть сразу рисует локальную маску; «Готово» снимает deferApply и сохраняет документ."""
     _open_and_translate(page)
-    page.locator("[data-role='layer-mask']").click()
+    mask_layer = page.locator("[data-role='layer-mask']")
+    if mask_layer.get_attribute("aria-pressed") != "true":
+        mask_layer.click()
+    expect(mask_layer).to_have_attribute("aria-pressed", "true")
     page.locator("[data-role='tool-brush']").click()
     expect(page.locator("[data-role='tool-brush']")).to_have_attribute("aria-checked", "true")
 

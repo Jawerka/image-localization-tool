@@ -550,11 +550,6 @@ def test_inline_pushstate_keeps_translation(safe_extension):
 
 def test_inline_save_translation_download(safe_extension):
     context, options, base, _ = safe_extension
-    worker = context.service_workers[0]
-    worker.evaluate("""() => {
-      globalThis.__iltDownloads = [];
-      chrome.downloads.download = async options => { globalThis.__iltDownloads.push(options); return 1; };
-    }""")
     page = context.new_page()
     page.goto(base + "/page.html")
     page.wait_for_function("document.querySelector('#pic').complete")
@@ -562,11 +557,17 @@ def test_inline_save_translation_download(safe_extension):
     _start_select(options, tab_id)
     page.locator("#pic").click()
     _wait_done(page)
-    worker.evaluate("""async args => {
+    worker = context.service_workers[0]
+    downloads = worker.evaluate("""async args => {
+      globalThis.__iltDownloads = [];
+      chrome.downloads.download = async options => { globalThis.__iltDownloads.push(options); return 1; };
       const tabs = await chrome.tabs.query({});
       const tab = tabs.find(item => item.id === args.tabId) || tabs.at(-1);
       await iltOnContextMenuClick({menuItemId:'ilt-save-translation', srcUrl: args.src, frameId: 0}, tab);
+      for (let i = 0; i < 40 && !globalThis.__iltDownloads.length; i += 1) {
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      return globalThis.__iltDownloads;
     }""", {"tabId": tab_id, "src": base + "/pic.png"})
-    downloads = worker.evaluate("() => globalThis.__iltDownloads")
     assert downloads and downloads[0]["filename"].endswith(".ru.png")
     assert downloads[0]["saveAs"] is True
