@@ -6,8 +6,93 @@ from PIL import Image, ImageDraw
 
 from src.config import Config
 from src.components.bubble_detector import Detection
-from src.models import TextRegion
+from src.models import TextRegion, MaskStroke
 from src.page_pipeline import PagePipeline
+
+
+def test_cleanup_reconstructs_transparent_panel_and_keeps_manual_exclusion():
+    import cv2
+    import numpy as np
+
+    class RecordingInpainter:
+        def __init__(self):
+            self.calls = []
+            self.last_warnings = []
+
+        def inpaint(self, image, mask, allow_flat_fill=True):
+            self.calls.append(allow_flat_fill)
+            return image.copy()
+
+    rgb = np.full((120, 240, 3), 255, np.uint8)
+    rgb[:] = np.linspace(205, 255, 240, dtype=np.uint8)[None, :, None]
+    cv2.putText(rgb, 'HELLO', (35, 75), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2)
+    region = TextRegion(1, (25, 40, 150, 45), text='HELLO', translation='ПРИВЕТ', bubble_bbox=(10, 10, 210, 100))
+    painter = RecordingInpainter()
+    pipeline = PagePipeline(Config(layout_long_side=0), inpainter=painter)
+    mask, _ = pipeline.clean(Image.fromarray(rgb), [region], strokes=[MaskStroke(mode='erase', points=[(55, 65)], radius=6)])
+    assert painter.calls and False in painter.calls
+    assert mask[65, 55] == 0
+
+
+def test_skipped_light_text_never_reaches_inpainter():
+    import cv2
+    import numpy as np
+
+    rgb = np.full((120, 240, 3), 35, np.uint8)
+    cv2.putText(rgb, 'HELLO', (35, 75), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+    region = TextRegion(1, (25, 40, 150, 45), text='HELLO', translation='ПРИВЕТ', skip=True)
+    class NoInpainter:
+        def inpaint(self, *args, **kwargs):
+            raise AssertionError('Пропущенный регион не должен очищаться')
+
+    mask, cleaned = PagePipeline(Config(layout_long_side=0), inpainter=NoInpainter()).clean(Image.fromarray(rgb), [region])
+    assert not np.any(mask)
+    assert np.array_equal(np.asarray(cleaned), rgb)
+
+
+def test_current_ocr_roles_reach_retouch_without_experimental_flags():
+    """Настоящая классификация OCR ведёт светлый текст и звук в общую очистку."""
+    import cv2
+    import numpy as np
+    from src.components.rapid_ocr import OcrWord, RapidOcr
+
+    rgb = np.full((120, 500, 3), 35, np.uint8)
+    cv2.putText(rgb, 'HELLO', (20, 75), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+    cv2.putText(rgb, 'BANG', (280, 75), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 7)
+    cv2.putText(rgb, 'BANG', (280, 75), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2)
+
+    class Detector:
+        def detect(self, image):
+            return [Detection((10, 35, 170, 50), 2, 'text_free', .99),
+                    Detection((270, 35, 110, 50), 2, 'text_free', .99)]
+
+    class RecordingInpainter:
+        last_warnings = []
+
+        def __init__(self):
+            self.calls = []
+
+        def inpaint(self, image, mask, allow_flat_fill=True):
+            self.calls.append(allow_flat_fill)
+            return image.copy()
+
+    ocr = RapidOcr()
+    ocr._words = lambda image: [OcrWord('YOUR LUNCH SWEETHEART.', (20, 45, 130, 30), .99),
+                               OcrWord('BANG', (280, 45, 90, 30), .99)]
+    painter = RecordingInpainter()
+    pipeline = PagePipeline(Config(layout_long_side=0), detector=Detector(), ocr=ocr,
+                            translator=FakeTranslator(), inpainter=painter)
+    image = Image.fromarray(rgb)
+    analyzed = pipeline.analyze(image, 'synthetic.png', 'en', 'ru')
+    assert [r.block_type for r in analyzed.regions] == ['narration', 'sfx']
+    mask, cleaned = pipeline.clean(image, analyzed.regions)
+    white = np.min(rgb, axis=2) > 210
+    assert np.mean(mask[white] > 0) > .98
+    assert np.any(mask[:, :200]) and np.any(mask[:, 250:])
+    assert not np.any(mask[:, 200:250])
+    assert painter.calls and False in painter.calls
+    assert cleaned.size == image.size
+    assert 'typeset' not in analyzed.stages_completed
 
 
 class FakeDetector:

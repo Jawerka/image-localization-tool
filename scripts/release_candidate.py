@@ -19,8 +19,9 @@ if str(ROOT) not in sys.path:
 from scripts.smoke_dist import read_app_version
 from src.app.downloads import atomic_json, digest
 
+# open — критерий не выполнен; такой пункт публикацию не пропускает.
 CHECK_STATUSES = frozenset({
-    "implemented", "tested", "accepted", "superseded", "deferred",
+    "implemented", "tested", "accepted", "superseded", "deferred", "open",
 })
 REQUIRED_PASS_STATUSES = frozenset({"tested", "accepted"})
 REQUIRED_PASS_RESULTS = frozenset({"ok", "pass", "passed", "accepted"})

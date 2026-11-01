@@ -62,7 +62,7 @@
     }
   ],
   "recorded_at": "2026-11-01",
-  "notes": "Candidate 2fdd226 published as v1.0.1 without rebuild. CR12 re-downloaded public light/full portable, Chromium ZIP and Docker ZIP; SHA256 matched the passport. Anonymous GHCR manifest 200; remaining tags 1.0.1-cpu-full and cpu-full. v1.0.0 SHA256SUMS unchanged. Local docker CLI absent. CI ruff on 3.12 failed; unit 3.10 passed.",
+  "notes": "1.0.1 опубликован с 2fdd226. SHA256 паспорта совпадают с ассетами GitHub. Обязательная приёмка частичная. CI 41294266264: шесть падений масок на Python 3.10/3.11/3.13; 3.12 останавливается на Ruff. Тег 1.0.0-cpu-full отвечает 404. SHA256SUMS.txt релиза v1.0.0 совпадает с его текущими ассетами; прежней независимой копии нет, историческая неизменность не доказана.",
   "checks": [
     {
       "id": "T01",
@@ -73,10 +73,10 @@
     },
     {
       "id": "T03",
-      "status": "accepted",
+      "status": "open",
       "command": "pytest unit Python 3.10 local; test_update_windows.ps1 -Fixture; CI 3.12 ruff currently fails on tree",
-      "result": "pass",
-      "constraints": ""
+      "result": "incomplete",
+      "constraints": "CI 41294266264: на 3.10/3.11/3.13 шесть тестов масок упали; на 3.12 Ruff (382) не запускает pytest. Локально Windows при тех же opencv 4.13.0 и numpy 2.2.6: 64 passed."
     },
     {
       "id": "T04",
@@ -115,10 +115,10 @@
     },
     {
       "id": "Q02",
-      "status": "accepted",
+      "status": "open",
       "command": "scripts/smoke-components.py --portable full ZIP --prepared; real en-ru pipeline, no LLM",
-      "result": "pass",
-      "constraints": ""
+      "result": "incomplete",
+      "constraints": "Только offline smoke en-ru. OCR, перевод, маска, очистка и вёрстка не оценивались. LLM-профиль не запускался."
     },
     {
       "id": "Q05",
@@ -129,10 +129,10 @@
     },
     {
       "id": "U08",
-      "status": "accepted",
+      "status": "open",
       "command": "tests/e2e/test_extension.py plus Chromium ZIP 1.0.1 unpacked",
-      "result": "pass",
-      "constraints": ""
+      "result": "incomplete",
+      "constraints": "Chromium ZIP распакован; E2E шёл на Windows backend. Docker backend и профиль обновления с 1.0.0 не приняты."
     },
     {
       "id": "T02",
@@ -143,10 +143,10 @@
     },
     {
       "id": "Q06",
-      "status": "accepted",
+      "status": "open",
       "command": "cold EXE start from isolated full ZIP ~8s to window; p95 pipeline not re-profiled",
-      "result": "pass",
-      "constraints": ""
+      "result": "incomplete",
+      "constraints": "p50/p95, память и диск на EXE кандидата не измерялись."
     },
     {
       "id": "T05",
@@ -185,24 +185,24 @@
     },
     {
       "id": "P02",
-      "status": "accepted",
+      "status": "open",
       "command": "light ZIP unpacked; notices and EXE present; component download not re-run (full path used)",
-      "result": "pass",
-      "constraints": ""
+      "result": "incomplete",
+      "constraints": "Light ZIP распакован, EXE запущен. Подготовка компонентов, обрыв и повтор загрузки не проверялись."
     },
     {
       "id": "P01",
-      "status": "accepted",
+      "status": "open",
       "command": "isolated unpack of full ZIP; EXE start; data/ created beside install; Prepare prepared-offline smoke",
-      "result": "pass",
-      "constraints": ""
+      "result": "incomplete",
+      "constraints": "Full ZIP распакован, EXE запущен. Перевод, правка и экспорт на чистой машине не выполнялись."
     },
     {
       "id": "P03",
-      "status": "accepted",
+      "status": "open",
       "command": "tests/windows/test_update_windows.ps1 -Fixture",
-      "result": "pass",
-      "constraints": ""
+      "result": "incomplete",
+      "constraints": "Только tests/windows/test_update_windows.ps1 -Fixture. Живое обновление 1.0.0 на 1.0.1 и откат не выполнялись."
     },
     {
       "id": "P04",
@@ -213,10 +213,10 @@
     },
     {
       "id": "P05",
-      "status": "accepted",
+      "status": "open",
       "command": "GHCR digest published; docker.yml functional --network none; local docker CLI absent",
-      "result": "pass",
-      "constraints": ""
+      "result": "incomplete",
+      "constraints": "Офлайн-шаг Docker workflow и анонимный манифест 200. Compose, volume, обновление, docker load и браузерный проект не проверялись."
     },
     {
       "id": "H01",
@@ -227,10 +227,10 @@
     },
     {
       "id": "H03",
-      "status": "accepted",
+      "status": "open",
       "command": "Prepare from frozen commit 2fdd226 after push; anonymous catalog gate",
-      "result": "pass",
-      "constraints": ""
+      "result": "incomplete",
+      "constraints": "Сборки из отдельного чистого клона не было."
     },
     {
       "id": "P06",
@@ -241,10 +241,10 @@
     },
     {
       "id": "H04",
-      "status": "accepted",
+      "status": "open",
       "command": "H04",
-      "result": "pass",
-      "constraints": ""
+      "result": "incomplete",
+      "constraints": "Байты опубликованы, но обязательные проверки выше открыты. Публикация не заменяет приёмку."
     }
   ]
 }

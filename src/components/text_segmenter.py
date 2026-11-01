@@ -8,6 +8,7 @@ from PIL import Image
 
 from src.components.bubble_contour import balloon_flood_mask, bubble_interior_mask
 from src.components.sfx_ink import drop_line_components, outlined_glyphs
+from src.components.retouch_ink import confirmed_light_ink
 from src.models import MaskStroke, TextRegion
 from src.utils.mask_metrics import otsu_threshold
 
@@ -268,6 +269,7 @@ def segment_region(
     cx1, cy1 = min(width, x1 + pad), min(height, y1 + pad)
     crop = image_rgb[cy0:cy1, cx0:cx1]
     outlined = _outlined_text_mask(crop) if not region.document else None
+    light_confirmed, _ = confirmed_light_ink(crop) if not region.document else (None, False)
     # Силуэт не собрался, но flood баллона есть: фон и чернила берём из него,
     # а не из кольца бокса, которое может лечь на тёмный рисунок снаружи.
     balloon = None
@@ -389,9 +391,15 @@ def segment_region(
         ink = np.zeros((height, width), dtype=np.uint8)
         ink[cy0:cy1, cx0:cx1] = binary
         capture_ink[int(region.id)] = ink
-    if bubble is not None:
-        return bubble
     full[cy0:cy1, cx0:cx1] = dilated
+    if bubble is not None:
+        full = bubble
+    if light_confirmed is not None and not sfx_like:
+        # Дополняем прежний результат, не отменяя силуэт или найденные
+        # тёмные буквы. Иначе просветы O/B могли бы сократить старую маску.
+        addition = cv2.dilate(light_confirmed, kernel, iterations=1)
+        full[cy0:cy1, cx0:cx1] = np.maximum(full[cy0:cy1, cx0:cx1], addition)
+        region._retouch_preserve_background = True
     if region.document:
         # Соседние строки и аватары за рамкой документа не ретушируем.
         bounded = np.zeros_like(full)

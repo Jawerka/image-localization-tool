@@ -172,6 +172,14 @@ def _edge_alpha(hole: np.ndarray, feather_px: float | int) -> np.ndarray:
     return np.clip(dist / feather, 0.0, 1.0).astype(np.float32)
 
 
+def _retouch_alpha(original: np.ndarray, predicted: np.ndarray, hole: np.ndarray) -> np.ndarray:
+    """Контрастный штрих заменяется полностью, близкий фон смешивается у края."""
+    alpha = _edge_alpha(hole, _EDGE_FEATHER_PX)
+    difference = np.max(np.abs(original.astype(np.float32) - predicted.astype(np.float32)), axis=2)
+    alpha[(hole > 0) & (difference > 24)] = 1.0
+    return alpha
+
+
 class LamaInpainter:
     """Заливка однородного баллона или LaMa. Большое окно режется без уменьшения."""
 
@@ -396,8 +404,9 @@ class LamaInpainter:
             return painted
         combined = np.zeros_like(crop, dtype=np.float32)
         combined[hole] = color[hole] / weight_sum[hole, None]
-        # Край дырки гасим здесь же: page-paste потом копирует уже смешанный кроп жёстко по hole.
-        alpha = _edge_alpha(component_crop, _EDGE_FEATHER_PX)
+        # Смешиваем только близкий фон; контрастные штрихи полностью заменяем.
+        # page-paste затем копирует уже обработанный кроп жёстко по hole.
+        alpha = _retouch_alpha(crop, combined, component_crop)
         blend = (
             painted.astype(np.float32) * (1.0 - alpha[..., None])
             + combined * alpha[..., None]
@@ -453,9 +462,10 @@ class LamaInpainter:
         x0: int,
         feather_px: float | int | None = None,
     ) -> np.ndarray:
-        """Вклеить компоненту с feather у края (α из distance transform).
+        """Вклеить компоненту, не возвращая контрастные буквы у края.
 
-        ``feather_px is None`` — ``_EDGE_FEATHER_PX``; ``0`` — жёсткая замена.
+        ``None`` — адаптивное смешивание фона; ``0`` — жёсткая замена.
+        Положительное значение явно включает прежнее смешивание по расстоянию.
         Для кропа из ``_lama_tiles`` (уже смягчённого) передаём ``feather_px=0``.
         """
         y1 = y0 + predicted.shape[0]
@@ -464,8 +474,8 @@ class LamaInpainter:
         hole_mask = component[y0:y1, x0:x1] > 0
         if not np.any(hole_mask):
             return image
-        fade = _EDGE_FEATHER_PX if feather_px is None else feather_px
-        alpha = _edge_alpha(hole_mask, fade)
+        alpha = (_retouch_alpha(patch, predicted, hole_mask) if feather_px is None
+                 else _edge_alpha(hole_mask, feather_px))
         use = hole_mask & (alpha > 0)
         if not np.any(use):
             return image

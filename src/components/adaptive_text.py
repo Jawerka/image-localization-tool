@@ -9,6 +9,7 @@ import numpy as np
 from PIL import Image
 
 from src.components.sfx_ink import outline_pad_px
+from src.components.retouch_ink import boundary_ink, confirmed_light_ink, smooth_line_mask
 from src.components.text_segmenter import _outlined_text_mask, segment_regions
 
 
@@ -147,6 +148,15 @@ def adaptive_masks(image, regions, ordinary, free, grow_px=0):
         if meta.get('kind') == 'bubble' and region.bubble_bbox is not None:
             continue
         _, ink, (a, b, c, d) = source_ink(image, region)
+        boundary = None
+        if meta.get('kind') == 'free':
+            crop = np.asarray(image.crop((a, b, c, d)))
+            confirmed, inverse_outline = confirmed_light_ink(crop)
+            if confirmed is not None and inverse_outline:
+                ink = np.maximum(ink, smooth_line_mask(crop, confirmed))
+                # Расширение не пересчитывает остальные строки и их отступ:
+                # добираются только компоненты, пересекающие прежний край ROI.
+                boundary = boundary_ink(image, region.bbox, (a, b, c, d))
         radius = max(1, min(64, round(float(meta.get('mask_pad_px', 8)))))
         if meta.get('kind') == 'bubble':
             radius = max(1, round(radius * .75))
@@ -156,6 +166,14 @@ def adaptive_masks(image, regions, ordinary, free, grow_px=0):
         local = np.zeros((yb - ya, xb - xa), np.uint8)
         local[b - ya:d - ya, a - xa:c - xa] = ink
         local = cv2.dilate(local, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (radius * 2 + 1, radius * 2 + 1)))
+        if boundary is not None:
+            extra, (aa, bb, cc, dd) = boundary
+            na, nb, nc, nd = min(xa, aa), min(ya, bb), max(xb, cc), max(yb, dd)
+            expanded = np.zeros((nd-nb, nc-na), np.uint8)
+            expanded[ya-nb:yb-nb, xa-na:xb-na] = local
+            expanded[bb-nb:dd-nb, aa-na:cc-na] = np.maximum(expanded[bb-nb:dd-nb, aa-na:cc-na], extra)
+            local = expanded
+            xa, ya, xb, yb = na, nb, nc, nd
         if meta.get('kind') == 'bubble':
             area = geometry_area((image.height, image.width), region)
             if area is not None:
@@ -220,6 +238,10 @@ def source_ink(image, region):
         outlined = _outlined_text_mask(np.asarray(crop))
         if outlined is not None:
             ink = np.maximum(ink, outlined)
+        confirmed, _ = confirmed_light_ink(np.asarray(crop))
+        if confirmed is not None:
+            ink = np.maximum(ink, confirmed)
+            region._retouch_preserve_background = True
     return (crop, ink, (a, b, c, d))
 
 def text_angle(ink):

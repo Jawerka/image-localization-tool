@@ -552,6 +552,8 @@ class PagePipeline:
         report(65, "Маска букв", "segment")
         started = time.perf_counter()
         drawable = self._drawable(active)
+        for region in drawable:
+            region._retouch_preserve_background = False
         adaptive = bool(getattr(self.config, "adaptive_text", True))
         if adaptive:
             prepare_regions(work, drawable, pixel_scale=layout_scale)
@@ -584,6 +586,22 @@ class PagePipeline:
         mask = np.maximum(mask_other, mask_sfx)
         self._merge_captured_sfx(work, sfx_regions, inks)
         mask = apply_strokes(mask, strokes or [], work)
+        # Плашки с просвечивающим рисунком и подтверждённая обводка требуют
+        # восстановления изображения, даже если узкое кольцо локально ровное.
+        from src.components.retouch_ink import preserves_picture
+
+        preserve = np.zeros_like(mask)
+        work_rgb = np.asarray(work)
+        for region in drawable:
+            x, y, w, h = region.bbox
+            xa, ya = max(0, x), max(0, y)
+            xb, yb = min(work.width, x+w), min(work.height, y+h)
+            if xb <= xa or yb <= ya:
+                continue
+            picture = (region.bubble_bbox is not None and preserves_picture(work_rgb[ya:yb, xa:xb]))
+            if picture or getattr(region, '_retouch_preserve_background', False):
+                pad = 34 if (region.auto_layout or {}).get('kind') == 'free' else 16
+                preserve[max(0, ya-pad):min(work.height, yb+pad), max(0, xa-pad):min(work.width, xb+pad)] = 255
         self._step_timings["segment"] = time.perf_counter() - started
         if debug:
             Image.fromarray(mask).save(debug / "03_mask.png")
@@ -593,8 +611,9 @@ class PagePipeline:
         if not np.any(mask):
             cleaned = work
         else:
-            sfx_part = np.where((mask > 0) & (mask_sfx > 0), np.uint8(255), np.uint8(0))
-            other_part = np.where((mask > 0) & (mask_sfx == 0), np.uint8(255), np.uint8(0))
+            reconstruct = (mask_sfx > 0) | (preserve > 0)
+            sfx_part = np.where((mask > 0) & reconstruct, np.uint8(255), np.uint8(0))
+            other_part = np.where((mask > 0) & ~reconstruct, np.uint8(255), np.uint8(0))
             if not np.any(sfx_part):
                 cleaned = self._inpaint(work, mask, warnings)
             else:
