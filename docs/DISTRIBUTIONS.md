@@ -26,7 +26,7 @@
 
 ## Windows portable CPU full
 
-После выпуска распакуйте `ImageLocalizationTool-1.0.0-windows-x64-portable-cpu-full.zip` в доступную на запись папку. Запустите `ImageLocalizationTool/desktop/ImageLocalizationTool.exe`.
+После выпуска распакуйте `ImageLocalizationTool-1.0.2-windows-x64-portable-cpu-full.zip` в доступную на запись папку. Запустите `ImageLocalizationTool/desktop/ImageLocalizationTool.exe`.
 
 Системный Python, установка библиотек и первоначальная загрузка моделей не требуются. Локальные библиотеки Visual C++ находятся также рядом с Flutter EXE. Для RAR/CBR в полном пакете предусмотрены 7z.exe, 7z.dll и лицензия в `tools/7zip`; загрузчик предпочитает их системным распаковщикам. Настройки, проекты, журнал и ключи создаются в `data` рядом с приложением.
 
@@ -47,7 +47,7 @@
 - `-UsePreparedStage` повторно использует компоненты `build/portable-full/ImageLocalizationTool`, обновляет код/Flutter/web из актуального dist и проверяет готовность перед ZIP. Личные файлы в staging data приводят к отказу.
 
 ```powershell
-venv/Scripts/python scripts/smoke-components.py --portable dist/ImageLocalizationTool-1.0.0-windows-x64-portable-cpu-full.zip --prepared
+venv/Scripts/python scripts/smoke-components.py --portable dist/ImageLocalizationTool-1.0.2-windows-x64-portable-cpu-full.zip --prepared
 venv/Scripts/python scripts/smoke-portable-desktop.py --app build/frozen-smoke-<digest>/ImageLocalizationTool
 ```
 
@@ -59,17 +59,17 @@ venv/Scripts/python scripts/smoke-portable-desktop.py --app build/frozen-smoke-<
 
 ### Из готового образа
 
-Готовый `ImageLocalizationTool-1.0.0-docker-cpu-full.zip` содержит образ `.tar.gz`, Compose без стадии сборки и README. Распакуйте его и выполняйте команды в этой папке. Исходники и пользовательские данные в пакет не входят.
+Готовый `ImageLocalizationTool-1.0.2-docker-cpu-full.zip` содержит образ `.tar.gz`, Compose без стадии сборки и README. Распакуйте его и выполняйте команды в этой папке. Исходники и пользовательские данные в пакет не входят.
 
 ```sh
-docker load -i ImageLocalizationTool-1.0.0-linux-amd64-cpu-full.tar.gz
+docker load -i ImageLocalizationTool-1.0.2-linux-amd64-cpu-full.tar.gz
 docker compose up -d --no-build
 ```
 
 Сборка такого ZIP из уже экспортированного образа:
 
 ```powershell
-venv/Scripts/python scripts/package-docker.py --image-archive dist/ImageLocalizationTool-1.0.0-linux-amd64-cpu-full.tar.gz
+venv/Scripts/python scripts/package-docker.py --image-archive dist/ImageLocalizationTool-1.0.2-linux-amd64-cpu-full.tar.gz
 ```
 
 Откройте `http://localhost:8080`. Новая схема необязательного входа описана ниже. Ранее опубликованные архивы сохраняют поведение своей версии до обновления образа.

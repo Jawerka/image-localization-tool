@@ -106,7 +106,7 @@ python -m src.app page.png --browser папка
 3. Если CDN недоступен из вашей сети, возьмите манифест и колёса из своего зеркала и укажите его:
 
    ```powershell
-   $env:ILT_RUNTIME_MANIFEST_URL = "https://mirror.example/ilt-runtime-manifest-1.0.1.json"
+   $env:ILT_RUNTIME_MANIFEST_URL = "https://mirror.example/ilt-runtime-manifest-1.0.2.json"
    ImageLocalizationTool.exe --deploy cpu
    ```
 
