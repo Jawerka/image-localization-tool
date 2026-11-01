@@ -214,10 +214,17 @@ def _drop_edge_components(mask: np.ndarray) -> np.ndarray | None:
         if touches and not covers:
             continue
         kept.append(index)
-    if not kept:
-        return None
     filtered = cv2.dilate(np.isin(labels, kept).astype(np.uint8), kernel)
     filtered = (filtered > 0) & (mask > 0)
+    # Внутренние компоненты уже прошли проверку обводки. Открытие нужно
+    # только для перемычек к краевому рисунку: иначе оно стирает тонкие штрихи.
+    raw_count, raw_labels, raw_stats, _ = cv2.connectedComponentsWithStats((mask > 0).astype(np.uint8))
+    internal = []
+    for index in range(1, raw_count):
+        x, y, w, h, area = (int(v) for v in raw_stats[index])
+        if area >= 8 and x > 1 and y > 1 and x + w < width - 1 and y + h < height - 1:
+            internal.append(index)
+    filtered |= np.isin(raw_labels, internal)
     if int(np.count_nonzero(filtered)) < 12:
         return None
     return filtered.astype(np.uint8) * 255

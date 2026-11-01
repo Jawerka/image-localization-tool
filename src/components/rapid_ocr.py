@@ -1,4 +1,4 @@
-"""Оффлайн-OCR: RapidOCR (PP-OCRv5), слова раскладываются по регионам детектора."""
+"""Оффлайн-OCR: RapidOCR с установленными моделями, слова по регионам детектора."""
 
 from __future__ import annotations
 
@@ -248,20 +248,27 @@ class RapidOcr:
         """
         text = region.text.strip()
         letters = [char for char in text if char.isalpha()]
+        words = text.split()
+        # Заглавные буквы обычны и в репликах. Несколько разных слов — фраза;
+        # повторяющиеся HA HA HA остаются звуком, как и короткий BA- DUMP.
+        tokens = {word.strip(' .!?,;:-…').casefold() for word in words}
         shout = bool(letters) and text.upper() == text and len(text) <= 24
         if region.bubble_bbox is not None:
             region.block_type = "dialogue"
             return
         from src.components.sfx_dict import lookup
 
-        action = text.strip(" .!?,;:-…").casefold() in _ACTIONS
-        if shout or action or lookup(text) is not None:
-            region.block_type = "sfx"
-            return
         if _HANDLE_RE.search(text) or _URL_RE.search(text):
             region.block_type = "sign"
             return
-        words = text.split()
+        action = text.strip(" .!?,;:-…").casefold() in _ACTIONS
+        sound_sequence = bool(words) and all(lookup(word) is not None for word in words)
+        if (shout and (len(words) <= 2 or len(tokens) == 1 or sound_sequence)) or action or lookup(text) is not None:
+            region.block_type = "sfx"
+            return
+        if len(words) >= 3 and text.upper() == text:
+            region.block_type = "narration"
+            return
         if text.endswith(("!", "?", "…", "...")):
             region.block_type = "sfx" if len(words) == 1 else "narration"
             return

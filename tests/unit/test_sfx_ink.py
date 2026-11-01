@@ -8,6 +8,31 @@ from src.components.text_segmenter import segment_region
 from src.models import TextRegion
 
 
+def test_edge_filter_preserves_confirmed_internal_thin_strokes():
+    """Проверенная буква сохраняет тонкую ветку и отдельный тонкий штрих."""
+    from src.components.sfx_ink import _drop_edge_components
+    mask = np.zeros((80, 140), np.uint8)
+    mask[30:55, 30:50] = 255
+    mask[20:35, 39:41] = 255
+    mask[28:54, 70:72] = 255
+    result = _drop_edge_components(mask)
+    assert result is not None
+    assert np.array_equal(result, mask)
+
+
+def test_edge_filter_does_not_restore_artwork_connected_to_border():
+    """Сохранение внутренних букв не возвращает отрезанный рисунок у края."""
+    from src.components.sfx_ink import _drop_edge_components
+    mask = np.zeros((80, 140), np.uint8)
+    mask[30:55, 65:85] = 255
+    mask[0:20, 0:25] = 255
+    mask[19:32, 24:26] = 255
+    result = _drop_edge_components(mask)
+    assert result is not None
+    assert result[8, 8] == 0
+    assert result[40, 75] == 255
+
+
 def test_outlined_glyphs_cover_letters_not_the_crop():
     """Чёрные буквы с белой обводкой на шумном тёмном фоне — не прямоугольник."""
     rgb = np.full((90, 220, 3), (30, 40, 35), np.uint8)

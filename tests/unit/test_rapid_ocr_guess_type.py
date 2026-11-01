@@ -48,6 +48,25 @@ def test_long_free_caption_is_narration():
     assert should_translate(region) is True
 
 
+def test_caps_sentence_is_not_a_sound():
+    """Короткая фраза заглавными не получает маску звукоподражания."""
+    region = _region('YOUR LUNCH SWEETHEART.')
+    RapidOcr._guess_type(region)
+    assert region.block_type == 'narration'
+    for text in ('BA- DUMP', 'BANG BANG', 'HA HA HA!', 'BANG BOOM CRASH!'):
+        sound = _region(text)
+        RapidOcr._guess_type(sound)
+        assert sound.block_type == 'sfx', text
+
+
+def test_uppercase_author_address_stays_a_sign():
+    """Регистр адреса автора не превращает его в звук."""
+    for text in ('WWW.ART.COM', '@ARTIST'):
+        region = _region(text)
+        RapidOcr._guess_type(region)
+        assert region.block_type == 'sign'
+
+
 def _join(words, direction="ltr") -> str:
     return " ".join(word.text for word in _reading_lines(words, direction))
 

@@ -137,13 +137,26 @@ def test_passport_rejects_legacy_acceptance_and_failed_required():
         )
     failed = _passport(checks=[{
         "id": "R01",
+        "status": "open",
+        "command": "pytest",
+        "result": "incomplete",
+    }])
+    with pytest.raises(ValueError, match="не принята"):
+        release_candidate.validate_passport(
+            failed,
+            source_sha="abc123",
+            version="1.0.1",
+            required_ids=["R01"],
+        )
+    deferred = _passport(checks=[{
+        "id": "R01",
         "status": "deferred",
         "command": "pytest",
         "result": "skip",
     }])
     with pytest.raises(ValueError, match="не принята"):
         release_candidate.validate_passport(
-            failed,
+            deferred,
             source_sha="abc123",
             version="1.0.1",
             required_ids=["R01"],

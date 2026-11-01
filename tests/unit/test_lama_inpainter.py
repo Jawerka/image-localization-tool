@@ -33,6 +33,40 @@ def test_edge_alpha_zero_feather_is_hard_mask():
     assert float(alpha[5, 5]) == 1.0
 
 
+def test_default_paste_fully_replaces_one_pixel_text():
+    """Тонкая буква входит в ядро удаления, не в полосу смешивания с оригиналом."""
+    image = np.full((30, 30, 3), 255, np.uint8)
+    image[8:22, 15] = 0
+    component = np.zeros((30, 30), np.uint8)
+    component[8:22, 15] = 255
+    predicted = np.full_like(image, 240)
+    result = LamaInpainter._paste_component(image, component, predicted, 0, 0)
+    assert np.all(result[8:22, 15] == 240)
+    assert np.all(result[:, 14] == 255)
+
+
+def test_default_paste_smooths_close_background_without_returning_text():
+    image = np.full((30, 30, 3), 220, np.uint8)
+    image[5:25, 15] = 0
+    component = np.zeros((30, 30), np.uint8)
+    component[5:25, 5:25] = 255
+    result = LamaInpainter._paste_component(image, component, np.full_like(image, 230), 0, 0)
+    assert 220 < result[5, 10, 0] < 230
+    assert result[5, 15, 0] == 230
+
+
+def test_tiled_paste_fully_removes_thin_stroke():
+    image = np.full((40, 1700, 3), 220, np.uint8)
+    image[20, 40:1660] = 0
+    mask = np.zeros((40, 1700), np.uint8)
+    mask[20, 40:1660] = 255
+    painter = LamaInpainter(device='cpu')
+    painter._lama_forward = lambda crop, _mask: np.full_like(crop, 230)
+    result = painter._lama_tiles(image, mask, mask)
+    assert np.all(result[20, 40:1660] == 230)
+    assert np.all(result[19] == 220)
+
+
 def test_edge_alpha_ramps_from_border_to_core():
     hole = np.zeros((40, 40), dtype=np.uint8)
     hole[8:32, 8:32] = 255
