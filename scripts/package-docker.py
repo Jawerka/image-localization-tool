@@ -7,10 +7,10 @@ from pathlib import Path
 
 import yaml
 
-from scripts.pack_notices import NOTICE_FILES, ROOT as REPO_ROOT
-
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+
+from scripts.pack_notices import NOTICE_FILES, ROOT as REPO_ROOT
 
 
 def main() -> int:
