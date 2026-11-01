@@ -475,6 +475,7 @@ export function applyBootstrap(data) {
   syncHistoryFlags();
   strokeCounts.clear();
   emit();
+  document.documentElement.dataset.iltBooted = "1";
   if (state.activePageId) reloadDetail(state.activePageId);
 }
 

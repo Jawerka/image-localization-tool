@@ -19,8 +19,8 @@ def test_browser_login_upload_edit_download(tmp_path):
     store = ProjectStore(tmp_path / "data")
     state = AppState(AppSettings(first_run_complete=True, ocr_backend="rapid", translator_backend="argos"),
                      tmp_path / "settings.json", store, JobQueue(FakeWorker(store)), token="browser-test-token")
-    httpd, port = serve(state, origins=("http://localhost",))
-    state.browser_origins = (f"http://127.0.0.1:{port}",)
+    httpd, port = serve(state, origins=("http://127.0.0.1", "http://localhost"))
+    state.browser_origins = (f"http://127.0.0.1:{port}", f"http://localhost:{port}")
     thread = threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
     thread.start()
     image = tmp_path / "page.png"
@@ -32,7 +32,8 @@ def test_browser_login_upload_edit_download(tmp_path):
             page = browser.new_page(viewport={"width": 1440, "height": 1000}, accept_downloads=True)
             page.on("pageerror", lambda error: errors.append(str(error)))
             page.goto(f"http://127.0.0.1:{port}", wait_until="domcontentloaded")
-            expect(page.locator("[data-role='empty'] [data-role='open-files']")).to_be_visible(timeout=30000)
+            expect(page.locator("html[data-ilt-booted='1']")).to_have_count(1, timeout=30000)
+            expect(page.locator("[data-role='empty'] [data-role='open-files']")).to_be_visible()
             expect(page.locator("[data-role='screen-error']")).to_be_hidden()
             with page.expect_file_chooser() as chooser:
                 page.locator("[data-role='empty'] [data-role='open-files']").click()
