@@ -1,2 +1,3 @@
 *.sh text eol=lf
 deploy/ilt.service text eol=lf
+src/app/runtime_manifest.json text eol=lf
