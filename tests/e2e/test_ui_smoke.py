@@ -595,7 +595,12 @@ def test_mesh_drag_cancels_on_escape_and_pointercancel(page, desktop):
       const frame = document.querySelector('[data-role="frame"]');
       frame.addEventListener('pointerdown', event => { window.__iltMeshPointerId = event.pointerId; }, { once: true });
     }""")
-    rect = point.bounding_box()
+    rect = None
+    for _ in range(20):
+        rect = point.bounding_box()
+        if rect:
+            break
+        page.wait_for_timeout(50)
     assert rect
     page.mouse.move(rect["x"] + rect["width"] / 2, rect["y"] + rect["height"] / 2)
     page.mouse.down()
