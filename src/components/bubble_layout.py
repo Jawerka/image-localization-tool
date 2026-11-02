@@ -299,3 +299,40 @@ def layout_in_shape(
                     placed.append((line, int(x - a), int(y - glyph[1])))
                 best = (cost, placed)
     return (best[1], True) if best else ([], False)
+
+
+def fallback_light_core(image, region):
+    """Белое ядро открытой вспышки вместо прямоугольника поверх её лучей.
+
+    Применяется лишь после провала обычного силуэта и flood. Отдельные
+    буквенные дыры заполняются до открытия, тонкие лучи исключаются.
+    """
+    if region.bubble_bbox is None:
+        return None
+    bx,by,bw,bh=region.bubble_bbox
+    x0,y0=max(0,bx),max(0,by)
+    x1,y1=min(image.shape[1],bx+bw),min(image.shape[0],by+bh)
+    if x1-x0<8 or y1-y0<8:
+        return None
+    gray=cv2.cvtColor(image[y0:y1,x0:x1],cv2.COLOR_RGB2GRAY)
+    count,labels,stats,_=cv2.connectedComponentsWithStats((gray>225).astype(np.uint8))
+    if count<2:
+        return None
+    idx=1+int(np.argmax(stats[1:,cv2.CC_STAT_AREA]))
+    if stats[idx,cv2.CC_STAT_AREA] < gray.size*.35:
+        return None
+    local=(labels==idx).astype(np.uint8)*255
+    contours,_=cv2.findContours(local,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)
+    cv2.drawContours(local,contours,-1,255,-1)
+    radius=max(2,round(min(gray.shape)*.09))
+    local=cv2.morphologyEx(local,cv2.MORPH_OPEN,cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(radius*2+1,radius*2+1)))
+    local=cv2.erode(local,np.ones((5,5),np.uint8))
+    tx,ty,tw,th=region.bbox
+    cx,cy=round(tx+tw/2-x0),round(ty+th/2-y0)
+    if not (0<=cx<local.shape[1] and 0<=cy<local.shape[0] and local[cy,cx]):
+        return None
+    if np.count_nonzero(local)<gray.size*.3:
+        return None
+    result=np.zeros(image.shape[:2],np.uint8)
+    result[y0:y1,x0:x1]=local
+    return result

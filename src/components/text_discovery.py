@@ -207,7 +207,108 @@ def _refine_sfx(image, region, existing):
     candidates.sort()
     # Повторённый звук допустим, если одна рамка заметно ближе к ожидаемой.
     # При равных или близких расстояниях сохраняем прежнюю локализацию.
-    if not candidates or (len(candidates) > 1 and candidates[1][0] - candidates[0][0] < max(8, pad * .2)):
+    if not candidates:
+        previous = region.bbox
+        _refine_outlined_sfx(image, region, existing)
+        if region.bbox == previous:
+            _refine_plain_cjk_sfx(image, region, existing)
+        return
+    if len(candidates) > 1 and candidates[1][0] - candidates[0][0] < max(8, pad * .2):
         return
     region.bbox = candidates[0][1]
     region.auto_layout = None
+
+
+def _refine_outlined_sfx(image, region, existing):
+    """Добрать цельную обведённую надпись, которую стилизованный OCR не прочёл.
+
+    Требуются контрастные ядра с тонким ореолом и единственная группа,
+    пересекающая исходную рамку. Границы соседних регионов защищены.
+    """
+    from src.components.sfx_ink import outlined_glyphs
+    x, y, w, h = region.bbox
+    pad = max(w, h)
+    a, b, c, d = max(0, x-pad), max(0, y-pad), min(image.width, x+w+pad), min(image.height, y+h+pad)
+    mask = outlined_glyphs(np.asarray(image.crop((a,b,c,d)).convert('RGB')), reject_cut_cores=True)
+    if mask is None:
+        return
+    radius = max(3, min(16, round(min(w,h) * .12)))
+    grouped = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (radius*2+1,radius*2+1)))
+    count, labels, stats, _ = cv2.connectedComponentsWithStats((grouped > 0).astype(np.uint8))
+    choices = []
+    for idx in range(1,count):
+        if np.count_nonzero(labels[y-b:y+h-b,x-a:x+w-a] == idx) < max(8,w*h*.015):
+            continue
+        ys,xs=np.where((labels==idx) & (mask>0))
+        if not len(xs):
+            continue
+        tx,ty,tw,th=a+int(xs.min()),b+int(ys.min()),int(xs.max()-xs.min()+1),int(ys.max()-ys.min()+1)
+        if not .5 <= tw*th/max(1,w*h) <= 4 or max(tw/w,th/h) > 3:
+            continue
+        if any(max(0,min(tx+tw,ox+ow)-max(tx,ox))*max(0,min(ty+th,oy+oh)-max(ty,oy)) > min(tw*th,ow*oh)*.25
+               for ox,oy,ow,oh in (other.bbox for other in existing if not other.skip)):
+            continue
+        choices.append((tx,ty,tw,th))
+    if len(choices)==1:
+        region.bbox=choices[0]
+        region.auto_layout=None
+
+
+def _refine_plain_cjk_sfx(image, region, existing):
+    """Крупные иероглифические звуки без различимого ореола на светлом поле.
+
+    Нужна группа сравнимых ядер рядом с исходной рамкой. Рамки речи,
+    соседних звуков и обрезанные компоненты рисунка не входят в группу.
+    """
+    letters=[ch for ch in region.text if ch.isalnum()]
+    if not 2<=len(letters)<=6 or not all('\u3040'<=ch<='\u9fff' for ch in letters):
+        return
+    x,y,w,h=region.bbox
+    pad=max(w,h)
+    a,b,c,d=max(0,x-pad),max(0,y-pad),min(image.width,x+w+pad),min(image.height,y+h+pad)
+    gray=cv2.cvtColor(np.asarray(image.crop((a,b,c,d)).convert('RGB')),cv2.COLOR_RGB2GRAY)
+    count,labels,stats,_=cv2.connectedComponentsWithStats((gray<80).astype(np.uint8))
+    cores=[]
+    def protected(tx,ty,tw,th):
+        return any(max(0,min(tx+tw,ox+ow)-max(tx,ox))*max(0,min(ty+th,oy+oh)-max(ty,oy))>min(tw*th,ow*oh)*.2
+                   for ox,oy,ow,oh in (other.bbox for other in existing if not other.skip))
+    for idx in range(1,count):
+        xx,yy,ww,hh,pixels=map(int,stats[idx])
+        tx,ty=xx+a,yy+b
+        if (xx==0 or yy==0 or xx+ww==gray.shape[1] or yy+hh==gray.shape[0] or
+                not h*.18<=hh<=h*1.2 or not w*.06<=ww<=w*1.2 or
+                not .12<pixels/(ww*hh)<.85 or
+                ty+hh<y or ty>y+h or protected(tx,ty,ww,hh)):
+            continue
+        cores.append(idx)
+    if not 2<=len(cores)<=len(letters)*3:
+        return
+    anchor=[idx for idx in cores if stats[idx,0]+a<x+w and stats[idx,0]+a+stats[idx,2]>x]
+    if not anchor:
+        return
+    selected=set(anchor)
+    for _ in range(len(cores)):
+        for idx in cores:
+            xx,yy,ww,hh,_=stats[idx]
+            if any(max(0,max(xx,stats[j,0])-min(xx+ww,stats[j,0]+stats[j,2]))<=max(hh,stats[j,3])*.5 and
+                   min(yy+hh,stats[j,1]+stats[j,3])-max(yy,stats[j,1])>=min(hh,stats[j,3])*.3 for j in selected):
+                selected.add(idx)
+    if len(selected)<2:
+        return
+    left=min(stats[i,0]for i in selected);top=min(stats[i,1]for i in selected)
+    right=max(stats[i,0]+stats[i,2]for i in selected);bottom=max(stats[i,1]+stats[i,3]for i in selected)
+    margin=max(2,round(max(stats[i,3]for i in selected)*.1))
+    # Отдельные точки и верхние штрихи знака лежат внутри оболочки группы.
+    for idx in range(1,count):
+        xx,yy,ww,hh,pixels=map(int,stats[idx])
+        if (pixels>=8 and left-margin<=xx and xx+ww<=right+margin and
+                top-margin<=yy and yy+hh<=bottom+margin and not protected(xx+a,yy+b,ww,hh)):
+            selected.add(idx)
+    left=min(stats[i,0]for i in selected);top=min(stats[i,1]for i in selected)
+    right=max(stats[i,0]+stats[i,2]for i in selected);bottom=max(stats[i,1]+stats[i,3]for i in selected)
+    tx,ty,tw,th=a+int(left),b+int(top),int(right-left),int(bottom-top)
+    if ((tw<w*.95 and th<h*.95) or not .5<=tw*th/(w*h)<=4 or max(tw/w,th/h)>3 or protected(tx,ty,tw,th) or
+            np.mean(gray[top:bottom,left:right]>180)<.5):
+        return
+    region.bbox=(tx,ty,tw,th)
+    region.auto_layout=None

@@ -64,6 +64,8 @@ def _auto_layout(value, bbox):
     if not isinstance(value, dict) or value.get('version') != 1 or value.get('kind') not in ('free', 'bubble'):
         return None
     try:
+        if value.get('writing_mode', 'horizontal') not in ('horizontal', 'vertical', 'auto'):
+            return None
         source = value.get('source_bbox')
         if source and list(source) != list(bbox):
             return None

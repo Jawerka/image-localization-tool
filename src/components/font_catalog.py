@@ -229,7 +229,7 @@ def assign_stylized_fonts(
         if adaptive and (getattr(region, 'auto_layout', None) or {}).get('kind') == 'bubble':
             font_id = FONT_ROLE_DIALOGUE
         if adaptive and (getattr(region, 'auto_layout', None) or {}).get('kind') == 'free':
-            preferred = 'impact' if region.block_type == 'sfx' and len(region.translation) < 20 else 'comicz'
+            preferred = 'jupiteroid-light' if region.block_type == 'sfx' else 'comicz'
             selected = next((face.id for face in catalog if Path(face.path).stem.casefold() == preferred and face.cyrillic), None)
             font_id = selected or font_id
         if font_id == FONT_ROLE_TITLE and font_id not in available:

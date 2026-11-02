@@ -322,6 +322,11 @@ def interior_mask(image_rgb: np.ndarray, region: TextRegion) -> np.ndarray:
         if int(np.sum(flood > 0)) > 200:
             flood = cv2.erode(flood, np.ones((3, 3), np.uint8), iterations=1)
         return flood
+    from src.components.bubble_layout import fallback_light_core
+    core = fallback_light_core(image_rgb, region)
+    if core is not None:
+        region._layout_light_core = True
+        return core
     tx, ty, tw, th = region.bbox
     xa, ya = max(0, tx), max(0, ty)
     xb, yb = min(width, tx + tw), min(height, ty + th)
@@ -1406,7 +1411,8 @@ class Typesetter:
             chosen_font = None
             override = int(region.style.font_size_override or 0)
             is_sfx = region.block_type == "sfx"
-            native_free = (region.auto_layout or {}).get('kind') == 'free' and font_path is not None and len(text) <= 1000
+            native_free = ((region.auto_layout or {}).get('kind') == 'free' or
+                           (region.auto_layout or {}).get('writing_mode') == 'vertical') and font_path is not None and len(text) <= 1000
             native_bubble = ((region.auto_layout or {}).get('kind') == 'bubble' and font_path is not None
                              and not region.style.skew_x and _warp_spec(region.style)[0] == 'none')
             raster_fit = None

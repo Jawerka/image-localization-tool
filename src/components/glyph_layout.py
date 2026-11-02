@@ -68,3 +68,32 @@ def glyph_mask(text, font, stroke_width=0, spacing=0.0, line_spacing=20):
         result.paste(line, ((result.width - line.width) // 2, y))
         y += line.height + gap
     return result
+
+
+def vertical_glyph_mask(text, font, spacing=0.0, line_spacing=20):
+    """Прямые буквы сверху вниз; пробелы сохраняют границы слов.
+
+    Общая высота ячейки сохраняет ритм для точек, дефисов и букв с выносами.
+    Буква центрируется по видимому контуру, а не по ширине её advance.
+    """
+    boxes = [font.getbbox(ch) for ch in text if not ch.isspace()]
+    if not boxes:
+        return Image.new('L', (1, 1))
+    width = max(1, max(b[2] - b[0] for b in boxes))
+    cell = max(1, max(b[3] - b[1] for b in boxes))
+    gap = max(0, round(line_spacing + spacing))
+    entries = []
+    y = 0
+    for ch in text:
+        if ch.isspace():
+            y += max(1, round(cell * .5))
+            continue
+        box = font.getbbox(ch)
+        entries.append((ch, box, y))
+        y += cell + gap
+    result = Image.new('L', (width, max(1, y - gap)))
+    paint = ImageDraw.Draw(result)
+    for ch, box, top in entries:
+        x = (width - (box[2] - box[0])) / 2 - box[0]
+        paint.text((x, top + (cell - (box[3] - box[1])) / 2 - box[1]), ch, font=font, fill=255)
+    return result

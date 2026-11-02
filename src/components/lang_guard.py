@@ -22,8 +22,10 @@ def unchanged_foreign_words(source: str, translation: str, target_lang: str, all
     """Непереведённое WILDFIRE/SLAM не становится именем из-за заглавных букв."""
     if (target_lang or '').lower() not in _CYRILLIC_TARGETS:
         return False
-    original = set(re.findall(r'\b[A-Z]{4,}\b', _strip(source, allowed or [])))
-    remaining = set(re.findall(r'\b[A-Z]{4,}\b', _strip(translation, allowed or [])))
+    # Строчные исходные слова тоже проверяются ниже общего порога латиницы.
+    # Имена вида Yanfei, глоссарий и адреса сохраняют прежние исключения.
+    original = {word.casefold() for word in re.findall(r'\b(?:[A-Z]{4,}|[a-z]{4,})\b', _strip(source, allowed or []))}
+    remaining = {word.casefold() for word in re.findall(r'\b[A-Za-z]{4,}\b', _strip(translation, allowed or []))}
     return bool(original & remaining)
 
 

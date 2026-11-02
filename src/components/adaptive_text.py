@@ -55,11 +55,24 @@ def prepare_regions(image, regions, pixel_scale=1.0):
                 area = inferred_balloon_area(image, region, ink, box, white_components)
             else:
                 from src.components.typesetter import interior_mask
+                region._layout_light_core = False
                 area = interior_mask(np.asarray(image.convert('RGB')), region)
+            if getattr(region, '_layout_light_core', False):
+                geometry['contour_source'] = 'light_core'
             contours, _ = cv2.findContours(area, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             if contours:
                 contour = max(contours, key=cv2.contourArea)
                 geometry['contour'] = cv2.approxPolyDP(contour, 1., True).reshape(-1, 2).tolist()
+        if bubble and region.bubble_bbox is not None:
+            bx, by, bw, bh = region.bubble_bbox
+            letters = sum(not ch.isspace() for ch in region.translation)
+            if bh >= bw * 2.6 and 2 <= letters <= 16 and not style.font_size_override:
+                margin = max(3, round(min(bw, bh) * .1))
+                geometry['writing_mode'] = 'vertical'
+                geometry['ink_bbox'] = [bx + margin, by + margin, max(1, bw - 2*margin), max(1, bh - 2*margin)]
+                geometry['angle'] = angle = 0.
+        if not bubble:
+            geometry['allow_vertical'] = region.block_type == 'sfx'
         region.auto_layout = geometry
         style.rotation = angle
         if not bubble and style.stroke_mode == 'auto' and not style.fill_locked:
@@ -83,7 +96,15 @@ def geometry_area(shape, region):
         if (region.auto_layout or {}).get('kind') == 'bubble':
             from src.components.bubble_layout import covers_source
             if not covers_source(area, region):
-                return None
+                if (region.auto_layout or {}).get('contour_source') != 'light_core' or region.bubble_bbox is None:
+                    return None
+                bx,by,bw,bh=region.bubble_bbox
+                tx,ty,tw,th=region.bbox
+                cx,cy=round(tx+tw/2),round(ty+th/2)
+                if (not (0<=cx<area.shape[1] and 0<=cy<area.shape[0] and area[cy,cx]) or
+                        np.count_nonzero(area)<bw*bh*.3 or
+                        np.count_nonzero(area[max(0,by):by+bh,max(0,bx):bx+bw])<np.count_nonzero(area)*.99):
+                    return None
         return area
     except (TypeError, ValueError):
         return None
@@ -215,6 +236,21 @@ def adaptive_masks(image, regions, ordinary, free, grow_px=0):
                 if other.id == region.id or not is_balloon(other):
                     continue
                 x, y, w, h = other.bbox
+                chars = [ch for ch in region.text if ch.isalnum()]
+                if (region.block_type == 'sfx' and 2 <= len(chars) <= 6 and
+                        all('\u3040' <= ch <= '\u9fff' for ch in chars) and
+                        min(xb,x+w)>max(xa,x) and min(yb,y+h)>max(ya,y)):
+                    # Рамка высокой японской реплики включает пустые поля.
+                    # В них может оказаться край крупного звука. Защищаем
+                    # подтверждённые буквы речи, а не весь её прямоугольник.
+                    _, protected, (pa,pb,pc,pd) = source_ink(image, other)
+                    if np.count_nonzero(protected) >= 20:
+                        protected = cv2.dilate(protected,np.ones((5,5),np.uint8))
+                        left,top,right,bottom=max(xa,pa),max(ya,pb),min(xb,pc),min(yb,pd)
+                        if right>left and bottom>top:
+                            view=local[top-ya:bottom-ya,left-xa:right-xa]
+                            view[protected[top-pb:bottom-pb,left-pa:right-pa]>0]=0
+                        continue
                 local[max(0, y - ya):max(0, min(yb, y + h) - ya), max(0, x - xa):max(0, min(xb, x + w) - xa)] = 0
         destination = free if meta.get('kind') == 'free' else ordinary
         # Удалить старую маску лишь в боксе этой надписи; остальные регионы не затирать.
@@ -267,6 +303,23 @@ def source_ink(image, region):
     capture = {}
     segment_regions(crop, [local], capture_ink=capture)
     ink = capture.get(local.id, np.zeros((crop.height, crop.width), np.uint8))
+    # Короткий CJK-звук на бумаге может не иметь различимого ореола.
+    # Замкнутые тёмные ядра сохраняются целиком: фильтр линий иначе
+    # отбрасывает толстый крюк буквы как фрагмент рисунка.
+    chars = [ch for ch in region.text if ch.isalnum()]
+    if (region.block_type == 'sfx' and 2 <= len(chars) <= 6 and
+            all('\u3040' <= ch <= '\u9fff' for ch in chars)):
+        gray = cv2.cvtColor(np.asarray(crop.convert('RGB')), cv2.COLOR_RGB2GRAY)
+        if np.mean(gray > 180) >= .6:
+            count, labels, stats, _ = cv2.connectedComponentsWithStats((gray < 80).astype(np.uint8))
+            cores = [i for i in range(1,count) if stats[i,4] >= 8 and
+                     stats[i,0] > 0 and stats[i,1] > 0 and
+                     stats[i,0]+stats[i,2] < crop.width and stats[i,1]+stats[i,3] < crop.height and
+                     stats[i,2] <= w*.9 and stats[i,3] <= h*1.1]
+            large = [i for i in cores if stats[i,2] >= w*.05 and stats[i,3] >= h*.15]
+            if len(large) >= 2:
+                ink = np.maximum(ink, np.isin(labels, cores).astype(np.uint8)*255)
+
     if getattr(local, "_outline_ink", False):
         region._outline_ink = True
     if region.block_type != 'sfx' and (not region.document):
@@ -385,7 +438,9 @@ def inferred_balloon_area(image, region, ink, box, white_components=None):
     best = None
     for idx in range(1, count):
         (x, y, w, h, area_size) = stats[idx]
-        if (area_size < (c - a) * (d - b) * 0.15 or x == 0 or y == 0 or (x + w >= image.width) or
+        if (w > region.bbox[2] * 3 or h > region.bbox[3] * 3 or
+                w * h > region.bbox[2] * region.bbox[3] * 3 or
+                area_size < (c - a) * (d - b) * 0.15 or x == 0 or y == 0 or (x + w >= image.width) or
                 (y + h >= image.height) or x >= c or y >= d or x + w <= a or y + h <= b):
             continue
         component = (labels[y:y+h, x:x+w] == idx).astype(np.uint8)
