@@ -308,7 +308,12 @@ def segment_region(
         binary = drop_line_components(binary)
     # На светлом фоне ищем тёмные штрихи независимо от оттенка кольца.
     light_ink = None
-    if (not region.document and (outlined is not None or glyph_mask is not None or
+    # У непривязанной реплики кольцо ROI может попасть на волосы/рисунок.
+    # Подтверждённый светлый фон позволяет искать отдельные тёмные буквы,
+    # но не даёт права заливать весь белый фон или захватывать линии края.
+    unbound_dialogue = (not has_bubble and origin == "dialogue" and
+                        np.percentile(cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY), 35) >= 225)
+    if (not region.document and (outlined is not None or glyph_mask is not None or unbound_dialogue or
             (region.bubble_bbox is not None and region.block_type != "sfx"))):
         gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
         if float(np.percentile(gray, 60)) >= 180:
@@ -322,6 +327,10 @@ def segment_region(
                     and stats[i, cv2.CC_STAT_TOP] + stats[i, cv2.CC_STAT_HEIGHT] < crop.shape[0]
                     and not (stats[i, cv2.CC_STAT_WIDTH] > crop.shape[1] * .8
                              and stats[i, cv2.CC_STAT_HEIGHT] > crop.shape[0] * .6)]
+            if unbound_dialogue:
+                # Крупные связные фрагменты рисунка не являются буквами.
+                kept = [i for i in kept if stats[i, cv2.CC_STAT_HEIGHT] <= box_h * .65
+                        and stats[i, cv2.CC_STAT_WIDTH] <= box_w * .65]
             if len(kept) >= 3:
                 light_ink = np.isin(labels, kept).astype(np.uint8) * 255
     if glyph_mask is not None:

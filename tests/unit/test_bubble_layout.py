@@ -13,6 +13,35 @@ from src.components.typesetter import (
 from src.models import TextRegion
 
 
+def test_translucent_colour_layout_crosses_background_panel():
+    from src.components.bubble_layout import colour_layout_area
+
+    image = np.full((140, 200, 3), 250, np.uint8)
+    oval = np.zeros((140, 200), np.uint8)
+    cv2.ellipse(oval, (100, 70), (80, 50), 0, 0, 360, 255, -1)
+    image[oval > 0] = (160, 197, 237)
+    panel = (oval > 0) & (np.indices(oval.shape)[1] > 115)
+    image[panel] = (114, 131, 173)
+    cv2.putText(image, 'HELLO', (52, 78), cv2.FONT_HERSHEY_SIMPLEX, .65, (20, 20, 20), 2)
+    region = TextRegion(1, (45, 45, 110, 50), bubble_bbox=(18, 18, 164, 104))
+    partial = oval.copy()
+    partial[:, 115:] = 0
+    result = colour_layout_area(image, region, partial)
+    assert np.mean(result[oval > 0] > 0) > .98
+    assert not np.any(result[oval == 0])
+    assert np.array_equal(colour_layout_area(image, region, oval), oval)
+
+
+def test_colour_layout_rejects_background_leaking_through_box():
+    from src.components.bubble_layout import colour_layout_area
+
+    image = np.full((140, 200, 3), (160, 197, 237), np.uint8)
+    region = TextRegion(1, (45, 45, 110, 50), bubble_bbox=(18, 18, 164, 104))
+    fallback = np.zeros((140, 200), np.uint8)
+    fallback[45:95, 45:155] = 255
+    assert np.array_equal(colour_layout_area(image, region, fallback), fallback)
+
+
 def test_neighbour_bubbles_get_disjoint_layout_without_changing_mask():
     from src.components.bubble_layout import separate_neighbour_bubbles
 

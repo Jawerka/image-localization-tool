@@ -4,6 +4,115 @@ import math
 from functools import cache
 
 import numpy as np
+import cv2
+
+
+def covers_source(mask, region, minimum=.75):
+    """Отсечь контур одной строки, ошибочно принятый за всё облачко."""
+    x, y, w, h = region.bbox
+    patch = mask[max(0, y):min(mask.shape[0], y + h), max(0, x):min(mask.shape[1], x + w)]
+    if not patch.size:
+        return False
+    ys, xs = np.nonzero(patch)
+    if not len(xs) or xs.max() - xs.min() + 1 < patch.shape[1] * .75 or ys.max() - ys.min() + 1 < patch.shape[0] * .75:
+        return False
+    # У наклонной реплики пустые углы AABB не являются местом для букв.
+    angle = abs(float(region.style.rotation or 0))
+    threshold = minimum * max(.2, 1 - .025 * min(angle, 35))
+    return bool(np.mean(patch > 0) >= threshold)
+
+
+def light_layout_area(image, region, fallback):
+    """Светлое тело облачка: залить буквенные дыры только для вёрстки."""
+    if region.bubble_bbox is None:
+        return fallback
+    bx, by, bw, bh = region.bubble_bbox
+    x0, y0 = max(0, bx), max(0, by)
+    x1, y1 = min(image.shape[1], bx + bw), min(image.shape[0], by + bh)
+    if x1 <= x0 or y1 <= y0:
+        return fallback
+    gray = cv2.cvtColor(image[y0:y1, x0:x1], cv2.COLOR_RGB2GRAY)
+    tx, ty, tw, th = region.bbox
+    xa, ya = max(0, tx - x0), max(0, ty - y0)
+    xb, yb = min(gray.shape[1], tx + tw - x0), min(gray.shape[0], ty + th - y0)
+    patch = gray[ya:yb, xa:xb]
+    if not patch.size or np.percentile(patch, 75) < 160:
+        return fallback
+    threshold = max(145, min(225, float(np.percentile(patch, 75)) - 28))
+    _, labels, stats, _ = cv2.connectedComponentsWithStats((gray >= threshold).astype(np.uint8))
+    hits = np.bincount(labels[ya:yb, xa:xb].ravel(), minlength=len(stats))
+    hits[0] = 0
+    label = int(np.argmax(hits))
+    if not label or stats[label, cv2.CC_STAT_AREA] > gray.size * .94:
+        return fallback
+    local = (labels == label).astype(np.uint8) * 255
+    contours, _ = cv2.findContours(local, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    cv2.drawContours(local, contours, -1, 255, -1)
+    result = np.zeros_like(fallback)
+    result[y0:y1, x0:x1] = local
+    if not covers_source(result, region, .85):
+        return fallback
+    if covers_source(fallback, region) and np.count_nonzero(result) <= np.count_nonzero(fallback) * 1.08:
+        return fallback
+    return result
+
+
+def balloon_body(mask, region):
+    """Убрать тонкие хвосты, сохранив широкое тело и исходную реплику."""
+    ys, xs = np.nonzero(mask)
+    if not len(xs):
+        return mask
+    radius = max(1, round(min(xs.max() - xs.min() + 1, ys.max() - ys.min() + 1) * .08))
+    local = mask[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
+    body = cv2.morphologyEx(local, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * radius + 1, 2 * radius + 1)))
+    result = np.zeros_like(mask)
+    result[ys.min():ys.max() + 1, xs.min():xs.max() + 1] = body
+    if np.count_nonzero(body) < len(xs) * .65 or not covers_source(result, region, .65):
+        return mask
+    return result
+
+
+def colour_layout_area(image, region, fallback):
+    """Уточнить цветной полупрозрачный баллон без изменения маски ретуши."""
+    from src.components.bubble_contour import balloon_seed
+
+    seed = balloon_seed(image, region)
+    if seed is None:
+        return fallback
+    sx, sy, _ = seed
+    bx, by, bw, bh = region.bubble_bbox
+    x0, y0 = max(0, bx), max(0, by)
+    x1, y1 = min(image.shape[1], bx + bw), min(image.shape[0], by + bh)
+    if not (x0 <= sx < x1 and y0 <= sy < y1):
+        return fallback
+    crop = cv2.cvtColor(image[y0:y1, x0:x1], cv2.COLOR_RGB2HSV)
+    hue, saturation, _ = (int(v) for v in crop[sy - y0, sx - x0])
+    if saturation < 45:
+        return fallback
+    delta = np.abs(crop[..., 0].astype(int) - hue)
+    delta = np.minimum(delta, 180 - delta)
+    candidate = ((delta <= 12) & (crop[..., 1] >= max(30, saturation * .45)) &
+                 (crop[..., 2] >= 60)).astype(np.uint8)
+    _, labels, stats, _ = cv2.connectedComponentsWithStats(candidate)
+    label = labels[sy - y0, sx - x0]
+    if not label or stats[label, cv2.CC_STAT_AREA] < bw * bh * .35:
+        return fallback
+    local = (labels == label).astype(np.uint8) * 255
+    # Большая полоса на границе бокса означает утечку в рисунок.
+    if any(np.mean(edge > 0) > .35 for edge in (local[0], local[-1], local[:, 0], local[:, -1])):
+        return fallback
+    contours, _ = cv2.findContours(local, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    cv2.drawContours(local, contours, -1, 255, -1)
+    result = np.zeros_like(fallback)
+    result[y0:y1, x0:x1] = local
+    tx, ty, tw, th = region.bbox
+    text = result[max(0, ty):ty + th, max(0, tx):tx + tw]
+    if not text.size or np.mean(text > 0) < .85:
+        return fallback
+    # Не подменяем уже полную форму менее надёжной цветовой оценкой.
+    if np.count_nonzero(result) <= np.count_nonzero(fallback) * 1.08:
+        return fallback
+    return result
 
 
 def separate_neighbour_bubbles(mask, region, regions):
@@ -75,6 +184,9 @@ def layout_in_shape(
     pad = max(0, int(stroke_pad)) + max(2, round(size * 0.15))
     line_h = max(1, round(max(size, ink_h * 1.15) + line_spacing))
     top, bottom = rows[0], rows[-1] + 1
+    widest = max(spans[y][1] - spans[y][0] + 1 for y in rows)
+    broad = [y for y in rows if spans[y][1] - spans[y][0] + 1 >= widest * .8]
+    center_x = float(np.median([(spans[y][0] + spans[y][1]) / 2 for y in broad]))
 
     @cache
     def bounds(line):
@@ -180,7 +292,7 @@ def layout_in_shape(
                         else (
                             right - width + 1
                             if align == "right"
-                            else (left + right - width + 1) // 2
+                            else max(left, min(right - width + 1, round(center_x - width / 2)))
                         )
                     )
                     # Pillow по умолчанию рисует ниже y на величину верхнего выноса.

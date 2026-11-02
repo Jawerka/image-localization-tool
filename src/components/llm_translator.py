@@ -7,7 +7,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from src.components.lang_guard import foreign_leak, route_for_argos
+from src.components.lang_guard import foreign_leak, route_for_argos, unchanged_foreign_words
 from src.components.sfx_dict import as_glossary, lookup
 from src.models import TextRegion, should_translate
 from src.utils.llm_client import LlmClient
@@ -391,7 +391,8 @@ class LlmTranslator:
         leaked = [
             region
             for region in regions
-            if region.translation.strip() and foreign_leak(region.translation, target_lang, allowed)
+            if region.translation.strip() and (foreign_leak(region.translation, target_lang, allowed)
+                or unchanged_foreign_words(region.text, region.translation, target_lang, allowed))
         ]
         if not leaked:
             return
@@ -406,7 +407,8 @@ class LlmTranslator:
         self._apply_items(leaked, payload.get("items") or [])
         code = (target_lang or "ru").strip().lower() or "ru"
         for region in leaked:
-            if foreign_leak(region.translation, target_lang, allowed):
+            if (foreign_leak(region.translation, target_lang, allowed) or
+                    unchanged_foreign_words(region.text, region.translation, target_lang, allowed)):
                 self.warnings.append(f"Регион {region.id} не удержался в языке {code}")
 
     def shorten(

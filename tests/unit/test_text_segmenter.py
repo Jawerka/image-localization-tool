@@ -8,6 +8,22 @@ from src.components.text_segmenter import _colors, _outlined_text_mask, apply_st
 from src.models import MaskStroke, TextRegion
 
 
+def test_unbound_light_dialogue_rescues_letters_without_erasing_border_art():
+    """Тёмный рисунок у кольца ROI не отменяет буквы светлой реплики."""
+    rgb = np.full((125, 220, 3), 255, np.uint8)
+    expected = np.zeros(rgb.shape[:2], np.uint8)
+    for text, point in [('WHAT', (20, 43)), ('NOW?', (20, 83))]:
+        cv2.putText(rgb, text, point, cv2.FONT_HERSHEY_SIMPLEX, .8, (0, 0, 0), 2)
+        cv2.putText(expected, text, point, cv2.FONT_HERSHEY_SIMPLEX, .8, 255, 2)
+    cv2.line(rgb, (175, 0), (175, 124), (0, 0, 0), 4)
+    region = TextRegion(1, (10, 10, 180, 90), text='WHAT NOW?', block_type='dialogue')
+    captured = {}
+    mask = segment_region(rgb, region, capture_ink=captured)
+    assert np.mean(mask[expected > 0] > 0) >= .99
+    assert np.mean(captured[1][expected > 0] > 0) >= .99
+    assert np.count_nonzero(mask[:, 170:180]) == 0
+
+
 def test_dense_outlined_caption_preserves_dark_cores_and_halo():
     """Плотная белая обводка не должна инвертироваться в фон и точки."""
     rgb = np.full((100, 240, 3), (20, 65, 60), dtype=np.uint8)

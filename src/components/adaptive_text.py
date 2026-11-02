@@ -80,6 +80,10 @@ def geometry_area(shape, region):
             return None
         area = np.zeros(shape[:2], np.uint8)
         cv2.fillPoly(area, [np.clip(polygon, -1_000_000, 1_000_000).astype(np.int32)], 255)
+        if (region.auto_layout or {}).get('kind') == 'bubble':
+            from src.components.bubble_layout import covers_source
+            if not covers_source(area, region):
+                return None
         return area
     except (TypeError, ValueError):
         return None
@@ -94,7 +98,7 @@ def fit_balloon_shape(area, region, text, font_path, lang, min_size=7, max_size=
     """
     from PIL import ImageDraw, ImageFont
     from src.components.bubble_layout import layout_in_shape, shape_row_spans
-    from src.components.typesetter import _draw_tracked, _field_center, _hyphenator
+    from src.components.typesetter import _composite_styled_layer, _field_center, _hyphenator
     ys, xs = np.where(area > 0)
     if not len(xs):
         return None, None, False
@@ -111,30 +115,51 @@ def fit_balloon_shape(area, region, text, font_path, lang, min_size=7, max_size=
     deskew = cv2.warpAffine(shape, cv2.getRotationMatrix2D(center, -angle, 1), (diagonal, diagonal), flags=cv2.INTER_NEAREST)
     inset = max(2, round(min(cut.shape) * .045))
     deskew = cv2.erode(deskew, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (inset * 2 + 1, inset * 2 + 1)))
+    count, labels, stats, _ = cv2.connectedComponentsWithStats((deskew > 0).astype(np.uint8))
+    if count > 2:
+        # После отступа тонкая перемычка может разделить фигурное облачко.
+        # Строки одной реплики не должны прыгать между разными островками.
+        label = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+        deskew = (labels == label).astype(np.uint8) * 255
     spans = shape_row_spans(deskew)
     dummy = ImageDraw.Draw(Image.new('L', (1, 1)))
     low = max(1, int(min_size))
     high = min(int(max_size), max(low, round(min(cut.shape) * .55)))
     selected = None
     spacing = float(region.style.letter_spacing or 0.0)
-    for size in range(high, low - 1, -1):
+    local_region = copy.copy(region)
+    local_region.bbox = (region.bbox[0] - origin_x, region.bbox[1] - origin_y, *region.bbox[2:])
+    if region.bubble_bbox is not None:
+        local_region.bubble_bbox = (region.bubble_bbox[0] - origin_x, region.bubble_bbox[1] - origin_y, *region.bubble_bbox[2:])
+    local_region.text_position = None
+    def attempt(size, hyphenator):
         pad = int(stroke_pad(size) if callable(stroke_pad) else stroke_pad)
         font = ImageFont.truetype(str(font_path), size)
         placed, fits = layout_in_shape(
-            text, font, dummy, spans, _hyphenator(lang), 'center',
+            text, font, dummy, spans, hyphenator, 'center',
             letter_spacing=spacing, line_spacing=region.style.line_spacing, stroke_pad=pad,
         )
         if not fits:
-            continue
+            return None
         layer = Image.new('RGBA', (diagonal, diagonal))
-        paint = ImageDraw.Draw(layer)
-        for line, x, y in placed:
-            _draw_tracked(paint, (x, y), line, font, (255, 255, 255), (255, 255, 255), pad, spacing)
-        turned = np.asarray(layer.rotate(angle, Image.Resampling.BICUBIC, center=center))
+        # Проверяем ту же растеризацию 2× и тот же поворот, что в финальном выводе.
+        _composite_styled_layer(layer, placed, font, font_path, (255, 255, 255),
+                                (255, 255, 255), pad, region.style, dummy, region=local_region)
+        turned = np.asarray(layer)
         if np.any((turned[..., 3] > 20) & (shape == 0)):
-            continue
-        selected = ([(line, int(x + origin_x), int(y + origin_y)) for line, x, y in placed], font, True)
-        break
+            return None
+        return ([(line, int(x + origin_x), int(y + origin_y)) for line, x, y in placed], font, True)
+
+    for size in range(high, low - 1, -1):
+        selected = attempt(size, _hyphenator(lang))
+        if selected:
+            # Умеренно уменьшаем кегль, если это убирает переносы внутри слов.
+            if any(line.endswith('-') and line not in text.split() for line, _, _ in selected[0]):
+                for whole_size in range(size, max(low, math.ceil(size * .82)) - 1, -1):
+                    whole = attempt(whole_size, None)
+                    if whole:
+                        return whole
+            return selected
     return selected or (None, None, False)
 
 
@@ -178,6 +203,13 @@ def adaptive_masks(image, regions, ordinary, free, grow_px=0):
             area = geometry_area((image.height, image.width), region)
             if area is not None:
                 local[area[ya:yb, xa:xb] == 0] = 0
+            if region.bubble_bbox is None:
+                # Толстая буква может соединиться с тонким контуром и исчезнуть
+                # из геометрического фильтра. Восстанавливаем только её ядро,
+                # не распространяя заливку по всей связанной обводке.
+                joined = joined_speech_ink(image.crop((a, b, c, d)), region, (a, b), area)
+                local[b - ya:d - ya, a - xa:c - xa] = np.maximum(
+                    local[b - ya:d - ya, a - xa:c - xa], joined)
         else:
             for other in regions:
                 if other.id == region.id or not is_balloon(other):
@@ -188,6 +220,35 @@ def adaptive_masks(image, regions, ordinary, free, grow_px=0):
         # Удалить старую маску лишь в боксе этой надписи; остальные регионы не затирать.
         destination[ya:yb, xa:xb] = np.maximum(destination[ya:yb, xa:xb], local)
     return ordinary, free
+
+
+def joined_speech_ink(crop, region, origin, area=None):
+    """Ограниченный добор толстых букв, соединённых с тонким краем облачка."""
+    gray = cv2.cvtColor(np.asarray(crop.convert('RGB')), cv2.COLOR_RGB2GRAY)
+    result = np.zeros(gray.shape, np.uint8)
+    if not gray.size or np.percentile(gray, 60) < 225:
+        return result
+    scale = max(.5, float((region.auto_layout or {}).get('outline_px', 3)) / 3)
+    radius = max(1.8, scale * 1.2)
+    dark = (gray < 160).astype(np.uint8)
+    core = (cv2.distanceTransform(dark, cv2.DIST_L2, 5) > radius).astype(np.uint8)
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(core)
+    a, b = origin
+    x, y, w, h = region.bbox
+    for idx in range(1, count):
+        cx, cy, cw, ch, pixels = stats[idx]
+        if (pixels < max(3, scale * scale) or ch > h * .65 or cw > w * .65 or
+                not (x <= a + cx + cw / 2 <= x + w and y <= b + cy + ch / 2 <= y + h)):
+            continue
+        component = labels == idx
+        if area is not None and np.mean(area[b:b + gray.shape[0], a:a + gray.shape[1]][component] > 0) < .6:
+            continue
+        result[component] = 255
+    grow = max(2, math.ceil(radius * 1.6))
+    result = cv2.dilate(result, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * grow + 1, 2 * grow + 1)))
+    result[dark == 0] = 0
+    pad = max(1, round(scale))
+    return cv2.dilate(result, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * pad + 1, 2 * pad + 1)))
 
 def source_ink(image, region):
     """Чернила локального кропа без необходимости держать маску всей страницы на регион."""
@@ -242,7 +303,45 @@ def source_ink(image, region):
         if confirmed is not None:
             ink = np.maximum(ink, confirmed)
             region._retouch_preserve_background = True
+    if (region.bubble_bbox is None and is_balloon(region) and
+            sum(ch.isalnum() for ch in region.text) >= 8):
+        ink = _supported_speech_rows(ink)
     return (crop, ink, (a, b, c, d))
+
+
+def _supported_speech_rows(ink):
+    """Не включать отдельные штрихи рисунка в оболочку непривязанной речи.
+
+    Обводка и ресэмплинг могут добавить пару компонентов далеко от строк.
+    Фильтр срабатывает только при нескольких подтверждённых рядах букв;
+    короткие реплики и неоднозначные наборы компонентов остаются прежними.
+    """
+    count, labels, stats, centers = cv2.connectedComponentsWithStats((ink > 0).astype(np.uint8))
+    significant = [i for i in range(1, count) if stats[i, 4] >= 8 and stats[i, 3] >= 5]
+    if len(significant) < 8:
+        return ink
+    typical = float(np.percentile([stats[i, 3] for i in significant], 60))
+    angle, _ = text_angle(ink)
+    rad = math.radians(angle)
+    normal = np.sin(rad) * centers[:, 0] + np.cos(rad) * centers[:, 1]
+    ordered = sorted(significant, key=lambda i: normal[i])
+    groups = []
+    for idx in ordered:
+        if not groups or normal[idx] - normal[groups[-1][-1]] > typical * .7:
+            groups.append([])
+        groups[-1].append(idx)
+    supported = [g for g in groups if sum(stats[i, 3] >= typical * .4 for i in g) >= 3]
+    if not supported:
+        return ink
+    # Точки и дефисы сохраняются рядом с найденной строкой, но не создают
+    # собственный подтверждённый ряд из мелких штрихов рисунка.
+    ids = [i for i in range(1, count) if any(
+        min(normal[j] for j in group) - typical * .35 <= normal[i] <=
+        max(normal[j] for j in group) + typical * .35 for group in supported)]
+    filtered = np.isin(labels, ids).astype(np.uint8) * 255
+    if np.count_nonzero(filtered) >= np.count_nonzero(ink) * .75:
+        return filtered
+    return ink
 
 def text_angle(ink):
     """Оценка направления строк по концентрации горизонтальной проекции после поворота."""
@@ -305,4 +404,26 @@ def inferred_balloon_area(image, region, ink, box, white_components=None):
     cv2.fillConvexPoly(area, hull, 255)
     pad = max(4, round(min(c - a, d - b) * 0.035))
     area = cv2.dilate(area, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (pad * 2 + 1, pad * 2 + 1)))
+    # Оболочка двух наклонных строк пересекает выемки фигурного облачка.
+    # Внутри ограниченной оболочки обводка снова разделяет белый фон:
+    # оставляем только части, действительно окружающие исходные буквы.
+    yy, xx = np.where(area > 0)
+    left, top, right, bottom = int(xx.min()), int(yy.min()), int(xx.max()) + 1, int(yy.max()) + 1
+    local_gray = cv2.cvtColor(np.asarray(image.crop((left, top, right, bottom)).convert('RGB')), cv2.COLOR_RGB2GRAY)
+    local_area = area[top:bottom, left:right]
+    bright = ((local_gray > 180) & (local_area > 0)).astype(np.uint8)
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(bright)
+    source = np.zeros_like(local_area)
+    xa, ya, xb, yb = max(left, a), max(top, b), min(right, c), min(bottom, d)
+    source[ya - top:yb - top, xa - left:xb - left] = ink[ya - b:yb - b, xa - a:xb - a]
+    refined = np.zeros_like(local_area)
+    for idx in range(1, count):
+        if stats[idx, cv2.CC_STAT_AREA] < pad * pad:
+            continue
+        contours, _ = cv2.findContours((labels == idx).astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        filled = cv2.drawContours(np.zeros_like(local_area), contours, -1, 255, -1)
+        if np.count_nonzero((filled > 0) & (source > 0)) >= max(8, np.count_nonzero(ink) * .02):
+            refined = np.maximum(refined, filled)
+    if np.count_nonzero((refined > 0) & (source > 0)) >= np.count_nonzero(ink) * .9:
+        area[top:bottom, left:right] = refined
     return area
