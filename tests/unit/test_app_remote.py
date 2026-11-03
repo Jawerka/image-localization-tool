@@ -448,7 +448,7 @@ def test_cors_preflight_echoes_extension_origin(serve_remote):
     assert moz_headers["access-control-allow-origin"] == "moz-extension://xyz"
     health, _headers, body = _request(server.port, "GET", "/v1/health")
     assert health == 200
-    assert json.loads(body) == {"version": "dev", "ready": True}
+    assert json.loads(body) == {"version": "dev", "ready": True, "max_body_bytes": MAX_BODY_BYTES}
 
 
 def test_oversized_content_length_is_413(serve_remote):
@@ -479,6 +479,27 @@ def test_oversized_content_length_is_413(serve_remote):
     finally:
         sock.close()
     assert b" 413 " in bytes(data).split(b"\r\n", 1)[0]
+
+
+def test_large_original_upload_is_accepted_unchanged(serve_remote):
+    """Регрессия PNG 29 865 297 байт: транспорт не уменьшает оригинал."""
+    seen: list[bytes] = []
+
+    def runner(job):
+        seen.append(job.image)
+        job.finish(_png((0, 0, 255)))
+
+    server = serve_remote(runner=runner)
+    token = json.loads(_pair(server.port, server.pairing.issue_code())[2])["token"]
+    buffer = BytesIO()
+    Image.new("RGB", (3150, 3150), (100, 150, 200)).save(buffer, format="PNG", compress_level=0)
+    image = buffer.getvalue().ljust(29_865_297, b"\0")
+    assert len(image) == 29_865_297
+    assert MAX_BODY_BYTES == 64 * 1024 * 1024
+    status, _headers, body = _translate(server.port, token, image)
+    assert status == 202
+    assert _wait_job(server.port, token, json.loads(body)["job_id"])["status"] == "done"
+    assert seen == [image]
 
 
 def test_small_image_and_multipart(serve_remote):

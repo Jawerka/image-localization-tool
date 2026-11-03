@@ -9,7 +9,7 @@ function background(withPanel = true, granted = true) {
   const chrome = {
     runtime: { onMessage: { addListener() {} }, onInstalled: { addListener() {} }, getURL: path => `chrome-extension://test/${path}` },
     storage: {
-      local: { get: async () => ({ serverUrl: "http://127.0.0.1:8765", token: "", targetLang: "ru" }) },
+      local: { get: async () => ({ serverUrl: "http://127.0.0.1:8765", token: "", targetLang: "ru" }), set: async () => {} },
       session: { set: async values => Object.assign(state, values), get: async key => ({ [key]: state[key] }) },
     },
     contextMenus: { create: async () => {}, removeAll: async () => {}, onClicked: { addListener() {} } },
@@ -126,4 +126,106 @@ test("Сохранить перевод качает файл с языком в
   assert.equal(download[1].filename, "large.ru.png");
   assert.equal(download[1].saveAs, true);
   assert.match(download[1].url, /^data:image\/png;base64,/);
+});
+
+
+function uploadContext(health = { max_body_bytes: 64 * 1024 * 1024 }) {
+  const { context } = background();
+  const calls = [];
+  Object.assign(context, {
+    Blob, FormData, Response,
+    fetch: async (url, options) => {
+      calls.push({ url, options });
+      return Response.json(url.endsWith('/v1/health') ? health : { job_id: 'large-job' });
+    },
+  });
+  return { context, calls };
+}
+
+const uploadCall = `postTranslate('http://127.0.0.1:8765', 'secret', uploadImage,
+  {imageUrl:'https://img.example/original.png', targetLang:'ru', fresh:true})`;
+
+test('Оригинал 29 865 297 байт проходит новый лимит и сохраняется в multipart', async () => {
+  const { context, calls } = uploadContext();
+  context.uploadImage = new Blob([new Uint8Array(29_865_297)], { type: 'image/png' });
+  assert.equal(await vm.runInContext(uploadCall, context), 'large-job');
+  assert.equal(calls.length, 2);
+  const posted = calls[1].options.body;
+  assert.ok(posted instanceof Blob);
+  assert.match(posted.type, /^multipart\/form-data;\s*boundary=/);
+  assert.ok(posted.size > context.uploadImage.size);
+  const form = await new Response(posted).formData();
+  assert.equal(form.get('file').size, context.uploadImage.size);
+  assert.equal(form.get('file').type, 'image/png');
+  assert.equal(form.get('target_lang'), 'ru');
+  assert.equal(form.get('fresh'), '1');
+  assert.deepEqual(await form.get('file').arrayBuffer(), await context.uploadImage.arrayBuffer());
+});
+
+test('Старый сервер и некорректный лимит: большой файл не передаётся', async () => {
+  for (const health of [{}, {max_body_bytes:0}, {max_body_bytes:-1}, {max_body_bytes:'67108864'}, {max_body_bytes:1.5}, {max_body_bytes:Number.MAX_VALUE}]) {
+    const { context, calls } = uploadContext(health);
+    context.uploadImage = new Blob([new Uint8Array(21 * 1024 * 1024)]);
+    await assert.rejects(vm.runInContext(uploadCall, context), error => error.code === 'E_UPLOAD_SIZE' && /20 МиБ/.test(error.message));
+    assert.equal(calls.length, 1);
+    const entry = vm.runInContext('logMemory.at(-1)', context);
+    assert.equal(entry.data.code, 'E_UPLOAD_SIZE');
+    assert.equal(JSON.stringify(entry).includes('secret'), false);
+  }
+});
+
+test('Размер файла ниже лимита, но multipart выше: POST не начинается', async () => {
+  const { context, calls } = uploadContext({max_body_bytes:1024});
+  context.uploadImage = new Blob([new Uint8Array(1024)], {type:'image/png'});
+  await assert.rejects(vm.runInContext(uploadCall, context), error => error.code === 'E_UPLOAD_SIZE');
+  assert.equal(calls.length, 1);
+  assert.ok(vm.runInContext('logMemory.at(-1).data.checkedBytes', context) > 1024);
+});
+
+test('Точный лимит multipart принимается, один лишний байт блокируется', async () => {
+  const probe = uploadContext();
+  probe.context.uploadImage = new Blob(['image'], {type:'image/png'});
+  await vm.runInContext(uploadCall, probe.context);
+  const bodySize = probe.calls[1].options.body.size;
+  for (const [limit, allowed] of [[bodySize, true], [bodySize - 1, false]]) {
+    const { context, calls } = uploadContext({max_body_bytes:limit});
+    context.uploadImage = probe.context.uploadImage;
+    if (allowed) assert.equal(await vm.runInContext(uploadCall, context), 'large-job');
+    else await assert.rejects(vm.runInContext(uploadCall, context), error => error.code === 'E_UPLOAD_SIZE');
+    assert.equal(calls.length, allowed ? 2 : 1);
+  }
+});
+
+test('413 сохраняет причину, HTTP-статус и код без секрета', async () => {
+  for (const response of [Response.json({error:'Картинка больше 40 000 000 пикселей'}, {status:413}), new Response('too large', {status:413}), Response.json({}, {status:413})]) {
+    const { context } = uploadContext();
+    context.fetch = async () => response;
+    await assert.rejects(vm.runInContext(`fetchApi('http://127.0.0.1:8765/v1/translate', {method:'POST', headers:{Authorization:'Bearer secret'}})`, context), error => error.code === 'E_HTTP_413' && !/сервер не найден/.test(error.message));
+    const entry = vm.runInContext('logMemory.at(-1)', context);
+    assert.equal(entry.data.status, 413);
+    assert.equal(entry.data.path, '/v1/translate');
+    assert.equal(JSON.stringify(entry).includes('secret'), false);
+  }
+});
+
+test('Сетевой TypeError отличается от локального TypeError', async () => {
+  const { context } = uploadContext();
+  context.fetch = async () => { throw new TypeError('Failed to fetch'); };
+  await assert.rejects(vm.runInContext(`fetchApi('http://127.0.0.1:8765/v1/health')`, context), error => error.code === 'E_NETWORK');
+  assert.equal(vm.runInContext(`toPipelineError(new TypeError('Ошибка сериализации'))`, context), 'Ошибка сериализации');
+});
+
+test('executeJob сохраняет код отказа загрузки в сводке задания', async () => {
+  const { context } = uploadContext({max_body_bytes:1});
+  context.chrome.storage.local.get = async () => ({serverUrl:'http://127.0.0.1:8765', token:'secret', targetLang:'ru'});
+  context.uploadImage = new Blob(['large'], {type:'image/png'});
+  await vm.runInContext(`(async () => {
+    const job = makeJob('test', 'https://site.example/', 'https://img.example/a.png');
+    job.suppliedBlob = uploadImage;
+    await executeJob(job);
+    globalThis.failedJob = job;
+  })()`, context);
+  assert.equal(context.failedJob.status, 'error');
+  assert.equal(context.failedJob.errorCode, 'E_UPLOAD_SIZE');
+  assert.match(context.failedJob.error, /лимит/);
 });

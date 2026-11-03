@@ -367,7 +367,7 @@ function runJob(job) {
         pump();
         return;
       }
-      if (job.status !== "done" && job.status !== "error") markError(job, toPipelineError(err));
+      if (job.status !== "done" && job.status !== "error") markError(job, toPipelineError(err), err?.code || "");
       finishJob(job, run);
     }
   );
@@ -375,7 +375,7 @@ function runJob(job) {
 
 function isNetworkError(err) {
   if (!err || typeof err !== "object") return false;
-  if (err.name === "TypeError" || err.name === "NetworkError") return true;
+  if (err.code === "E_NETWORK" || err.name === "NetworkError") return true;
   const message = String(err.message || "");
   return message === "Failed to fetch"
     || /NetworkError|ERR_CONNECTION|ERR_NAME_NOT_RESOLVED|ERR_INTERNET_DISCONNECTED|ECONNREFUSED|ENOTFOUND/i.test(message);
@@ -413,21 +413,29 @@ async function fetchApi(url, options) {
   try {
     response = await fetch(url, options);
   } catch (err) {
-    if (isNetworkError(err)) throw new Error("сервер не найден");
+    if (err?.name === "TypeError" || isNetworkError(err)) {
+      const error = new Error("не удалось связаться с сервером");
+      error.code = "E_NETWORK";
+      writeLog([{ lvl: "error", ev: "api-error", msg: error.message,
+        data: { path: new URL(url).pathname, method: options?.method || "GET", code: error.code } }]);
+      throw error;
+    }
     throw err;
   }
   if (!response) throw new Error("сервер не найден");
-  if (response.status === 401) throw new Error("ключ отозван");
-  if (response.status === 429) throw new Error("очередь заполнена");
   if (!response.ok) {
-    let message = "ошибка перевода";
+    let message = response.status === 413 ? "изображение превышает допустимый размер сервера" : "ошибка перевода";
     try {
       const data = await response.json();
       if (data && typeof data.error === "string" && data.error.trim()) message = data.error;
-    } catch (_) {
-      message = "ошибка перевода";
-    }
-    throw new Error(message);
+    } catch (_) { /* оставим сообщение по HTTP-статусу */ }
+    if (response.status === 401) message = "ключ отозван";
+    if (response.status === 429) message = "очередь заполнена";
+    const error = new Error(message);
+    error.code = "E_HTTP_" + response.status;
+    writeLog([{ lvl: "error", ev: "api-error", msg: message,
+      data: { path: new URL(url).pathname, method: options?.method || "GET", status: response.status, code: error.code } }]);
+    throw error;
   }
   return response;
 }
@@ -649,15 +657,32 @@ function blobFromBase64(base64, mime) {
   return new Blob([bytes], { type: mime || "image/png" });
 }
 
+function checkUploadSize(size, limit, imageBytes) {
+  if (size <= limit) return;
+  const error = new Error(`изображение слишком большое: лимит загрузки сервера ${Number((limit / (1024 * 1024)).toFixed(2))} МиБ`);
+  error.code = "E_UPLOAD_SIZE";
+  writeLog([{ lvl: "error", ev: "upload-too-large", msg: error.message,
+    data: { code: error.code, imageBytes, checkedBytes: size, maxBodyBytes: limit } }]);
+  throw error;
+}
+
 async function postTranslate(serverUrl, token, imageBlob, job) {
+  const healthResponse = await fetchApi(apiUrl(serverUrl, "/v1/health"), { cache: "no-store" });
+  const health = await readJson(healthResponse);
+  const advertised = health?.max_body_bytes;
+  const limit = Number.isSafeInteger(advertised) && advertised > 0 ? advertised : 20 * 1024 * 1024;
+  checkUploadSize(imageBlob.size, limit, imageBlob.size);
   const form = new FormData();
   form.append("file", imageBlob, fileNameFromUrl(job.imageUrl));
   form.append("target_lang", job.targetLang);
   if (job.fresh) form.append("fresh", "1");
+  // Проверяем и отправляем одни и те же байты вместе с multipart-заголовками.
+  const body = await new Response(form).blob();
+  checkUploadSize(body.size, limit, imageBlob.size);
   const response = await fetchApi(apiUrl(serverUrl, "/v1/translate"), {
     method: "POST",
     headers: authHeaders(token),
-    body: form,
+    body,
     cache: "no-store",
   });
   const data = await readJson(response);
@@ -774,7 +799,7 @@ async function executeJob(job) {
   try {
     remoteId = await postTranslate(settings.serverUrl, settings.token, imageBlob, job);
   } catch (err) {
-    markError(job, toPipelineError(err));
+    markError(job, toPipelineError(err), err?.code || "");
     return;
   }
   job.remoteId = remoteId;
@@ -782,14 +807,14 @@ async function executeJob(job) {
   try {
     await pollJob(settings.serverUrl, settings.token, job);
   } catch (err) {
-    markError(job, toPipelineError(err));
+    markError(job, toPipelineError(err), err?.code || "");
     return;
   }
   let result;
   try {
     result = await fetchResult(settings.serverUrl, settings.token, remoteId);
   } catch (err) {
-    markError(job, toPipelineError(err));
+    markError(job, toPipelineError(err), err?.code || "");
     return;
   }
   try {
