@@ -29,6 +29,7 @@ SOURCE_FILES = (
     "background.js",
     "button-model.js",
     "log.js",
+    "image-source.js",
     "inline-content.js",
     "native-swap.js",
     "safe-content.js",

@@ -229,3 +229,73 @@ test('executeJob сохраняет код отказа загрузки в св
   assert.equal(context.failedJob.errorCode, 'E_UPLOAD_SIZE');
   assert.match(context.failedJob.error, /лимит/);
 });
+
+
+test('Запасное скачивание разрешает HTTP-кэш расширения', async () => {
+  const { context } = uploadContext();
+  let options;
+  context.fetch = async (_url, supplied) => { options = supplied; return new Response('image', {headers:{'content-type':'image/webp'}}); };
+  const blob = await vm.runInContext(`downloadImage('https://img.example/a.webp', 'https://site.example/')`, context);
+  assert.equal(await blob.text(), 'image');
+  assert.equal(options.cache, 'force-cache');
+});
+
+test('Ошибка загрузки сохраняет тип сбоя и origin без подписанного URL', async () => {
+  const { context } = uploadContext();
+  context.fetch = async () => { throw new TypeError('Failed to fetch'); };
+  await assert.rejects(vm.runInContext(`downloadImage('https://img.example/a.webp?private=key', 'https://site.example/')`, context), error => error.code === 'E_DOWNLOAD');
+  const entries = vm.runInContext('logMemory', context);
+  assert.equal(entries[0].data.name, 'TypeError');
+  assert.equal(entries[0].data.origin, 'https://img.example/');
+  assert.equal(JSON.stringify(entries).includes('private'), false);
+});
+
+test('Запасное скачивание отвергает пустой либо непрозрачный ответ', async () => {
+  for (const response of [new Response(''), {ok:true,type:'opaque',status:0}]) {
+    const { context } = uploadContext();
+    context.fetch = async () => response;
+    await assert.rejects(vm.runInContext(`downloadImage('https://img.example/a.webp', 'https://site.example/')`, context), error => error.code === 'E_DOWNLOAD');
+  }
+});
+
+test('Переданные байты страницы обходят повторное скачивание оригинала', async () => {
+  const { context, calls } = uploadContext();
+  context.chrome.storage.local.get = async () => ({serverUrl:'http://127.0.0.1:8765', token:'secret', targetLang:'ru'});
+  await vm.runInContext(`(async () => {
+    const job = makeJob('source-test', 'https://site.example/', 'https://unavailable.example/a.png');
+    job.suppliedBlob = new Blob(['cached-original'], {type:'image/png'});
+    pollJob = async () => {};
+    fetchResult = async () => ({blob:new Blob(['translated'], {type:'image/png'}),mime:'image/png'});
+    finishLocal = async job => {job.status='done';};
+    deleteRemote = async () => {};
+    await executeJob(job);
+    globalThis.finishedSourceJob = job;
+  })()`, context);
+  assert.equal(context.finishedSourceJob.status, 'done');
+  assert.equal(calls.some(call => call.url.includes('unavailable.example')), false);
+  const form = await new Response(calls.find(call => call.options.method === 'POST').options.body).formData();
+  assert.equal(await form.get('file').text(), 'cached-original');
+});
+
+
+test('Байты HTTP-оригинала со страницы сохраняют кэш готового перевода и fresh', async () => {
+  for (const fresh of [false, true]) {
+    const { context, calls } = uploadContext();
+    context.chrome.storage.local.get = async () => ({serverUrl:'http://127.0.0.1:8765', token:'secret', targetLang:'ru'});
+    context.freshTest = fresh;
+    await vm.runInContext(`(async () => {
+      const job = makeJob('result-cache-test', 'https://site.example/', 'https://img.example/a.png');
+      job.suppliedBlob = new Blob(['original'], {type:'image/png'});
+      job.fresh = freshTest;
+      readResultCache = async () => new Blob(['existing-translation'], {type:'image/png'});
+      pollJob = async () => {};
+      fetchResult = async () => ({blob:new Blob(['fresh-translation'], {type:'image/png'}),mime:'image/png'});
+      finishLocal = async job => {job.status='done';};
+      deleteRemote = async () => {};
+      await executeJob(job);
+      globalThis.cachedSourceJob = job;
+    })()`, context);
+    assert.equal(await context.cachedSourceJob.blob.text(), fresh ? 'fresh-translation' : 'existing-translation');
+    assert.equal(calls.length, fresh ? 2 : 0);
+  }
+});

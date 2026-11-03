@@ -216,11 +216,11 @@ def test_saved_pikabu_has_no_idle_changes(safe_extension):
             storage: {local: {get(keys, callback) {callback({});}}}
           };
         }""")
-        for name in ("button-model.js", "log.js", "inline-content.js", "safe-content.js"):
+        for name in ("button-model.js", "log.js", "image-source.js", "inline-content.js", "safe-content.js"):
             page.add_script_tag(content=(ROOT / "extension/src" / name).read_text(encoding="utf-8"))
         page.wait_for_timeout(100)
         # add_script_tag сам добавляет два тега; удаляем их перед сравнением.
-        page.evaluate("document.querySelectorAll('script:not([src])').forEach(e=>{const t=e.textContent; if(t.includes('iltSafeContent')||t.includes('iltInlineContent')||t.includes('iltButtonModel')||t.includes('iltLog')) e.remove()})")
+        page.evaluate("document.querySelectorAll('script:not([src])').forEach(e=>{const t=e.textContent; if(t.includes('iltSafeContent')||t.includes('iltInlineContent')||t.includes('iltButtonModel')||t.includes('iltLog')||t.includes('iltImageSource')) e.remove()})")
         assert page.evaluate("document.documentElement.outerHTML") == before
         assert page.locator("img").evaluate_all("es=>es.map(e=>({src:e.src,rect:e.getBoundingClientRect().toJSON()}))") == geometry
         page.close()

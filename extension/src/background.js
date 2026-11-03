@@ -598,21 +598,37 @@ async function downloadImage(imageUrl, pageUrl) {
   if (isBlobUrl(imageUrl) || /^data:/i.test(imageUrl)) throw downloadError(0);
   let response = null;
   try {
-    response = await fetch(imageUrl, { credentials: "include", cache: "no-store" });
-  } catch (_) {
+    response = await fetch(imageUrl, { credentials: "include", cache: "force-cache" });
+  } catch (error) {
+    writeLog([{ lvl: "error", ev: "download-error", msg: "источник изображения не ответил",
+      data: { origin: new URL(imageUrl).origin, name: error.name, cache: "force-cache" } }]);
     response = null;
   }
   if (response && (response.status === 401 || response.status === 403)) {
     try { await withReferer(imageUrl, pageUrl); } catch (_) {}
     try {
-      response = await fetch(imageUrl, { credentials: "include", cache: "no-store" });
-    } catch (_) {
+      response = await fetch(imageUrl, { credentials: "include", cache: "force-cache" });
+    } catch (error) {
+      writeLog([{ lvl: "error", ev: "download-error", msg: "повторная загрузка с Referer не удалась",
+        data: { origin: new URL(imageUrl).origin, name: error.name, cache: "force-cache" } }]);
       response = null;
     }
     await clearReferer();
   }
-  if (!response || !response.ok) throw downloadError(response ? response.status : 0);
-  return response.blob();
+  if (!response || !response.ok || response.type === "opaque") {
+    writeLog([{ lvl: "error", ev: "download-error", msg: "исходник недоступен в кэше расширения и в сети",
+      data: { origin: new URL(imageUrl).origin, status: response?.status || 0 } }]);
+    throw downloadError(response ? response.status : 0);
+  }
+  try {
+    const blob = await response.blob();
+    if (!blob.size) throw downloadError(0);
+    return blob;
+  } catch (error) {
+    writeLog([{ lvl: "error", ev: "download-error", msg: "не удалось прочитать тело изображения",
+      data: { origin: new URL(imageUrl).origin, name: error.name } }]);
+    throw downloadError(0);
+  }
 }
 
 async function convertImage(blob) {
@@ -771,7 +787,7 @@ async function executeJob(job) {
     return;
   }
   logToken = settings.token;
-  if (!job.fresh && !job.suppliedBlob) {
+  if (!job.fresh && (!job.suppliedBlob || /^https?:/i.test(job.imageUrl))) {
     const cached = await readResultCache(job.imageUrl, job.targetLang);
     if (cached) {
       job.blob = cached;

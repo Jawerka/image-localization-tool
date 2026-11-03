@@ -738,23 +738,7 @@
   }
 
   async function readInlineBytes(choice) {
-    if (choice.imageBase64) return { imageBase64: choice.imageBase64, imageMime: choice.imageMime || "image/png" };
-    const url = choice.url || "";
-    if (!url.startsWith("blob:") && !url.startsWith("data:")) return {};
-    try {
-      const response = await fetch(url);
-      const blob = await response.blob();
-      const buffer = await blob.arrayBuffer();
-      const bytes = new Uint8Array(buffer);
-      let binary = "";
-      for (let offset = 0; offset < bytes.length; offset += 0x2000) {
-        binary += String.fromCharCode.apply(null, bytes.subarray(offset, offset + 0x2000));
-      }
-      return { imageBase64: btoa(binary), imageMime: blob.type || "image/png" };
-    } catch (error) {
-      log("read-bytes", error.message || "не прочитано", {});
-      return {};
-    }
+    return globalThis.iltImageSource?.read(choice, log) || {};
   }
 
   async function start(choice, permitted = false, error = "") {
