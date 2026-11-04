@@ -35,6 +35,9 @@ def prepare_regions(image, regions, pixel_scale=1.0):
             continue
         angle, evidence = text_angle(ink)
         bubble = is_balloon(region)
+        if (region.bubble_bbox is None and abs(angle) >= 3 and
+                getattr(region, '_retouch_preserve_background', False)):
+            bubble = False
         if bubble and (sum(ch.isalnum() for ch in region.text) < 4 or
                        (any('\u3040' <= ch <= '\u9fff' for ch in region.text) and region.bbox[3] > region.bbox[2] * 1.2)):
             angle = 0.
@@ -73,6 +76,11 @@ def prepare_regions(image, regions, pixel_scale=1.0):
                 geometry['angle'] = angle = 0.
         if not bubble:
             geometry['allow_vertical'] = region.block_type == 'sfx'
+            if abs(angle) >= 3:
+                from src.components.slanted_layout import source_lines
+                rows = source_lines(ink, (a, b), region.bbox, angle)
+                if rows:
+                    geometry['source_lines'] = rows
         region.auto_layout = geometry
         style.rotation = angle
         if not bubble and style.stroke_mode == 'auto' and not style.fill_locked:
@@ -422,6 +430,15 @@ def text_angle(ink):
     gain = best / max(zero, 1)
     if abs(angle) < 3 or gain < 1.055 or abs(angle) == 35:
         return (0.0, {'raw_angle': angle, 'gain': round(gain, 3), 'reason': 'недостаточная уверенность'})
+    # Повторное измерение на сглаженной маске устраняет ступеньку целого градуса.
+    smooth = padded.astype(np.float32)
+    refined = []
+    for candidate in np.arange(angle - 1., angle + 1.01, .1):
+        matrix = cv2.getRotationMatrix2D((side / 2, side / 2), -float(candidate), 1)
+        rotated = cv2.warpAffine(smooth, matrix, (side, side), flags=cv2.INTER_LINEAR)
+        projection = rotated.sum(axis=1, dtype=np.float64)
+        refined.append((float(np.dot(projection, projection)), float(candidate)))
+    angle = round(max(refined)[1], 2)
     return (float(angle), {'raw_angle': angle, 'gain': round(gain, 3), 'reason': 'проекция строк'})
 
 def inferred_balloon_area(image, region, ink, box, white_components=None):

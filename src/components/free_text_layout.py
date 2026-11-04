@@ -12,6 +12,11 @@ from src.components.glyph_layout import glyph_mask, vertical_glyph_mask
 
 def free_raster(text, font_path, style, geometry, scale=2, frozen=None):
     """Основа до геометрии; фиксированные размеры снимка сохраняют ручной поворот."""
+    if geometry.get('source_lines'):
+        from src.components.slanted_layout import line_raster
+        result = line_raster(text, font_path, style, geometry, scale, frozen)
+        if result is not None:
+            return result
     font = ImageFont.truetype(str(font_path), 144)
     ix, iy, width, height = geometry.get('ink_bbox', [0, 0, 100, 50])
     ink_width, ink_height = width, height

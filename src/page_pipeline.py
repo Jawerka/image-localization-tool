@@ -195,6 +195,9 @@ def _scale_regions(regions: list[TextRegion], factor: float) -> None:
                 meta["source_bbox"] = list(_scale_box(meta["source_bbox"], factor))
             if meta.get("contour"):
                 meta["contour"] = _scale_points(meta["contour"], factor)
+            if meta.get("source_lines"):
+                meta["source_lines"] = [[round(float(v)*factor, 6) for v in row]
+                                        for row in meta["source_lines"]]
             for key in ("outline_px", "mask_pad_px"):
                 if key in meta:
                     meta[key] = round(float(meta[key]) * factor, 6)

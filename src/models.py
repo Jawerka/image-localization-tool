@@ -79,6 +79,13 @@ def _auto_layout(value, bbox):
         for key in ('outline_px', 'mask_pad_px'):
             if key in value and not 0 <= float(value[key]) <= 10000:
                 return None
+        rows = value.get('source_lines')
+        if rows is not None and (not isinstance(rows, list) or not 1 <= len(rows) <= 12 or any(
+                not isinstance(row, (list, tuple)) or len(row) != 4 or
+                any(not isinstance(v, (int, float)) or isinstance(v, bool) or
+                    not math.isfinite(v) or abs(v) >= 1_000_000 for v in row) or
+                min(row[2:]) <= 0 for row in rows)):
+            return None
         if value.get('contour') is not None:
             points = value['contour']
             if (not isinstance(points, list) or not 3 <= len(points) <= 4096 or
