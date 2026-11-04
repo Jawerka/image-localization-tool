@@ -8,7 +8,7 @@ from PIL import Image
 
 from src.components.bubble_contour import balloon_flood_mask, bubble_interior_mask
 from src.components.sfx_ink import drop_line_components, outlined_glyphs
-from src.components.retouch_ink import confirmed_light_ink
+from src.components.retouch_ink import confirmed_light_ink, smooth_light_mask
 from src.models import MaskStroke, TextRegion
 from src.utils.mask_metrics import otsu_threshold
 
@@ -253,6 +253,7 @@ def segment_region(
     до дилатации по id региона.
     """
     height, width = image_rgb.shape[:2]
+    region._retouch_smooth_background = False
     bubble = _bubble_retouch_mask(image_rgb, region, inset_px=bubble_inset_px)
     full = np.zeros((height, width), dtype=np.uint8)
     x, y, box_w, box_h = region.bbox
@@ -269,7 +270,7 @@ def segment_region(
     cx1, cy1 = min(width, x1 + pad), min(height, y1 + pad)
     crop = image_rgb[cy0:cy1, cx0:cx1]
     outlined = _outlined_text_mask(crop) if not region.document else None
-    light_confirmed, _ = confirmed_light_ink(crop) if not region.document else (None, False)
+    light_confirmed, inverse_outline = confirmed_light_ink(crop) if not region.document else (None, False)
     # Силуэт не собрался, но flood баллона есть: фон и чернила берём из него,
     # а не из кольца бокса, которое может лечь на тёмный рисунок снаружи.
     balloon = None
@@ -360,11 +361,27 @@ def segment_region(
             binary = _drop_border_components(binary)
         binary = _drop_non_letter_components(binary)
 
+    plain_light = (light_confirmed is not None and not inverse_outline and origin == "dialogue"
+                   and float(np.median(cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY))) >= 120)
+    if plain_light and outlined is None:
+        # Белые буквы на цветном облачке задают и чернила, и размер отступа.
+        # Добавление только после дилатации оставляло тонкий ореол букв,
+        # когда прежняя тёмная маска давала высоту строки в один пиксель.
+        binary = light_confirmed
+        light_ink = None
+        bubble = None
+        balloon = None
     ink_bool = binary > 0
     # Дополнение чернил не должно связывать строки фрагментом рисунка
     # и раздувать отступ маски, уже оценённый по подтверждённому ореолу.
     heights = _line_heights(outlined > 0 if outlined is not None else ink_bool)
     line_height = int(np.median(heights)) if heights else max(8, box_h)
+    if plain_light:
+        n_light, _, light_stats, _ = cv2.connectedComponentsWithStats(light_confirmed)
+        glyph_heights = [light_stats[i, cv2.CC_STAT_HEIGHT] for i in range(1, n_light)
+                         if light_stats[i, cv2.CC_STAT_AREA] >= 8 and light_stats[i, cv2.CC_STAT_HEIGHT] >= 6]
+        if glyph_heights:
+            line_height = int(np.percentile(glyph_heights, 75))
     if light_ink is not None and outlined is None:
         # Фрагмент рамки может связать строки по вертикали. Кегль и отступ
         # оцениваем по компонентам букв, не по высоте всего связанного блока.
@@ -381,9 +398,17 @@ def segment_region(
         radius = _INK_PAD_PX + grow
     else:
         radius = max(2, int(round(line_height * 0.22))) + grow
+    retouch_ink = binary
+    if plain_light:
+        retouch_ink = smooth_light_mask(crop, binary)
+        if not np.array_equal(retouch_ink, binary):
+            # Оболочка уже скрыла межбуквенный ореол. Большой отступ здесь
+            # захватил бы край маленького цветного облачка.
+            radius = 2 + grow
+            region._retouch_smooth_background = True
     kernel_size = radius * 2 + 1
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
-    dilated = cv2.dilate(binary, kernel, iterations=1)
+    dilated = cv2.dilate(retouch_ink, kernel, iterations=1)
     if balloon is not None:
         dilated[balloon[cy0:cy1, cx0:cx1] == 0] = 0
 

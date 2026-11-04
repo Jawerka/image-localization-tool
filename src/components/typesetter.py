@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import math
 from pathlib import Path
@@ -20,6 +21,7 @@ from src.utils.paths import resolve_font
 
 COMIC_FONT = resolve_font("Heroika-Regular.otf")
 _HYPHENATORS: dict[str, object] = {}
+_NONWHITE_STROKE_MULTIPLIER = 1.75
 
 
 def _font_file(region: TextRegion) -> Path | None:
@@ -463,6 +465,12 @@ def _background_is_complex(image_rgb: np.ndarray, mask: np.ndarray) -> bool:
     if pixels.shape[0] < 20:
         return False
     return float(pixels.astype(np.float32).std(axis=0).mean()) > 22
+
+
+def _nonwhite_background(image_rgb: np.ndarray, mask: np.ndarray) -> bool:
+    """Цветной, серый и тёмный фон; редкие JPEG-точки на белом не учитываем."""
+    pixels = image_rgb[mask > 0]
+    return bool(len(pixels) and np.mean(np.min(pixels, axis=1) < 245) > .10)
 
 
 def _median_rgb(image_rgb: np.ndarray, mask: np.ndarray) -> tuple[int, int, int]:
@@ -1292,8 +1300,8 @@ class Typesetter:
         region: TextRegion,
         size: int,
     ) -> tuple[tuple[int, int, int] | None, int]:
-        """Тонкая белая автоматическая обводка независимо от цвета облачка."""
-        return (255, 255, 255), self._fit_stroke_width(region, size, False)
+        """Белая автообводка толще на любом подтверждённом небелом фоне."""
+        return (255, 255, 255), self._fit_stroke_width(region, size, _nonwhite_background(image_rgb, area))
 
     def _fit_stroke_width(self, region: TextRegion, size: int, complex_background: bool) -> int:
         """Ширина обводки для подбора кегля без повторного измерения фона."""
@@ -1302,7 +1310,10 @@ class Typesetter:
             return 0
         if mode == "custom" and region.style.stroke_width > 0:
             return max(1, int(round(region.style.stroke_width)))
-        return max(1, int(round(size * max(.06, self.stroke_ratio))))
+        width = max(1, int(round(size * max(.06, self.stroke_ratio))))
+        if mode == 'auto' and complex_background:
+            return max(width + 1, int(math.ceil(width * _NONWHITE_STROKE_MULTIPLIER)))
+        return width
 
     def render(
         self,
@@ -1431,7 +1442,17 @@ class Typesetter:
             area_y, area_x = np.nonzero(area)
             paint_rgb = rgb[area_y.min():area_y.max()+1, area_x.min():area_x.max()+1]
             paint_area = area[area_y.min():area_y.max()+1, area_x.min():area_x.max()+1]
-            complex_background = _background_is_complex(paint_rgb, paint_area)
+            complex_background = _nonwhite_background(paint_rgb, paint_area)
+            raster_style = region.style
+            free_outline = float((region.auto_layout or {}).get('outline_px', 3))
+            if native_free and region.style.stroke_mode == 'auto':
+                if complex_background:
+                    free_outline *= _NONWHITE_STROKE_MULTIPLIER
+                # Одна ширина резервируется при подборе свободной надписи
+                # и применяется при рисовании; геометрия проекта не меняется.
+                raster_style = copy.copy(region.style)
+                raster_style.stroke_mode = 'custom'
+                raster_style.stroke_width = free_outline
 
             def stroke_pad(size: int) -> int:
                 return self._fit_stroke_width(region, size, complex_background)
@@ -1439,7 +1460,7 @@ class Typesetter:
             if native_free:
                 from src.components.free_text_layout import free_raster
                 cached_fit = frozen.get('raster_fit') if frozen else None
-                _raw, raster_fit = free_raster(text, font_path, region.style, region.auto_layout, _LAYER_SCALE, cached_fit)
+                _raw, raster_fit = free_raster(text, font_path, raster_style, region.auto_layout, _LAYER_SCALE, cached_fit)
                 chosen_font = _load_font(font_path, int(raster_fit.get('font_size', 144)))
                 placed = [(line, int(region.bbox[0]), int(region.bbox[1]) + i * 160)
                           for i, line in enumerate(text.split('\n')) if line]
@@ -1573,7 +1594,7 @@ class Typesetter:
             stroke, stroke_width = self._stroke_paint(rgb, area, region, size)
             if native_free and region.style.stroke_mode == 'auto':
                 stroke = (255, 255, 255)
-                stroke_width = max(1, round(float(region.auto_layout.get('outline_px', 3))))
+                stroke_width = max(1, round(free_outline))
             fill = region.style.fill_rgb
             if (region.style.stroke_mode == 'auto' and not region.style.fill_locked and
                     stroke is not None and stroke_width > 0 and _contrast_ratio(fill, stroke) < 3):
@@ -1596,9 +1617,10 @@ class Typesetter:
             )
             if needs_layer:
                 capture = {} if (not apply_geometry or capture_layers) else None
+                raster_style.fill_rgb = fill
                 visible_bounds = _composite_styled_layer(
                     overlay, placed, chosen_font, font_path, fill, stroke, stroke_width,
-                    region.style, draw, region=region, apply_geometry=apply_geometry,
+                    raster_style, draw, region=region, apply_geometry=apply_geometry,
                     stable_pad=stable_pad, layer_bounds=self._last_layer_bounds,
                     capture=capture, raster_fit=raster_fit,
                 )

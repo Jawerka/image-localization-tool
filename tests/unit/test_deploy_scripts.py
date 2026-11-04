@@ -4,12 +4,103 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import os
+import subprocess
+
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 WIN = ROOT / "scripts" / "deploy-windows.ps1"
 LAN = ROOT / "scripts" / "deploy-lan.ps1"
 EXT = ROOT / "scripts" / "deploy-extension.ps1"
 SPEC = ROOT / "ImageLocalizationTool.spec"
 CI = ROOT / ".github" / "workflows" / "ci.yml"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Проверяется реальный robocopy Windows")
+@pytest.mark.parametrize("include_models", [False, True])
+def test_deploy_preserves_files_when_bundle_contains_persistent_placeholders(tmp_path, include_models):
+    """Пустые каталоги portable не должны очищать пользовательскую установку."""
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    script = scripts / "deploy-windows.ps1"
+    script.write_bytes(WIN.read_bytes())
+    source = tmp_path / "dist" / "ImageLocalizationTool"
+    target = tmp_path / "apps" / "ImageLocalizationTool"
+    assert source.resolve().is_relative_to(tmp_path.resolve())
+    assert target.resolve().is_relative_to(tmp_path.resolve())
+    for path in ["desktop/ImageLocalizationTool.exe", "sidecar/ImageLocalizationTool.exe", "web/index.html"]:
+        staged = source / path
+        staged.parent.mkdir(parents=True, exist_ok=True)
+        staged.write_text("new-code", encoding="utf-8")
+    folders = ["data", "models", "runtime", ".resources", ".downloads", ".builtin", "components"]
+    for name in folders:
+        (source / name).mkdir()
+        (source / name / ".keep").touch()
+        saved = target / name / "nested" / "saved.bin"
+        saved.parent.mkdir(parents=True)
+        saved.write_bytes(b"user-data-must-survive")
+    (target / 'personal-notes.txt').write_bytes(b'keep root files')
+    command = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), "-Dest", str(target)]
+    if include_models:
+        command.append("-IncludeModels")
+    result = subprocess.run(command, capture_output=True, timeout=60)
+    assert result.returncode == 0, (result.stdout + result.stderr).decode(errors="replace")
+    for name in folders:
+        assert (target / name / "nested" / "saved.bin").read_bytes() == b"user-data-must-survive"
+    assert (target / 'personal-notes.txt').read_bytes() == b'keep root files'
+    backups = list(target.parent.glob('.ImageLocalizationTool.backup-*'))
+    assert len(backups) == 1
+    assert (backups[0]/'data/nested/saved.bin').read_bytes() == b'user-data-must-survive'
+    assert (target / "web" / "index.html").read_text(encoding="utf-8") == "new-code"
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Проверяется реальный robocopy Windows')
+def test_windows_dry_run_does_not_create_target_or_backup(tmp_path):
+    """Dry run читает артефакты, но не создаёт установку или резервные папки."""
+    scripts = tmp_path/'scripts'
+    scripts.mkdir()
+    script = scripts/'deploy-windows.ps1'
+    script.write_bytes(WIN.read_bytes())
+    source = tmp_path/'dist/ImageLocalizationTool'
+    for rel in ['desktop/ImageLocalizationTool.exe', 'sidecar/ImageLocalizationTool.exe', 'web/index.html']:
+        file = source/rel
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_bytes(b'new code')
+    target = tmp_path/'new-install'
+    result = subprocess.run(['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(script),
+                             '-Dest', str(target), '-DryRun'], capture_output=True, timeout=60)
+    assert result.returncode == 0, result.stderr.decode(errors='replace')
+    assert not target.exists()
+    assert not list(tmp_path.glob('.*.backup-*'))
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Проверяется PowerShell Windows')
+def test_windows_incomplete_backup_blocks_code_changes_even_with_zero_exit_code(tmp_path):
+    """Ложный успех копирования не должен разрешать запись поверх установки."""
+    scripts = tmp_path/'scripts'
+    scripts.mkdir()
+    (scripts/'deploy-windows.ps1').write_bytes(WIN.read_bytes())
+    source = tmp_path/'dist/ImageLocalizationTool'
+    target = tmp_path/'apps/ImageLocalizationTool'
+    for rel in ['desktop/ImageLocalizationTool.exe', 'sidecar/ImageLocalizationTool.exe', 'web/index.html']:
+        for directory, content in [(source, b'new code'), (target, b'old code')]:
+            file = directory/rel
+            file.parent.mkdir(parents=True, exist_ok=True)
+            file.write_bytes(content)
+    data = target/'data/project.json'
+    data.parent.mkdir()
+    data.write_bytes(b'user project')
+    wrapper = tmp_path/'fixture.ps1'
+    wrapper.write_text("function global:robocopy { $global:LASTEXITCODE = 0 }\n"
+                       "& (Join-Path $PSScriptRoot 'scripts/deploy-windows.ps1') "
+                       "-Dest (Join-Path $PSScriptRoot 'apps/ImageLocalizationTool')\n", encoding='ascii')
+    result = subprocess.run(['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(wrapper)],
+                            capture_output=True, timeout=60)
+    assert result.returncode != 0
+    assert b'Backup file missing' in result.stderr
+    assert (target/'web/index.html').read_bytes() == b'old code'
+    assert data.read_bytes() == b'user project'
 
 
 def test_deploy_windows_script_is_ascii_and_skips_models_by_default():
@@ -33,12 +124,14 @@ def test_deploy_lan_script_uses_current_host_and_proxy_jump():
     assert "192.168.88.41" in text
     assert '[string[]] $Hosts = @("192.168.88.41")' in text
     assert '[string] $ProxyJump = "pve.30"' in text
-    assert "'-J', $ProxyJump" in text
+    driver = (ROOT / 'scripts/lan_deploy.py').read_text(encoding='utf-8')
+    remote = (ROOT / 'scripts/lan_deploy_remote.py').read_text(encoding='utf-8')
+    assert "'-J', args.proxy_jump" in driver
     assert "DryRun" in text
     assert "ilt.service" in text
     assert "/opt/image-localization-tool" in text
     assert "venv" in text or "models" in text or "config" in text
-    assert "systemctl restart" in text
+    assert "'systemctl', 'restart'" in remote
 
 
 def test_ci_workflow_runs_filtered_unit_tests():

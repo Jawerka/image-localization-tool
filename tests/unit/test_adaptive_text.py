@@ -232,10 +232,11 @@ def test_adaptive_font_has_bundled_fallback_and_respects_manual_choice():
     assert region.style.font_id == 'chosen-by-user'
 
 
-def test_native_outline_survives_working_upscale():
+@pytest.mark.parametrize('background,expected', [((248, 248, 248), 3), ((128, 128, 128), 5)])
+def test_native_outline_survives_working_upscale(background, expected):
     from src.config import Config
     from src.page_pipeline import PagePipeline
-    image = Image.new('RGB', (400, 250), (128, 128, 128))
+    image = Image.new('RGB', (400, 250), background)
     original = TextRegion(1, (100, 60, 80, 120), text='THUD', translation='I', block_type='sfx',
                           style=TextStyle(fill_rgb=(18, 18, 18), font_id='Heroika-Regular'),
                           auto_layout=dict(version=1, kind='free', source_bbox=[100, 60, 80, 120],
@@ -247,9 +248,10 @@ def test_native_outline_survives_working_upscale():
         assert not over
         row = np.asarray(rendered)[120, :, 0]
         black = np.flatnonzero(row < 60)
-        white = np.flatnonzero(row > 220)
+        white = np.flatnonzero(row > 250)
         widths.append((black[0] - white[0], white[-1] - black[-1]))
-    assert all(2 <= value <= 4 for pair in widths for value in pair)
+    assert all(expected - 1 <= value <= expected + 1 for pair in widths for value in pair), widths
+    assert all(abs(a - b) <= 1 for a, b in zip(*widths)), widths
 
 
 def test_linked_balloon_geometry_comes_from_original_pixels():

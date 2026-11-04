@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from src.components.retouch_ink import boundary_ink, confirmed_light_ink, preserves_picture, smooth_line_mask
+from src.components.retouch_ink import boundary_ink, confirmed_light_ink, preserves_picture, smooth_light_mask, smooth_line_mask
 from src.components.adaptive_text import source_ink
 from src.components.text_segmenter import segment_region
 from src.models import TextRegion
@@ -29,6 +29,24 @@ def test_light_text_keeps_every_stroke_on_dark_panel():
     assert found is not None and not outlined
     assert np.mean(found[expected > 0] > 0) >= .99
     assert not np.any(found[:12])
+
+
+def test_white_letters_on_midtone_colored_panels_are_not_outlines():
+    for background in [(170, 190, 230), (112, 105, 164), (180, 130, 160)]:
+        rgb, expected = caption(background)
+        found, outlined = confirmed_light_ink(rgb)
+        assert found is not None and not outlined
+        assert np.mean(found[expected > 0] > 0) >= .99
+        assert not np.any(found[:, 270:])
+
+
+def test_bright_fields_and_border_highlights_on_colored_panel_are_rejected():
+    rgb = np.full((135, 320, 3), (170, 190, 230), np.uint8)
+    cv2.rectangle(rgb, (0, 0), (319, 134), (255, 255, 255), 4)
+    cv2.rectangle(rgb, (30, 20), (130, 110), (255, 255, 255), -1)
+    cv2.rectangle(rgb, (190, 20), (290, 110), (255, 255, 255), -1)
+    found, _ = confirmed_light_ink(rgb)
+    assert found is None
 
 
 def test_inverse_outline_includes_solid_i_and_l_and_black_stroke():
@@ -62,6 +80,28 @@ def test_dark_bubble_mask_and_source_ink_preserve_bright_letters():
     assert np.mean(result[expected > 0] > 0) >= .99
     _, ink, (a, b, c, d) = source_ink(Image.fromarray(rgb), region)
     assert np.mean(ink[expected[b:d, a:c] > 0] > 0) >= .99
+
+
+def test_midtone_bubble_uses_white_glyphs_for_capture_and_cleanup_margin():
+    rgb, expected = caption((170, 190, 230))
+    region = TextRegion(1, (12, 12, 240, 105), text='I WILL LIKE ME', bubble_bbox=(3, 3, 310, 125))
+    captured = {}
+    result = segment_region(rgb, region, capture_ink=captured)
+    assert np.mean(captured[1][expected > 0] > 0) >= .99
+    margin = cv2.dilate(expected, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
+    assert np.mean(result[margin > 0] > 0) >= .99
+    assert region._retouch_preserve_background
+    assert not np.any(result[:, 270:])
+
+
+def test_light_envelope_only_closes_gaps_on_smooth_background():
+    rgb, expected = caption((170, 190, 230))
+    closed = smooth_light_mask(rgb, expected)
+    assert np.all(closed[expected > 0] > 0)
+    assert closed[65, 60] > 0
+    assert not np.any(closed[:, 270:])
+    detailed = np.random.default_rng(7).integers(0, 255, rgb.shape, dtype=np.uint8)
+    assert np.array_equal(smooth_light_mask(detailed, expected), expected)
 
 
 def test_transparent_panel_is_distinguished_from_opaque_paper():

@@ -50,6 +50,35 @@ def test_skipped_light_text_never_reaches_inpainter():
     assert np.array_equal(np.asarray(cleaned), rgb)
 
 
+def test_smooth_bubble_rejects_generated_thin_line_and_preserves_erased_pixels():
+    import cv2
+    import numpy as np
+
+    background = (170, 190, 230)
+    rgb = np.full((135, 320, 3), background, np.uint8)
+    cv2.putText(rgb, 'HELLO WORLD', (20, 65), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+    region = TextRegion(1, (12, 25, 250, 55), text='HELLO WORLD', translation='ПРИВЕТ МИР',
+                        bubble_bbox=(3, 3, 310, 125))
+
+    class LineInpainter:
+        last_warnings = []
+
+        def inpaint(self, image, mask, allow_flat_fill=True):
+            result = np.array(image)
+            result[mask > 0] = background
+            line = np.zeros_like(mask)
+            cv2.line(line, (60, 50), (180, 50), 255, 1)
+            result[(line > 0) & (mask > 0)] = 0
+            return Image.fromarray(result)
+
+    pipeline = PagePipeline(Config(layout_long_side=0), inpainter=LineInpainter())
+    mask, cleaned = pipeline.clean(Image.fromarray(rgb), [region],
+                                   strokes=[MaskStroke(mode='erase', points=[(45, 50)], radius=3)])
+    result = np.asarray(cleaned)
+    assert np.all(result[50, 75:160] == background)
+    assert np.array_equal(result[mask == 0], rgb[mask == 0])
+
+
 def test_current_ocr_roles_reach_retouch_without_experimental_flags():
     """Настоящая классификация OCR ведёт светлый текст и звук в общую очистку."""
     import cv2

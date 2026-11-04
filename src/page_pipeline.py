@@ -621,6 +621,24 @@ class PagePipeline:
                 if np.any(other_part):
                     cleaned = self._inpaint(cleaned, other_part, warnings)
                 cleaned = self._inpaint(cleaned, sfx_part, warnings, allow_flat_fill=False)
+        # На подтверждённом гладком фоне LaMa иногда рисует тонкую линию.
+        # Медианный фильтр убирает её только внутри автоматической маски,
+        # не меняя исходные границы облачка и соседний рисунок.
+        smooth_regions = [r for r in drawable if getattr(r, '_retouch_smooth_background', False)
+                          and not r.manual and not r.edited]
+        if smooth_regions and np.any(mask):
+            rgb = np.array(cleaned)
+            for region in smooth_regions:
+                x, y, w, h = region.bbox
+                xa, ya = max(0, x-3), max(0, y-3)
+                xb, yb = min(work.width, x+w+3), min(work.height, y+h+3)
+                patch = rgb[ya:yb, xa:xb]
+                if min(patch.shape[:2]) < 25:
+                    continue
+                filtered = cv2.medianBlur(patch, 25)
+                selected = mask[ya:yb, xa:xb] > 0
+                patch[selected] = filtered[selected]
+            cleaned = Image.fromarray(rgb)
         self._step_timings["inpaint"] = time.perf_counter() - started
         if not np.any(mask):
             if layout_scale != 1.0:

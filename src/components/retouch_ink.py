@@ -7,7 +7,7 @@ import numpy as np
 
 
 def confirmed_light_ink(crop: np.ndarray) -> tuple[np.ndarray | None, bool]:
-    """Светлые штрихи на тёмном фоне либо белое ядро с чёрной обводкой.
+    """Светлые штрихи на контрастном фоне либо белое ядро с чёрной обводкой.
 
     Большие светлые поля и рамки отбрасываются. Возвращается маска чернил
     до отступа ретуши и признак включённой в неё обводки.
@@ -30,6 +30,7 @@ def confirmed_light_ink(crop: np.ndarray) -> tuple[np.ndarray | None, bool]:
     bright = ((np.min(crop, axis=2) >= (180 if dark_panel else 210)) & neutral).astype(np.uint8)
     count, labels, stats, _ = cv2.connectedComponentsWithStats(bright)
     seeds = np.zeros_like(gray)
+    outlined_seeds = np.zeros_like(gray)
     accepted = 0
     sizes = []
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
@@ -47,25 +48,33 @@ def confirmed_light_ink(crop: np.ndarray) -> tuple[np.ndarray | None, bool]:
             yb, xb = min(height, y+h+3), min(width, x+w+3)
             local = (labels[ya:yb, xa:xb] == index).astype(np.uint8)
             ring = (cv2.dilate(local, kernel) > 0) & (local == 0)
-            if not np.any(ring) or np.mean(gray[ya:yb, xa:xb][ring] < 100) < .60:
+            if not np.any(ring):
                 continue
+            surround = gray[ya:yb, xa:xb][ring]
+            core = float(np.median(gray[y:y+h, x:x+w][body]))
+            if np.mean(surround < core - 28) < .60:
+                continue
+            # Цветное облачко не является чёрной обводкой: расширение
+            # по тёмным пикселям допускается только для подтверждённой оболочки.
+            if np.mean(surround < 100) >= .60:
+                outlined_seeds[y:y+h, x:x+w][body] = 255
         seeds[y:y+h, x:x+w][body] = 255
         accepted += 1
         sizes.append(min(w, h))
     if accepted < 2 or np.mean(seeds > 0) > .35:
         return None, False
-    if dark_panel:
+    if dark_panel or not np.any(outlined_seeds):
         return seeds, False
     # От белого ядра до внешней границы тёмной обводки. Фон и другие
     # несвязанные чёрные объекты не входят в геодезическое расширение.
-    reached = seeds > 0
+    reached = outlined_seeds > 0
     dark = gray < 135
     steps = min(10, max(3, round(float(np.median(sizes)) * .65)))
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
     for _ in range(steps):
         expanded = (cv2.dilate(reached.astype(np.uint8), kernel) > 0) & dark
         reached |= expanded
-    return reached.astype(np.uint8) * 255, True
+    return np.maximum(seeds, reached.astype(np.uint8) * 255), True
 
 
 def _inverse_outline(gray: np.ndarray, white: np.ndarray) -> np.ndarray | None:
@@ -142,6 +151,29 @@ def smooth_line_mask(crop: np.ndarray, ink: np.ndarray) -> np.ndarray:
             continue
         pad = max(1, min(6, round((y1-y0) * .12)))
         result[max(0, y0-pad):min(gray.shape[0], y1+pad), xs[0]:xs[-1]+1] = 255
+    return result
+
+
+def smooth_light_mask(crop: np.ndarray, ink: np.ndarray) -> np.ndarray:
+    """На гладком фоне скрыть также просветы между светлыми буквами.
+
+    Узкие дырки оставляли в контексте восстановления цветные тени исходных
+    штрихов. Оболочка надписи убирает этот контекст, не заполняя всё облачко.
+    Детальный рисунок и резкие границы за пределами букв не расширяются.
+    """
+    gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
+    exclude = cv2.dilate((ink > 0).astype(np.uint8), np.ones((9, 9), np.uint8)) > 0
+    gx = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3) / 8
+    gy = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3) / 8
+    background = np.hypot(gx, gy)[~exclude]
+    if background.size < 50 or np.percentile(background, 90) > 8:
+        return ink
+    ys, xs = np.where(ink > 0)
+    if len(xs) < 12:
+        return ink
+    hull = cv2.convexHull(np.column_stack((xs, ys)).astype(np.int32))
+    result = np.zeros_like(ink)
+    cv2.fillConvexPoly(result, hull, 255)
     return result
 
 
