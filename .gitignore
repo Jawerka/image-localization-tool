@@ -52,6 +52,7 @@ Thumbs.db
 # Project specific
 # Локальный архив устаревших файлов; в git не входит.
 legacy/
+_archives/
 config.json
 *.log
 output/
