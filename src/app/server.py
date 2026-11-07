@@ -2340,6 +2340,7 @@ def _preview_region(state: AppState, page_id: str, body: dict) -> _Result:
             "target_lang": settings.target_lang,
             "text_stroke_ratio": settings.text_stroke_ratio,
             "text_margin": settings.text_margin,
+            "text_scale": getattr(settings, "text_scale", 1.1),
         },
     })
     cache = _render_cache(state)
@@ -2498,6 +2499,7 @@ def _preview_typesetter(state: AppState):
         lang=str(getattr(settings, "target_lang", "ru") or "ru"),
         stroke_ratio=float(getattr(settings, "text_stroke_ratio", 0) or 0),
         margin_ratio=float(getattr(settings, "text_margin", 0) or 0),
+        font_scale=float(getattr(settings, "text_scale", 1.1)),
     )
 
 

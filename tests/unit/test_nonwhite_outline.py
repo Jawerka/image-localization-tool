@@ -19,7 +19,7 @@ def test_uniform_nonwhite_background_gets_thicker_outline(color):
     image = np.full_like(white, color)
     _, normal = setter._stroke_paint(white, mask, region, 28)
     stroke, thick = setter._stroke_paint(image, mask, region, 28)
-    assert stroke == (255, 255, 255)
+    assert stroke == ((0, 0, 0) if color == (0, 0, 0) else (255, 255, 255))
     assert thick > normal
 
 

@@ -1,6 +1,7 @@
 """Конфигурация приложения."""
 
 import json
+import math
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
@@ -21,7 +22,7 @@ class Config:
     # Потоки ONNX Runtime внутри одной операции; 0 — автонастройка ORT.
     ort_intra_op_threads: int = 0
 
-    # Минимальный размер шрифта
+    # Минимальный кегль на итоговом растре; тесная область не снижает порог
     min_font_size: int = 10
 
     # Максимальный размер шрифта
@@ -85,6 +86,8 @@ class Config:
     text_stroke_ratio: float = 0.08
     # Доля меньшей стороны баллона, которую не занимает текст.
     text_margin: float = 0.08
+    # Масштаб автоматически подобранного текста после раскладки.
+    text_scale: float = 1.1
     # Длинная сторона для разметки мелких страниц. 0 — без апскейла.
     layout_long_side: int = 2000
     # Отступ маски ретуши от контура баллона внутрь (px).
@@ -95,6 +98,13 @@ class Config:
 
     def __post_init__(self) -> None:
         """Явный режим побеждает старый флаг; новый профиль переводит звуки."""
+        try:
+            self.text_scale = float(self.text_scale)
+            if not math.isfinite(self.text_scale):
+                raise ValueError('text_scale')
+            self.text_scale = min(2.0, max(.5, self.text_scale))
+        except (TypeError, ValueError):
+            self.text_scale = 1.1
         if self.sfx_mode is None:
             mode = "skip" if self.translate_sfx is False else "replace"
         else:

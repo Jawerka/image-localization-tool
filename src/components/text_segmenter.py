@@ -8,7 +8,7 @@ from PIL import Image
 
 from src.components.bubble_contour import balloon_flood_mask, bubble_interior_mask
 from src.components.sfx_ink import drop_line_components, outlined_glyphs
-from src.components.retouch_ink import confirmed_light_ink, smooth_light_mask
+from src.components.retouch_ink import boundary_ink, confirmed_light_ink, smooth_light_mask
 from src.models import MaskStroke, TextRegion
 from src.utils.mask_metrics import otsu_threshold
 
@@ -315,7 +315,7 @@ def segment_region(
     unbound_dialogue = (not has_bubble and origin == "dialogue" and
                         np.percentile(cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY), 35) >= 225)
     if (not region.document and (outlined is not None or glyph_mask is not None or unbound_dialogue or
-            (region.bubble_bbox is not None and region.block_type != "sfx"))):
+            (has_bubble and origin != "sfx"))):
         gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
         if float(np.percentile(gray, 60)) >= 180:
             cutoff = min(170, max(60, otsu_threshold(gray)))
@@ -362,7 +362,11 @@ def segment_region(
         binary = _drop_non_letter_components(binary)
 
     plain_light = (light_confirmed is not None and not inverse_outline and origin == "dialogue"
-                   and float(np.median(cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY))) >= 120)
+                   and float(np.median(cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY))) >= 120
+                   and (light_ink is None or np.count_nonzero(light_confirmed) >=
+                        np.count_nonzero(light_ink) * .5))
+    # Светлые просветы O/B и цветных иероглифов могут выглядеть как белые
+    # буквы. Они не заменяют уже подтверждённую большую маску тёмных штрихов.
     if plain_light and outlined is None:
         # Белые буквы на цветном облачке задают и чернила, и размер отступа.
         # Добавление только после дилатации оставляло тонкий ореол букв,
@@ -434,6 +438,12 @@ def segment_region(
         addition = cv2.dilate(light_confirmed, kernel, iterations=1)
         full[cy0:cy1, cx0:cx1] = np.maximum(full[cy0:cy1, cx0:cx1], addition)
         region._retouch_preserve_background = True
+    if not region.document and (light_confirmed is not None or outlined is not None):
+        extra = boundary_ink(Image.fromarray(image_rgb), region.bbox, (cx0, cy0, cx1, cy1))
+        if extra is not None:
+            addition, (aa, bb, cc, dd) = extra
+            full[bb:dd, aa:cc] = np.maximum(full[bb:dd, aa:cc], addition)
+            region._retouch_preserve_background = True
     if region.document:
         # Соседние строки и аватары за рамкой документа не ретушируем.
         bounded = np.zeros_like(full)

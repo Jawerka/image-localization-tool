@@ -118,6 +118,31 @@ def test_terminal_free_text_is_not_a_sign():
         assert region.block_type == "sign", text
 
 
+def test_unassigned_line_becomes_one_free_region():
+    """Три неназначенных слова на одной линии собираются в свободный регион."""
+    ocr = RapidOcr()
+    ocr._words = lambda _image: [
+        OcrWord("ON", (10, 40, 20, 12), .99),
+        OcrWord("THE", (35, 40, 28, 12), .99),
+        OcrWord("WALL", (68, 40, 40, 12), .99),
+    ]
+    _, regions = ocr.recognize(Image.new("RGB", (160, 80), "white"), [])
+    assert len(regions) == 1
+    assert regions[0].text == "ON THE WALL"
+    assert regions[0].class_name == "text_free"
+    assert regions[0].bbox == (10, 40, 98, 12)
+
+
+def test_vertical_column_reads_top_to_bottom():
+    """Столбец из трёх высоких глифов читается сверху вниз, даже при сдвиге по X."""
+    words = [
+        OcrWord("A", (16, 10, 14, 40), 0.9),
+        OcrWord("B", (12, 28, 14, 40), 0.9),
+        OcrWord("C", (14, 46, 14, 40), 0.9),
+    ]
+    assert _join(words) == "A B C"
+
+
 def test_unassigned_ocr_sound_is_kept_without_duplicates_or_signature():
     """Найденный OCR звук не теряется из-за отсутствия бокса детектора."""
     ocr = RapidOcr()
@@ -175,3 +200,75 @@ def test_hyphenated_fragment_expands_only_overlapping_recovered_sound():
     assert len(regions) == 1
     assert regions[0].text == "-A DUMP"
     assert regions[0].bbox == (55, 30, 60, 65)
+
+
+def test_slanted_ocr_quads_keep_line_order():
+    """Наклонные строки реального баллона не сортируются по левому краю."""
+    rows = [
+        ("I WIN AGAIN!", ((529, 13), (630, 48), (622, 68), (522, 33))),
+        ("HUMAN YOU", ((525, 31), (616, 63), (610, 82), (518, 50))),
+        ("ARE PATHETIC IN", ((502, 41), (627, 86), (620, 106), (495, 61))),
+        ("VIDEOGAMES...", ((504, 61), (616, 101), (609, 121), (497, 81))),
+    ]
+    ocr = RapidOcr()
+    words = []
+    for text, quad in rows:
+        ocr._append_word(words, quad, text, .99)
+    assert _join(words) == "I WIN AGAIN! HUMAN YOU ARE PATHETIC IN VIDEOGAMES..."
+
+
+def test_empty_nested_balloon_retry_keeps_word_owner():
+    """Повторное распознавание большого баллона не дублирует малый."""
+    ocr = RapidOcr()
+    ocr._words = lambda _image: [OcrWord("ONLY", (12, 12, 20, 10), .99)]
+    outer = TextRegion(1, (0, 0, 100, 100), bubble_bbox=(0, 0, 100, 100))
+    inner = TextRegion(2, (10, 10, 30, 20), bubble_bbox=(5, 5, 50, 30))
+    _, regions = ocr.recognize(Image.new("RGB", (100, 100), "white"), [outer, inner])
+    assert [r.text for r in regions] == ["", "ONLY"]
+
+
+def test_empty_balloon_retry_preserves_rtl():
+    """Направление колонок сохраняется при повторном кропе."""
+    ocr = RapidOcr()
+    calls = []
+    def words(_image):
+        calls.append(1)
+        return [] if len(calls) == 1 else [
+            OcrWord("LEFT", (10, 10, 10, 40), .99),
+            OcrWord("RIGHT", (25, 10, 10, 40), .99),
+        ]
+    ocr._words = words
+    region = TextRegion(1, (0, 0, 60, 60), bubble_bbox=(0, 0, 60, 60))
+    _, regions = ocr.recognize(Image.new("RGB", (100, 100), "white"), [region], "rtl")
+    assert regions[0].text == "RIGHT LEFT"
+
+
+def test_assigned_ocr_expands_clipped_source_without_changing_balloon():
+    """Надёжный OCR восстанавливает края исходных букв для ретуши."""
+    ocr = RapidOcr()
+    ocr._words = lambda _image: [OcrWord("FUFU", (47, 28, 206, 117), .99)]
+    region = TextRegion(1, (56, 44, 160, 86), bubble_bbox=(5, 0, 275, 199))
+    _, regions = ocr.recognize(Image.new("RGB", (300, 220), "white"), [region])
+    assert regions[0].bbox == (47, 28, 206, 117)
+    assert regions[0].bubble_bbox == (5, 0, 275, 199)
+
+
+def test_source_expansion_preserves_saved_geometry_and_rejects_weak_words():
+    """Ручная геометрия и слабые либо слишком большие рамки сохраняются."""
+    for attributes in (dict(manual=True), dict(edited=True), dict(layout_snapshot={}),
+                       dict(auto_layout={}), dict(text_position=(2, 3))):
+        region = TextRegion(1, (10, 10, 20, 20), **attributes)
+        RapidOcr._expand_source_bbox(region, [OcrWord("HI", (8, 8, 24, 24), .99)], (100, 100))
+        assert region.bbox == (10, 10, 20, 20)
+    for word in (OcrWord("HI", (8, 8, 24, 24), .7), OcrWord("HI", (0, 0, 40, 40), .99)):
+        region = TextRegion(1, (10, 10, 20, 20))
+        RapidOcr._expand_source_bbox(region, [word], (100, 100))
+        assert region.bbox == (10, 10, 20, 20)
+
+
+def test_source_expansion_caps_combined_area():
+    """Несколько слов вместе не раздувают исходную область ретуши."""
+    region = TextRegion(1, (10, 10, 20, 20))
+    words = [OcrWord("ONE", (0, 10, 30, 20), .99), OcrWord("TWO", (10, 0, 20, 30), .99)]
+    RapidOcr._expand_source_bbox(region, words, (100, 100))
+    assert region.bbox == (10, 10, 20, 20)

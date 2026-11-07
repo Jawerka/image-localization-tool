@@ -363,3 +363,11 @@ def test_pipeline_defaults_come_from_config():
     assert settings.layout_long_side == pipeline.layout_long_side
     assert settings.viewer_show_boxes == pipeline.viewer_show_boxes
     assert settings.llm_base_url == ""
+
+
+def test_text_scale_reaches_pipeline_and_preview_settings():
+    """Один коэффициент используется настройками приложения и пайплайном."""
+    settings = AppSettings(text_scale=1.1)
+    assert settings.to_dict()['text_scale'] == 1.1
+    assert settings.to_config().text_scale == 1.1
+    assert AppSettings(text_scale=8).text_scale == 2.0

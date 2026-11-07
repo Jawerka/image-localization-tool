@@ -25,6 +25,7 @@ class OcrWord:
     text: str
     bbox: tuple[int, int, int, int]
     confidence: float
+    quad: tuple[tuple[float, float], ...] | None = None
 
     @property
     def center(self) -> tuple[float, float]:
@@ -61,6 +62,48 @@ def _same_reading_line(word: OcrWord, line: list[OcrWord]) -> bool:
     return False
 
 
+def _x_overlap_ratio(a: OcrWord, b: OcrWord) -> float:
+    left = max(a.bbox[0], b.bbox[0])
+    right = min(a.bbox[0] + a.bbox[2], b.bbox[0] + b.bbox[2])
+    overlap = max(0, right - left)
+    narrower = min(a.bbox[2], b.bbox[2])
+    return overlap / narrower if narrower else 0.0
+
+
+def _mostly_vertical_glyphs(words: list[OcrWord]) -> bool:
+    """Явный вертикальный сигнал: большинство quad выше ширины."""
+    if len(words) < 2:
+        return False
+    tall = sum(1 for word in words if word.bbox[3] > word.bbox[2] * 1.15)
+    return tall >= max(2, round(len(words) * 0.6))
+
+
+def _same_column(word: OcrWord, column: list[OcrWord]) -> bool:
+    return any(_x_overlap_ratio(word, other) >= 0.5 for other in column)
+
+
+def _reading_columns(words: list[OcrWord], direction: str) -> list[OcrWord]:
+    """Столбцы сверху вниз; порядок столбцов — по направлению чтения."""
+    pending = sorted(words, key=lambda word: (word.bbox[0], word.bbox[1]))
+    columns: list[list[OcrWord]] = []
+    for word in pending:
+        for column in columns:
+            if _same_column(word, column):
+                column.append(word)
+                break
+        else:
+            columns.append([word])
+    columns.sort(
+        key=lambda column: sum(item.bbox[0] + item.bbox[2] / 2 for item in column) / len(column),
+        reverse=direction == "rtl",
+    )
+    ordered: list[OcrWord] = []
+    for column in columns:
+        column.sort(key=lambda item: item.center[1])
+        ordered.extend(column)
+    return ordered
+
+
 def _reading_lines(words: list[OcrWord], direction: str = "ltr") -> list[OcrWord]:
     """Строки по вертикальному пересечению, слова внутри строки слева направо.
 
@@ -68,6 +111,38 @@ def _reading_lines(words: list[OcrWord], direction: str = "ltr") -> list[OcrWord
     Вертикальный столбец не склеивается: у соседей сверху и снизу нет пересечения.
     Для RTL меняется только направление внутри строки.
     """
+    if _mostly_vertical_glyphs(words) and any(
+        _x_overlap_ratio(left, right) >= 0.5
+        for index, left in enumerate(words)
+        for right in words[index + 1:]
+    ):
+        return _reading_columns(words, direction)
+    # Наклон увеличивает осевые рамки строк: соседние строки начинают
+    # пересекаться. Группируем исходные четырёхугольники после выпрямления.
+    angles = []
+    for word in words:
+        if word.quad is not None:
+            points = np.asarray(word.quad)
+            edge = points[1] - points[0]
+            if abs(edge[0]) > abs(edge[1]):
+                angles.append(float(np.arctan2(edge[1], edge[0])))
+    angle = float(np.median(angles)) if angles else 0.0
+    originals = {}
+    if abs(angle) > np.radians(3):
+        cosine, sine = np.cos(angle), np.sin(angle)
+        rotation = np.array([[cosine, -sine], [sine, cosine]])
+        projected = []
+        for word in words:
+            if word.quad is None:
+                x, y, w, h = word.bbox
+                points = np.array([[x, y], [x+w, y], [x+w, y+h], [x, y+h]])
+            else:
+                points = np.asarray(word.quad)
+            bbox = _quad_to_bbox(points @ rotation)
+            proxy = OcrWord(word.text, bbox or word.bbox, word.confidence)
+            originals[id(proxy)] = word
+            projected.append(proxy)
+        words = projected
     pending = sorted(words, key=lambda word: (word.center[1], word.bbox[0]))
     lines: list[list[OcrWord]] = []
     for word in pending:
@@ -83,7 +158,7 @@ def _reading_lines(words: list[OcrWord], direction: str = "ltr") -> list[OcrWord
     for line in lines:
         line.sort(key=lambda item: item.bbox[0], reverse=reverse)
         ordered.extend(line)
-    return ordered
+    return [originals.get(id(word), word) for word in ordered]
 
 
 class RapidOcr:
@@ -146,21 +221,68 @@ class RapidOcr:
         bbox = _quad_to_bbox(box)
         if bbox is None:
             return
-        words.append(OcrWord(text=cleaned, bbox=bbox, confidence=confidence))
+        quad = tuple(tuple(float(value) for value in point) for point in np.asarray(box).reshape(-1, 2))
+        words.append(OcrWord(text=cleaned, bbox=bbox, confidence=confidence, quad=quad if len(quad) == 4 else None))
 
-    def read_crop(self, image: Image.Image, region: TextRegion) -> str:
+    @staticmethod
+    def _expand_source_bbox(region: TextRegion, words: list[OcrWord], image_size: tuple[int, int]) -> None:
+        """Восстановить обрезанные края букв, не меняя сохранённую геометрию."""
+        style = region.style
+        if (region.skip or region.manual or region.edited or region.layout_snapshot is not None
+                or region.auto_layout is not None or region.text_position is not None
+                or style.rotation or style.skew_x or (style.warp or {}).get("kind", "none") != "none"):
+            return
+        from src.components.text_regions import box_area, overlap_ratio, union_box
+
+        original = region.bbox
+        candidates = [original]
+        width, height = image_size
+        for word in words:
+            if word.confidence < .8 or overlap_ratio(word.bbox, original) < .5:
+                continue
+            if region.bubble_bbox is not None and overlap_ratio(word.bbox, region.bubble_bbox) < .7:
+                continue
+            x, y, w, h = word.bbox
+            x0, y0 = max(0, x), max(0, y)
+            x1, y1 = min(width, x + w), min(height, y + h)
+            if x1 > x0 and y1 > y0:
+                candidates.append((x0, y0, x1 - x0, y1 - y0))
+        expanded = union_box(candidates)
+        if box_area(expanded) > 2 * box_area(original):
+            return
+        region.bbox = expanded
+
+    def read_crop(
+        self, image: Image.Image, region: TextRegion, reading_order: str = "ltr",
+        regions: list[TextRegion] | None = None,
+    ) -> str:
         """Распознать текст только внутри рамки региона."""
         width, height = image.size
         x, y, box_w, box_h = region.bbox
         pad = 8
+        left, top = max(0, x - pad), max(0, y - pad)
         crop = image.crop((
-            max(0, x - pad),
-            max(0, y - pad),
+            left,
+            top,
             min(width, x + box_w + pad),
             min(height, y + box_h + pad),
         ))
-        words = _reading_lines(self._words(crop), "ltr")
+        words = self._words(crop)
+        if regions is not None:
+            # Повторный кроп не должен забирать текст соседнего баллона.
+            owned = []
+            for word in words:
+                center = (word.center[0] + left, word.center[1] + top)
+                containers = [r for r in regions if _point_in_box(center, r.bubble_bbox or r.bbox)]
+                owner = min(containers, key=lambda r: ((r.bubble_bbox or r.bbox)[2] * (r.bubble_bbox or r.bbox)[3], r.id), default=None)
+                if owner is None or owner.id == region.id:
+                    owned.append(word)
+            words = owned
+        words = _reading_lines(words, reading_order)
         region.text = " ".join(word.text for word in words).strip()
+        global_words = [OcrWord(word.text, (word.bbox[0] + left, word.bbox[1] + top,
+                                          word.bbox[2], word.bbox[3]), word.confidence) for word in words]
+        self._expand_source_bbox(region, global_words, image.size)
         return region.text
 
     def recognize(
@@ -191,24 +313,62 @@ class RapidOcr:
             # Короткая реплика может пропасть при OCR всей страницы. Повторяем
             # только пустой речевой кроп, не трогая исключения и найденный текст.
             if not region.text and region.bubble_bbox is not None and not region.skip:
-                self.read_crop(image, region)
+                self.read_crop(image, region, direction, regions)
             self._guess_type(region)
+        for region in regions:
+            self._expand_source_bbox(region, buckets.get(region.id, []), image.size)
         # OCR видит и надписи, которым детектор не дал область. Сохраняем
         # уверенные звуки отдельно; вывески, подписи автора и шум не добавляем.
-        from src.components.text_regions import overlap_ratio
+        from src.components.text_regions import overlap_ratio, union_box
 
         regions = list(regions)
         recovered: list[TextRegion] = []
-        for word in unassigned:
+
+        def _usable(word: OcrWord) -> bool:
             if word.confidence < .55 or "@" in word.text or "_" in word.text:
-                continue
+                return False
             letters = sum(char.isalpha() for char in word.text)
-            if letters < 2 or letters < len(word.text.strip()) * .5:
+            return letters >= 2 and letters >= len(word.text.strip()) * .5
+
+        def _already_owned(word: OcrWord) -> bool:
+            return any(overlap_ratio(word.bbox, r.bbox) > .8 or
+                       (word.text.casefold() == r.text.casefold() and
+                        overlap_ratio(word.bbox, r.bbox) > .4) for r in regions)
+
+        leftover: list[OcrWord] = []
+        for word in unassigned:
+            if not _usable(word) or _already_owned(word):
                 continue
-            if any(overlap_ratio(word.bbox, r.bbox) > .8 or
-                   (word.text.casefold() == r.text.casefold() and
-                    overlap_ratio(word.bbox, r.bbox) > .4) for r in regions):
+            if any(word.text.casefold() == other.text.casefold() and
+                   overlap_ratio(word.bbox, other.bbox) > .8 for other in leftover):
                 continue
+            leftover.append(word)
+        pending = sorted(leftover, key=lambda word: (word.center[1], word.bbox[0]))
+        lines: list[list[OcrWord]] = []
+        for word in pending:
+            for line in reversed(lines):
+                if _same_reading_line(word, line):
+                    line.append(word)
+                    break
+            else:
+                lines.append([word])
+        singles: list[OcrWord] = []
+        for line in lines:
+            if len(line) < 2:
+                singles.extend(line)
+                continue
+            ordered = _reading_lines(line, direction)
+            candidate = TextRegion(
+                max((r.id for r in regions), default=0) + 1,
+                union_box([word.bbox for word in ordered]),
+                text=" ".join(word.text for word in ordered),
+                confidence=min(word.confidence for word in ordered),
+                class_name="text_free",
+                order=len(regions),
+            )
+            self._guess_type(candidate)
+            regions.append(candidate)
+        for word in singles:
             candidate = TextRegion(
                 max((r.id for r in regions), default=0) + 1, word.bbox,
                 text=word.text, confidence=word.confidence, class_name="text_free",
@@ -221,8 +381,6 @@ class RapidOcr:
         # У наклонного многострочного звука OCR иногда читает только одну
         # букву строки с дефисом. Самостоятельной целью такой фрагмент не
         # становится; присоединяем его лишь к пересекающемуся найденному звуку.
-        from src.components.text_regions import union_box
-
         for word in unassigned:
             if (word.confidence < .5 or "-" not in word.text or
                     sum(char.isalpha() for char in word.text) != 1):

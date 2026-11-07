@@ -309,6 +309,7 @@ class PagePipeline:
             stroke_ratio=self.config.text_stroke_ratio,
             margin_ratio=self.config.text_margin,
             adaptive_text=self.config.adaptive_text,
+            font_scale=self.config.text_scale,
         )
         self.ocr_name = ""
         self.translator_name = ""
@@ -390,6 +391,7 @@ class PagePipeline:
             progress_callback=progress_callback,
             cancel_check=cancel_check,
             _skip_layout_scale=True,
+            _native_pixel_scale=layout_scale,
         )
         overflow_ids = set(overflow)
         for region in regions:
@@ -670,6 +672,7 @@ class PagePipeline:
         cancel_check: CancelCheck | None = None,
         _skip_layout_scale: bool = False,
         incremental: dict | None = None,
+        _native_pixel_scale: float = 1.0,
     ) -> tuple[Image.Image, list[int]]:
         """Вёрстка переводов. Второй результат — id регионов, которые не влезли."""
         report = _bind_report(progress_callback, cancel_check)
@@ -697,26 +700,31 @@ class PagePipeline:
             incremental.get("previous_regions") or []
         ):
             incremental = None
-        if incremental and layout_scale == 1.0:
-            assign_stylized_fonts(
-                active,
-                enabled=bool(getattr(self.config, "auto_stylized_fonts", True)),
-                adaptive=bool(getattr(self.config, "adaptive_text", True)),
-            )
-            rendered, overflow, incremental_details = self.typesetter.render_incremental(
-                work,
-                active,
-                incremental["previous_regions"],
-                incremental["previous_result"],
-                incremental["previous_bounds"],
-                incremental["changed_region_ids"],
-                force=True,
-            )
-            warnings[:] = [item for item in warnings if not item.startswith("Текст не влез полностью:")]
-            if overflow:
-                warnings.append(f"Текст не влез полностью: {overflow}")
-        else:
-            rendered, overflow = self._typeset(work, active, target_lang, warnings)
+        original_min = self.typesetter.min_font_size
+        self.typesetter.min_font_size = math.ceil(self.config.min_font_size * layout_scale * _native_pixel_scale)
+        try:
+            if incremental and layout_scale == 1.0:
+                assign_stylized_fonts(
+                    active,
+                    enabled=bool(getattr(self.config, "auto_stylized_fonts", True)),
+                    adaptive=bool(getattr(self.config, "adaptive_text", True)),
+                )
+                rendered, overflow, incremental_details = self.typesetter.render_incremental(
+                    work,
+                    active,
+                    incremental["previous_regions"],
+                    incremental["previous_result"],
+                    incremental["previous_bounds"],
+                    incremental["changed_region_ids"],
+                    force=True,
+                )
+                warnings[:] = [item for item in warnings if not item.startswith("Текст не влез полностью:")]
+                if overflow:
+                    warnings.append(f"Текст не влез полностью: {overflow}")
+            else:
+                rendered, overflow = self._typeset(work, active, target_lang, warnings)
+        finally:
+            self.typesetter.min_font_size = original_min
         self._last_typeset_details = incremental_details or {"mode": "full"}
         self._step_timings["typeset"] = time.perf_counter() - started
         overflow_ids = set(overflow)

@@ -51,7 +51,7 @@ foreach ($name in $managed) {
             if ($link) { throw "Reparse point not allowed: $($link.FullName)" }
         }
     }
-    $copyMode = if ($name -eq 'models') { '/E' } else { '/MIR' }
+    $copyMode = '/E'
     $targets += [pscustomobject]@{ Source=$source; Target=$target; Mode=$copyMode }
 }
 Write-Host '==> DRY RUN (managed code directories only; data/runtime/resources are outside scope)'
@@ -67,7 +67,7 @@ if (Test-Path -LiteralPath $Dest) {
         $source = Join-Path $Dest $name
         if (Test-Path -LiteralPath $source) {
             $sourceFiles = @(Get-ChildItem -LiteralPath $source -Recurse -File -Force)
-            & robocopy $source (Join-Path $backupRoot $name) /E /COPY:DATS /XJ /R:0 /W:0 /NFL /NDL /NJH /NJS /NP | Out-Null
+            & robocopy $source (Join-Path $backupRoot $name) /E /COPY:DAT /XJ /R:0 /W:0 /NFL /NDL /NJH /NJS /NP | Out-Null
             if ($LASTEXITCODE -ge 8) { throw "Backup failed: $name" }
             foreach ($sourceFile in $sourceFiles) {
                 $relative = $sourceFile.FullName.Substring($source.Length).TrimStart('\')

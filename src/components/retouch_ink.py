@@ -7,7 +7,7 @@ import numpy as np
 
 
 def confirmed_light_ink(crop: np.ndarray) -> tuple[np.ndarray | None, bool]:
-    """Светлые штрихи на контрастном фоне либо белое ядро с чёрной обводкой.
+    """Светлые штрихи на контрастном фоне либо светлое ядро с обводкой.
 
     Большие светлые поля и рамки отбрасываются. Возвращается маска чернил
     до отступа ретуши и признак включённой в неё обводки.
@@ -22,11 +22,12 @@ def confirmed_light_ink(crop: np.ndarray) -> tuple[np.ndarray | None, bool]:
     # преобладающее белое поле не является белой сердцевиной наклейки.
     if float(np.mean(white)) > .5:
         return None, False
+    coloured = _colour_outline(crop)
     dark_panel = float(np.percentile(gray, 50)) < 120 and float(np.percentile(gray, 70)) < 170
     if not dark_panel:
         enclosed = _inverse_outline(gray, white)
         if enclosed is not None:
-            return enclosed, True
+            return np.maximum(enclosed, coloured) if coloured is not None else enclosed, True
     bright = ((np.min(crop, axis=2) >= (180 if dark_panel else 210)) & neutral).astype(np.uint8)
     count, labels, stats, _ = cv2.connectedComponentsWithStats(bright)
     seeds = np.zeros_like(gray)
@@ -62,9 +63,9 @@ def confirmed_light_ink(crop: np.ndarray) -> tuple[np.ndarray | None, bool]:
         accepted += 1
         sizes.append(min(w, h))
     if accepted < 2 or np.mean(seeds > 0) > .35:
-        return None, False
+        return (coloured, True) if coloured is not None else (None, False)
     if dark_panel or not np.any(outlined_seeds):
-        return seeds, False
+        return (np.maximum(seeds, coloured), True) if coloured is not None else (seeds, False)
     # От белого ядра до внешней границы тёмной обводки. Фон и другие
     # несвязанные чёрные объекты не входят в геодезическое расширение.
     reached = outlined_seeds > 0
@@ -74,7 +75,92 @@ def confirmed_light_ink(crop: np.ndarray) -> tuple[np.ndarray | None, bool]:
     for _ in range(steps):
         expanded = (cv2.dilate(reached.astype(np.uint8), kernel) > 0) & dark
         reached |= expanded
-    return np.maximum(seeds, reached.astype(np.uint8) * 255), True
+    result = np.maximum(seeds, reached.astype(np.uint8) * 255)
+    return np.maximum(result, coloured) if coloured is not None else result, True
+
+
+def _letter_like_cores(cores: np.ndarray) -> int:
+    """Число светлых ядер, похожих на отдельные буквы, а не на плашку."""
+    count, _, stats, _ = cv2.connectedComponentsWithStats(cores.astype(np.uint8))
+    letters = 0
+    height, width = cores.shape
+    for index in range(1, count):
+        x, y, w, h, area = (int(v) for v in stats[index])
+        if area < 8 or min(w, h) < 2 or area > cores.size * .20:
+            continue
+        if w > width * .9 or h > height * .9:
+            continue
+        letters += 1
+    return letters
+
+
+def _close_shell_near_cores(cores: np.ndarray, shell: np.ndarray) -> np.ndarray | None:
+    """Соединить цветную оболочку только вокруг ядер, не заливая баллон."""
+    ys, xs = np.where(cores)
+    if len(xs) < 8:
+        return None
+    hull = cv2.convexHull(np.column_stack((xs, ys)).astype(np.int32))
+    neighborhood = np.zeros(cores.shape, np.uint8)
+    cv2.fillConvexPoly(neighborhood, hull, 255)
+    neighborhood = cv2.dilate(neighborhood, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)))
+    local = ((shell > 0) & (neighborhood > 0)).astype(np.uint8) * 255
+    if np.count_nonzero(local) > np.count_nonzero(cores) * 6:
+        return None
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    closed = cv2.morphologyEx(local, cv2.MORPH_CLOSE, kernel)
+    closed[neighborhood == 0] = 0
+    return closed
+
+
+def _colour_outline(crop: np.ndarray) -> np.ndarray | None:
+    """Замкнутая цветная обводка светлых букв, подтверждённая их ядрами.
+
+    Цвет выбирается из кольца самих букв. Сплошная цветная плашка
+    отбрасывается по выходу на границу и отношению оболочки к ядру.
+    """
+    cores = ((np.min(crop, axis=2) >= 170) & (np.max(crop, axis=2) >= 200)
+             & (np.ptp(crop, axis=2) < 65))
+    chroma = np.ptp(crop, axis=2) > 35
+    ring = (cv2.dilate(cores.astype(np.uint8), np.ones((5, 5), np.uint8)) > 0) & ~cores
+    pixels = crop[ring & chroma]
+    if len(pixels) < 20:
+        return None
+    colours, counts = np.unique(pixels.astype(np.int32) // 16, axis=0, return_counts=True)
+    if counts.max() < len(pixels) * .12:
+        return None
+    colour = colours[counts.argmax()] * 16 + 8
+    shell = (np.linalg.norm(crop.astype(np.float32) - colour, axis=2) < 38) & chroma
+    letter_cores = _letter_like_cores(cores)
+    if letter_cores:
+        closed = _close_shell_near_cores(cores, shell)
+        if closed is not None:
+            shell = shell | (closed > 0)
+    count, labels, stats, _ = cv2.connectedComponentsWithStats((cores | shell).astype(np.uint8))
+    result = np.zeros(cores.shape, np.uint8)
+    accepted = 0
+    height, width = cores.shape
+    for idx in range(1, count):
+        x, y, w, h, area = (int(v) for v in stats[idx])
+        body = labels[y:y+h, x:x+w] == idx
+        core = cores[y:y+h, x:x+w] & body
+        size = np.count_nonzero(core)
+        if size < 8 or not size * 1.2 <= area <= size * 6 or area > cores.size * .55:
+            continue
+        touches_edge = x == 0 or y == 0 or x + w == width or y + h == height
+        if touches_edge:
+            rows, cols = np.where(core)
+            if not len(cols):
+                continue
+            gx, gy = x + cols, y + rows
+            if gx.min() == 0 or gy.min() == 0 or gx.max() == width - 1 or gy.max() == height - 1:
+                continue
+        contours, _ = cv2.findContours(body.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        filled = cv2.drawContours(np.zeros((h, w), np.uint8), contours, -1, 255, -1)
+        result[y:y+h, x:x+w] = np.maximum(result[y:y+h, x:x+w], filled)
+        accepted += 1
+    if accepted >= 2 or (accepted >= 1 and letter_cores >= 2):
+        return result
+    return None
 
 
 def _inverse_outline(gray: np.ndarray, white: np.ndarray) -> np.ndarray | None:

@@ -122,4 +122,8 @@ def line_raster(text, font_path, style, geometry, scale=2, frozen=None):
     fit = dict(text='\n'.join(lines), width=width, height=height, center=[(left+right)/2, (top+bottom)/2],
                spacing=0, line_gap=0, font_size=max(1, round(144*common)),
                writing_mode='horizontal', source_lines=True)
+    if frozen:
+        # Повторный рендер обязан учитывать увеличенный кегль свободных строк.
+        layer = layer.resize((max(1, int(frozen["width"])), max(1, int(frozen["height"]))), Image.Resampling.LANCZOS)
+        fit = dict(frozen)
     return layer, fit

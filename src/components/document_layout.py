@@ -97,13 +97,13 @@ def layout_rectangle(
     @cache
     def box(line):
         b = font.getbbox(line)
+        extra = (len(line) - 1) * letter_spacing if letter_spacing else 0
         width = (
             draw.textlength(line, font=font)
             if not letter_spacing
-            else sum(draw.textlength(ch, font=font) for ch in line)
-            + max(0, len(line) - 1) * letter_spacing
+            else sum(draw.textlength(ch, font=font) for ch in line) + extra
         )
-        return min(0, b[0]), b[1], max(b[2], math.ceil(width)), b[3]
+        return min(0, b[0]), b[1], max(math.ceil(width), b[2] + extra), b[3]
 
     pending = list(words)
     lines = []

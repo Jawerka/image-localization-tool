@@ -47,6 +47,8 @@ def main():
     parser.add_argument('--baseline', type=Path)
     parser.add_argument('--reference', action='store_true')
     parser.add_argument('--only', nargs='+')
+    parser.add_argument('--ocr', choices=('none', 'rapid'), default='none',
+                        help='Автоматический OCR перед очисткой; при --baseline используются сохранённые регионы')
     args = parser.parse_args()
     if (args.out / 'eval.json').exists():
         parser.error('Каталог уже содержит отчёт; выберите новый --out, чтобы сохранить сравнение')
@@ -58,6 +60,11 @@ def main():
     config = Config()
     detector = BubbleDetector(intra_op_threads=4)
     pipeline = PagePipeline(config)
+    ocr = None
+    if args.ocr == 'rapid' and not args.baseline:
+        from src.components.rapid_ocr import RapidOcr
+
+        ocr = RapidOcr(intra_op_threads=4)
     report = []
     args.out.mkdir(parents=True, exist_ok=True)
     sources = [ROOT / 'src/page_pipeline.py', *sorted((ROOT / 'src/components').glob('*.py'))]
@@ -65,7 +72,8 @@ def main():
         'python': platform.python_version(),
         'config': {key: getattr(config, key) for key in ('layout_long_side', 'adaptive_text', 'letter_mask_grow_px', 'bubble_mask_inset_px', 'inpainter_backend')},
         'source_sha256': {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for p in sources},
-        'scope': 'Фиксированные детекции ogkalu, технические непустые тексты; OCR и перевод исключены',
+        'scope': 'Фиксированные регионы; перевод исключён, техническая замена ТЕСТ',
+        'ocr': 'cached' if args.baseline else args.ocr,
     }
     (args.out / 'run.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')
     for source, annotation, zone_path in pairs:
@@ -82,9 +90,12 @@ def main():
             payload = json.loads((cached / 'regions.json').read_text(encoding='utf-8'))
         else:
             regions = build_regions(detector.detect(image))
+            if ocr is not None:
+                _, regions = ocr.recognize(image, regions)
             for region in regions:
-                region.text = 'TEST TEXT'
-                region.translation = 'ТЕСТ'
+                if ocr is None:
+                    region.text = 'TEST TEXT'
+                region.translation = 'ТЕСТ' if region.text.strip() else ''
             payload = [r.to_dict() for r in regions]
         (destination / 'regions.json').write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
         (destination / 'input.json').write_text(json.dumps({'sha256': source_hash, 'size': image.size}), encoding='utf-8')

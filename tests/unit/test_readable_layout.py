@@ -61,3 +61,42 @@ def test_thin_tail_does_not_set_balloon_body_center():
     body = balloon_body(mask, region)
     assert not body[127, 13]
     assert np.all(body[40:90, 110:190])
+
+
+def test_overflow_at_minimum_does_not_clip_letters():
+    """Если после сжатия интервалов текст всё ещё не влезает, буквы не клипаются маской."""
+    image = Image.new('RGB', (220, 70), 'white')
+    region = TextRegion(
+        1, (10, 10, 70, 22),
+        translation='Очень длинная подпись которая не помещается в узкую полосу',
+        document=True,
+    )
+    result, overflow = Typesetter(min_font_size=10, max_font_size=10, font_scale=1.0).render(
+        image, [region], force=True,
+    )
+    assert overflow == [1]
+    assert region.style.font_size >= 10
+    changed = np.any(np.asarray(result) != 255, axis=2)
+    area = np.zeros((70, 220), np.uint8)
+    x, y, w, h = region.bbox
+    area[y:y+h, x:x+w] = 255
+    assert np.any(changed & (area == 0))
+
+
+def test_narrow_balloon_keeps_horizontal_russian():
+    """Горизонтальный перевод в узком баллоне не ставится вертикально."""
+    from src.components.adaptive_text import prepare_regions
+
+    image = Image.new('RGB', (160, 280), (30, 30, 30))
+    ImageDraw.Draw(image).ellipse((50, 20, 110, 260), fill=(250, 250, 250))
+    ImageDraw.Draw(image).text((62, 70), 'Hi!', fill=(10, 10, 10))
+    region = TextRegion(
+        1, (58, 60, 44, 40),
+        bubble_bbox=(50, 20, 60, 240),
+        text='Hi!',
+        translation='Привет всем',
+        block_type='dialogue',
+        class_name='text_bubble',
+    )
+    prepare_regions(image, [region])
+    assert (region.auto_layout or {}).get('writing_mode') != 'vertical'

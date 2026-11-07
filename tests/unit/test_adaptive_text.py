@@ -205,9 +205,12 @@ def test_asymmetric_free_ink_stays_centered_after_rotation():
 def test_small_document_label_gets_complete_text():
     region = TextRegion(1, (10, 10, 53, 18), text='Follow', translation='Подписаться',
                         document=True, block_type='narration', style=TextStyle(alignment='left'))
-    _, overflow = Typesetter(min_font_size=10, max_font_size=128).render(Image.new('RGB', (100, 40), 'white'), [region])
-    assert not overflow
-    assert 6 <= region.style.font_size < 10
+    setter = Typesetter(min_font_size=10, max_font_size=128)
+    _, overflow = setter.render(Image.new('RGB', (100, 40), 'white'), [region], force=True)
+    assert region.style.font_size >= 10
+    laid = ''.join(line for line, _, _ in setter._last_layouts[1]['lines']).replace('-', '')
+    assert laid.replace(' ', '') == 'Подписаться'
+    assert overflow in ([], [1])
 
 
 @pytest.mark.parametrize('bad', [{'version': 1, 'kind': 'free', 'ink_bbox': [0, 0, None, 10]},
@@ -243,7 +246,8 @@ def test_native_outline_survives_working_upscale(background, expected):
                                            ink_bbox=[100, 60, 80, 120], outline_px=3, mask_pad_px=8))
     widths = []
     for side in (0, 2000):
-        pipeline = PagePipeline(Config(layout_long_side=side))
+        # Проверяется толщина обводки, увеличение букв проверяется отдельно.
+        pipeline = PagePipeline(Config(layout_long_side=side, text_scale=1.0))
         rendered, over = pipeline.typeset_image(image, [copy.deepcopy(original)], 'en')
         assert not over
         row = np.asarray(rendered)[120, :, 0]

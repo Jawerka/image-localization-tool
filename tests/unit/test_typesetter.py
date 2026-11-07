@@ -458,7 +458,7 @@ def test_sfx_long_text_shrinks_instead_of_overflow():
     assert 10 <= region.style.font_size < 48
 
 
-def test_black_bubble_has_readable_white_outline():
+def test_black_bubble_has_white_fill_and_black_outline():
     image = Image.new("RGB", (180, 120), "white")
     draw = ImageDraw.Draw(image)
     draw.ellipse((10, 10, 170, 110), fill="black")
@@ -474,7 +474,9 @@ def test_black_bubble_has_readable_white_outline():
     assert overflow == []
     light = np.all(np.array(result) > 200, axis=2)
     assert int(light.sum()) > 10
-    assert region.style.fill_rgb == (0, 0, 0)
+    assert region.style.fill_rgb == (255, 255, 255)
+    stroke, width = Typesetter()._stroke_paint(np.array(image), interior_mask(np.array(image), region), region, 28)
+    assert stroke == (0, 0, 0) and width > 0
 
 
 def test_locked_black_on_black_bubble_stays_black():
@@ -881,7 +883,7 @@ def test_contrasting_stroke_keeps_dark_fill_on_dark_background():
     assert typesetter_module._readable_fill((18, 18, 18), (30, 30, 30), None) == (255, 255, 255)
 
 
-def test_free_text_on_dark_background_stays_dark_with_white_stroke():
+def test_free_text_on_dark_background_has_white_fill():
     image = Image.new("RGB", (240, 120), (30, 30, 30))
     region = TextRegion(
         id=1,
@@ -899,7 +901,7 @@ def test_free_text_on_dark_background_stays_dark_with_white_stroke():
     )
     result, overflow = Typesetter(min_font_size=28, max_font_size=28, lang="ru").render(image, [region])
     assert overflow == []
-    assert region.style.fill_rgb == (18, 18, 18)
+    assert region.style.fill_rgb == (255, 255, 255)
     pixels = np.array(result)
     assert int(np.sum(np.all(pixels > 220, axis=2))) > 10
 
@@ -925,3 +927,92 @@ def test_protruding_text_box_keeps_balloon_flood(monkeypatch):
     assert mask[140, 160] == 0
     assert int(np.sum(mask[:, 130:])) == 0
     assert int(np.sum(mask > 0)) > int(0.35 * 100 * 240)
+
+
+def test_automatic_font_scale_increases_size_once_and_preserves_words():
+    """Общее увеличение не теряет строки и повторно не растит снимок."""
+    import copy
+    image = Image.new('RGB', (420, 160), 'white')
+    region = TextRegion(1, (25, 25, 350, 110), translation='ПОЛНЫЙ ТЕКСТ', document=True)
+    setter = Typesetter(min_font_size=20, max_font_size=20, font_scale=1.1)
+    first, overflow = setter.render(image, [region])
+    assert not overflow
+    assert region.style.font_size == 22
+    assert ' '.join(line for line, _, _ in setter._last_layouts[1]['lines']) == region.translation
+    region.layout_snapshot = copy.deepcopy(setter._last_layouts[1])
+    again, overflow = setter.render(image, [region])
+    assert region.style.font_size == 22
+    assert np.array_equal(np.asarray(first), np.asarray(again))
+
+
+def test_automatic_font_scale_preserves_manual_size():
+    """Заданный пользователем кегль не умножается на общий масштаб."""
+    image = Image.new('RGB', (420, 160), 'white')
+    for manual, override in [(True, 0), (False, 20)]:
+        region = TextRegion(1, (25, 25, 350, 110), translation='ТЕКСТ', document=True,
+                            manual=manual, style=TextStyle(font_size_override=override))
+        Typesetter(min_font_size=20, max_font_size=20, font_scale=1.1).render(image, [region])
+        assert region.style.font_size == 20
+
+
+def test_enlarged_free_text_reports_leak_without_clipping_letters():
+    """Увеличенная надпись не обрезается молча границей старой области."""
+    image = Image.new('RGB', (600, 400), (128, 128, 128))
+    region = TextRegion(1, (100, 100, 80, 120), text='THUD', translation='I', block_type='sfx',
+                        style=TextStyle(fill_rgb=(18, 18, 18), font_id='Heroika-Regular'),
+                        auto_layout=dict(version=1, kind='free', source_bbox=[100, 100, 80, 120],
+                                         ink_bbox=[100, 100, 80, 120], outline_px=3))
+    area = interior_mask(np.asarray(image), region)
+    result, overflow = Typesetter(font_scale=2.0).render(image, [region])
+    assert overflow == [1]
+    changed = np.any(np.asarray(result) != np.asarray(image), axis=2)
+    assert np.any(changed & (area == 0))
+
+
+def test_free_raster_respects_minimum_even_with_reduced_scale():
+    """Свободный растр и уменьшение масштаба не обходят нижний порог."""
+    region = TextRegion(1, (50, 50, 35, 8), translation='ДЛИННЫЙ ТЕКСТ', block_type='sfx',
+                        auto_layout=dict(version=1, kind='free', source_bbox=[50, 50, 35, 8],
+                                         ink_bbox=[50, 50, 35, 8], outline_px=0))
+    setter = Typesetter(min_font_size=10, font_scale=0.5)
+    result, overflow = setter.render(Image.new('RGB', (200, 150), 'white'), [region])
+    assert region.style.font_size >= 10
+    assert setter._last_layouts[1]['raster_fit']['font_size'] >= 10
+    assert overflow == [1]
+    assert np.any(np.asarray(result) != 255)
+
+
+def test_long_caption_tightens_spacing_at_minimum():
+    """При кегле 10 сначала сжимаются интервалы, а не сразу аварийный перенос."""
+    from src.components.typesetter import _font_file, _load_font, _text_width, _tight_spacing
+
+    text = 'ПОДПИСЬБЕЗПРОБЕЛОВ'
+    probe = TextRegion(1, (0, 0, 10, 28), translation=text, document=True)
+    font = _load_font(_font_file(probe), 10)
+    draw = ImageDraw.Draw(Image.new('RGB', (1, 1)))
+    natural = _text_width(draw, text, font, 0.0)
+    tight_letter, _tight_line = _tight_spacing(10)
+    squeezed = _text_width(draw, text, font, tight_letter)
+    assert squeezed < natural
+    # Высота одной строки; ширина между сжатым и обычным текстом с учётом pad раскладки.
+    width = squeezed + 10
+    assert width < natural
+    region = TextRegion(1, (2, 2, width, 22), translation=text, document=True)
+    image = Image.new('RGB', (width + 8, 30), 'white')
+    _result, overflow = Typesetter(min_font_size=10, max_font_size=10, font_scale=1.0).render(image, [region])
+    assert region.style.font_size == 10
+    assert region.style.letter_spacing == tight_letter
+    assert overflow == []
+
+
+def test_manual_size_does_not_tighten_spacing():
+    """Ручной кегль не сжимает межбуквенный интервал."""
+    region = TextRegion(
+        1, (4, 4, 90, 24), translation='ПОДПИСЬБЕЗПРОБЕЛОВ', document=True,
+        style=TextStyle(font_size_override=10),
+    )
+    Typesetter(min_font_size=10, max_font_size=10, font_scale=1.0).render(
+        Image.new('RGB', (120, 40), 'white'), [region],
+    )
+    assert region.style.letter_spacing == 0
+    assert region.style.font_size == 10

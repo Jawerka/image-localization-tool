@@ -85,3 +85,13 @@ def test_sfx_config_precedence(tmp_path):
     assert Config(sfx_mode='skip').translate_sfx is False
     assert Config(translate_sfx=False).sfx_mode == 'skip'
     assert Config().translate_sfx is True
+
+
+def test_text_scale_defaults_and_roundtrip(tmp_path):
+    """Размер по умолчанию и ручной коэффициент переживают сохранение."""
+    assert Config().text_scale == 1.1
+    assert Config(text_scale=float('nan')).text_scale == 1.1
+    assert Config(text_scale='bad').text_scale == 1.1
+    path = tmp_path / 'scale.json'
+    Config(text_scale=1.25).save(path)
+    assert Config.load(path).text_scale == 1.25

@@ -97,6 +97,24 @@ def test_gap_in_shape_is_not_usable_text_space():
     assert not fits and not placed
 
 
+def test_shape_layout_uses_wide_body_above_long_narrow_tail():
+    """Хвост сдвигает общий центр, но не должен вытеснять текст из тела."""
+    mask = np.zeros((320, 250), np.uint8)
+    mask[10:110, 20:230] = 255
+    mask[110:310, 115:135] = 255
+    region = TextRegion(1, (30, 20, 180, 70))
+    font = _load_font(_font_file(region), 22)
+    draw = ImageDraw.Draw(Image.new('RGB', (250, 320)))
+    text = 'ПОЛНЫЙ ТЕКСТ РЕПЛИКИ'
+    placed, fits = layout_in_shape(text, font, draw, _row_spans(mask), None, 'center')
+    assert fits
+    assert ' '.join(line for line, _, _ in placed) == text
+    for line, x, y in placed:
+        left, top, right, bottom = draw.textbbox((x, y), line, font=font)
+        assert bottom <= 110
+        assert np.all(mask[top:bottom, left:right] > 0)
+
+
 def test_fit_stroke_width_matches_render_width():
     from src.components.typesetter import Typesetter
     from src.models import TextStyle

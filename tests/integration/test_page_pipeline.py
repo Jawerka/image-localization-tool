@@ -281,3 +281,14 @@ def test_sfx_default_reaches_shared_translation_and_drawable_filter():
         sound.translation = ''
         assert not pipeline._drawable([sound])
     assert _pipeline_fingerprint(AppSettings()) != _pipeline_fingerprint(AppSettings(sfx_mode='skip'))
+
+
+def test_minimum_font_survives_working_upscale():
+    """Минимальный кегль относится к итоговой странице, а не рабочему растру."""
+    pipeline = PagePipeline(Config(min_font_size=10, text_scale=1.0, layout_long_side=600))
+    region = TextRegion(1, (10, 10, 28, 10), translation='Подписаться', document=True)
+    result, overflow = pipeline.typeset_image(Image.new('RGB', (100, 50), 'white'), [region], 'ru')
+    assert result.size == (100, 50)
+    assert region.style.font_size >= 10
+    assert overflow == [1]
+    assert pipeline.typesetter.min_font_size == 10

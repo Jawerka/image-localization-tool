@@ -106,3 +106,16 @@ def test_outline_remains_in_external_roi():
                         source_lines=rows, outline_px=3))
     _, overflow = Typesetter().render(Image.new('RGB', (400, 250), (50, 50, 50)), [region])
     assert not overflow
+
+
+def test_frozen_source_rows_apply_enlarged_raster():
+    """Увеличение кегля меняет реальные пиксели, а не только метаданные."""
+    from src.components.slanted_layout import line_raster
+    geometry = dict(source_lines=[[20, 20, 100, 12]], source_bbox=[20, 20, 100, 12],
+                    ink_bbox=[20, 20, 100, 12])
+    layer, fit = line_raster('ТЕКСТ', COMIC_FONT, TextStyle(stroke_mode='none'), geometry)
+    enlarged = dict(fit, width=fit['width']*2, height=fit['height']*2, font_size=fit['font_size']*2)
+    result, actual = line_raster('ТЕКСТ', COMIC_FONT, TextStyle(stroke_mode='none'), geometry, frozen=enlarged)
+    assert result.size == (layer.width*2, layer.height*2)
+    assert actual == enlarged
+    assert np.count_nonzero(np.asarray(result.getchannel('A')) > 128) > 3 * np.count_nonzero(np.asarray(layer.getchannel('A')) > 128)

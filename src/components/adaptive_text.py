@@ -68,8 +68,15 @@ def prepare_regions(image, regions, pixel_scale=1.0):
                 geometry['contour'] = cv2.approxPolyDP(contour, 1., True).reshape(-1, 2).tolist()
         if bubble and region.bubble_bbox is not None:
             bx, by, bw, bh = region.bubble_bbox
-            letters = sum(not ch.isspace() for ch in region.translation)
-            if bh >= bw * 2.6 and 2 <= letters <= 16 and not style.font_size_override:
+            target = region.translation or region.text
+            letters = sum(not ch.isspace() for ch in target)
+            ink_vertical = (int(ys.max()) - int(ys.min()) + 1) >= (int(xs.max()) - int(xs.min()) + 1) * 1.6
+            target_vertical = (
+                any('\u3040' <= ch <= '\u9fff' for ch in target)
+                or (region.block_type == 'sfx' and letters <= 8)
+            )
+            if (ink_vertical and target_vertical and 2 <= letters <= 16
+                    and not style.font_size_override):
                 margin = max(3, round(min(bw, bh) * .1))
                 geometry['writing_mode'] = 'vertical'
                 geometry['ink_bbox'] = [bx + margin, by + margin, max(1, bw - 2*margin), max(1, bh - 2*margin)]

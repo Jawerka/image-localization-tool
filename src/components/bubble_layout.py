@@ -191,11 +191,11 @@ def layout_in_shape(
     @cache
     def bounds(line):
         if letter_spacing:
-            width = sum(float(draw.textlength(ch, font=font)) for ch in line)
-            width += max(0, len(line) - 1) * letter_spacing
-            # Запас под крайние выносы курсивных глифов.
+            extra = (len(line) - 1) * letter_spacing
+            width = sum(float(draw.textlength(ch, font=font)) for ch in line) + extra
+            # Запас под крайние выносы курсивных глифов; отрицательный трекинг сужает и bbox.
             box = font.getbbox(line)
-            return min(0, box[0]), max(math.ceil(width), box[2])
+            return min(0, box[0]), max(math.ceil(width), box[2] + extra)
         box = font.getbbox(line)
         return box[0], max(box[2], math.ceil(draw.textlength(line, font=font)))
 
@@ -236,7 +236,10 @@ def layout_in_shape(
         if block_h > bottom - top:
             continue
         center_y = (top + bottom - block_h) // 2
-        for shift in (0, -line_h // 3, line_h // 3):
+        # Длинный узкий хвост или вырез соседнего баллона смещает центр
+        # всей высоты. Проверяем также центр широкого тела, не меняя форму.
+        body_shift = round(float(np.median(broad)) - block_h / 2) - center_y
+        for shift in dict.fromkeys((0, -line_h // 3, line_h // 3, body_shift)):
             start = center_y + shift
             bands = []
             for i in range(count):
