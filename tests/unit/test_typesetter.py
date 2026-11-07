@@ -929,6 +929,64 @@ def test_protruding_text_box_keeps_balloon_flood(monkeypatch):
     assert int(np.sum(mask > 0)) > int(0.35 * 100 * 240)
 
 
+def test_document_column_shrinks_to_min_and_misses_the_photo():
+    """Длинный абзац садится в колонку до min 10 и не закрашивает снимок справа."""
+    image = Image.new("RGB", (420, 320), (250, 250, 248))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((250, 20, 400, 300), fill=(40, 110, 210))
+    draw.ellipse((280, 70, 370, 160), fill=(220, 50, 40))
+    draw.rectangle((270, 190, 380, 250), fill=(50, 180, 80))
+    region = TextRegion(
+        1,
+        (16, 16, 390, 290),
+        document=True,
+        block_type="narration",
+        translation=(
+            "Перевод абзаца длиннее исходного поля и обязан целиком поместиться "
+            "в колонке слева, не заходя на цветную фотографию справа от текста."
+        ),
+        style=TextStyle(fill_rgb=(0, 0, 0), alignment="left"),
+    )
+    photo = np.array(image)[20:300, 250:400].copy()
+    setter = Typesetter(min_font_size=10, max_font_size=64, lang="ru")
+    result, _overflow = setter.render(image, [region])
+    assert region.style.font_size >= 10
+    assert region.style.font_size < 43
+    words = " ".join(line for line, _, _ in setter._last_layouts[1]["lines"])
+    compact = words.replace(" ", "").replace("-", "")
+    assert compact == region.translation.replace(" ", "")
+    assert not np.any(np.array(result)[20:300, 250:400] != photo)
+
+
+def test_document_title_shrinks_before_body_bbox_after_font_scale():
+    """После fit и 1.1 заголовок не заходит в bbox абзаца, текст и пол 10 сохраняются."""
+    import copy
+    image = Image.new('RGB', (420, 280), 'white')
+    title = TextRegion(
+        1, (20, 16, 380, 50), document=True, block_type='title',
+        translation='Время чтения',
+        style=TextStyle(fill_rgb=(0, 0, 0), alignment='left'),
+    )
+    body = TextRegion(
+        2, (20, 68, 380, 190), document=True, block_type='narration',
+        translation='Абзац под заголовком занимает колонку и не должен быть перекрыт кеглем.',
+        style=TextStyle(fill_rgb=(0, 0, 0), alignment='left'),
+    )
+    solo = copy.deepcopy(title)
+    solo_setter = Typesetter(min_font_size=10, max_font_size=64, font_scale=1.1, lang='ru')
+    solo_setter.render(image, [solo])
+    solo_bounds = solo_setter._last_region_bounds[1]
+    bx, by, bw, bh = body.bbox
+    assert solo_bounds[0] < bx + bw and solo_bounds[2] > bx and solo_bounds[1] < by + bh and solo_bounds[3] > by
+    setter = Typesetter(min_font_size=10, max_font_size=64, font_scale=1.1, lang='ru')
+    setter.render(image, [title, body])
+    words = ' '.join(line for line, _, _ in setter._last_layouts[1]['lines'])
+    assert words.replace(' ', '').replace('-', '') == title.translation.replace(' ', '')
+    assert title.style.font_size >= 10
+    bounds = setter._last_region_bounds[1]
+    assert bounds[2] <= bx or bounds[0] >= bx + bw or bounds[3] <= by or bounds[1] >= by + bh
+
+
 def test_automatic_font_scale_increases_size_once_and_preserves_words():
     """Общее увеличение не теряет строки и повторно не растит снимок."""
     import copy

@@ -60,22 +60,33 @@ foreach ($entry in $targets) {
     if ($LASTEXITCODE -ge 8) { throw "Dry run failed: $($entry.Target)" }
 }
 if ($DryRun) { Write-Host 'Windows deploy dry-run OK'; return }
-$backupRoot = Join-Path (Split-Path -Parent $Dest) ('.' + (Split-Path -Leaf $Dest) + '.backup-' + [guid]::NewGuid().ToString('N'))
+$destParent = Split-Path -Parent $Dest
+$destName = Split-Path -Leaf $Dest
+$backupRoot = Join-Path $destParent ('.' + $destName + '.backup')
+$backupStaging = Join-Path $destParent ('.' + $destName + '.backup.staging')
 if (Test-Path -LiteralPath $Dest) {
-    New-Item -ItemType Directory -Path $backupRoot -Force | Out-Null
-    foreach ($name in @('desktop','sidecar','web','fonts','data')) {
-        $source = Join-Path $Dest $name
-        if (Test-Path -LiteralPath $source) {
-            $sourceFiles = @(Get-ChildItem -LiteralPath $source -Recurse -File -Force)
-            & robocopy $source (Join-Path $backupRoot $name) /E /COPY:DAT /XJ /R:0 /W:0 /NFL /NDL /NJH /NJS /NP | Out-Null
-            if ($LASTEXITCODE -ge 8) { throw "Backup failed: $name" }
-            foreach ($sourceFile in $sourceFiles) {
-                $relative = $sourceFile.FullName.Substring($source.Length).TrimStart('\')
-                $savedFile = Join-Path (Join-Path $backupRoot $name) $relative
-                if (-not (Test-Path -LiteralPath $savedFile -PathType Leaf)) { throw "Backup file missing: $name\$relative" }
-                if ((Get-DeployHash $sourceFile.FullName) -ne (Get-DeployHash $savedFile)) { throw "Backup hash mismatch: $name\$relative" }
+    if (Test-Path -LiteralPath $backupStaging) { Remove-Item -LiteralPath $backupStaging -Recurse -Force }
+    New-Item -ItemType Directory -Path $backupStaging -Force | Out-Null
+    try {
+        foreach ($name in @('desktop','sidecar','web','fonts','data')) {
+            $source = Join-Path $Dest $name
+            if (Test-Path -LiteralPath $source) {
+                $sourceFiles = @(Get-ChildItem -LiteralPath $source -Recurse -File -Force)
+                & robocopy $source (Join-Path $backupStaging $name) /E /COPY:DAT /XJ /R:0 /W:0 /NFL /NDL /NJH /NJS /NP | Out-Null
+                if ($LASTEXITCODE -ge 8) { throw "Backup failed: $name" }
+                foreach ($sourceFile in $sourceFiles) {
+                    $relative = $sourceFile.FullName.Substring($source.Length).TrimStart('\')
+                    $savedFile = Join-Path (Join-Path $backupStaging $name) $relative
+                    if (-not (Test-Path -LiteralPath $savedFile -PathType Leaf)) { throw "Backup file missing: $name\$relative" }
+                    if ((Get-DeployHash $sourceFile.FullName) -ne (Get-DeployHash $savedFile)) { throw "Backup hash mismatch: $name\$relative" }
+                }
             }
         }
+        if (Test-Path -LiteralPath $backupRoot) { Remove-Item -LiteralPath $backupRoot -Recurse -Force }
+        Move-Item -LiteralPath $backupStaging -Destination $backupRoot
+    } catch {
+        if (Test-Path -LiteralPath $backupStaging) { Remove-Item -LiteralPath $backupStaging -Recurse -Force -ErrorAction SilentlyContinue }
+        throw
     }
     Write-Host "Backup: $backupRoot"
 }
@@ -83,6 +94,10 @@ foreach ($entry in $targets) {
     & robocopy $entry.Source $entry.Target $entry.Mode /XJ /R:0 /W:0 /NFL /NDL /NJH /NJS /NP | Out-Null
     if ($LASTEXITCODE -ge 8) { throw "Copy failed: $($entry.Target); backup: $backupRoot" }
 }
+$backupPrefix = '.' + $destName + '.backup-'
+Get-ChildItem -LiteralPath $destParent -Force | Where-Object {
+    $_.PSIsContainer -and $_.Name.StartsWith($backupPrefix, [StringComparison]::OrdinalIgnoreCase)
+} | ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force }
 $release = Join-Path $DistDir 'release.json'
 if (Test-Path -LiteralPath $release) { Copy-Item -LiteralPath $release -Destination (Join-Path $Dest 'release.json') -Force }
 Write-Host 'Windows deploy OK:'

@@ -310,9 +310,11 @@ class RapidOcr:
         for region in regions:
             ordered = _reading_lines(buckets.get(region.id, []), direction)
             region.text = " ".join(word.text for word in ordered).strip()
-            # Короткая реплика может пропасть при OCR всей страницы. Повторяем
-            # только пустой речевой кроп, не трогая исключения и найденный текст.
-            if not region.text and region.bubble_bbox is not None and not region.skip:
+            # Короткая реплика или свободная строка бланка может пропасть
+            # при OCR всей страницы. Повторяем пустой кроп, не трогая исключения.
+            if not region.text and not region.skip and (
+                region.bubble_bbox is not None or region.block_type != "sfx"
+            ):
                 self.read_crop(image, region, direction, regions)
             self._guess_type(region)
         for region in regions:

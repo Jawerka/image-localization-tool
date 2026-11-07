@@ -289,6 +289,45 @@ def test_apply_strokes_flood_paint_and_erase_in_order():
     assert int(no_image.sum()) == 0
 
 
+def test_free_text_on_paper_covers_handwritten_form_lines():
+    """Тёмные строки на светлом бланке внутри комикса закрываются ink, не баллоном."""
+    rgb = np.full((220, 280, 3), (55, 70, 90), np.uint8)
+    rgb[30:170, 25:210] = (248, 244, 232)
+    expected = np.zeros(rgb.shape[:2], np.uint8)
+    for y, word in [(80, "LINDA"), (125, "NAME")]:
+        cv2.putText(rgb, word, (40, y), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (25, 20, 18), 2)
+        cv2.putText(expected, word, (40, y), cv2.FONT_HERSHEY_SIMPLEX, 1.0, 255, 2)
+    region = TextRegion(
+        1, (35, 50, 165, 95), text="LINDA NAME", block_type="narration", class_name="text_free",
+    )
+    mask = segment_region(rgb, region)
+    assert np.mean(mask[expected > 0] > 0) >= .90
+    assert np.count_nonzero(mask[:25]) == 0
+
+
+def test_contrast_sfx_next_to_balloon_keeps_separate_masks():
+    """Контрастный SFX рядом с репликой не входит в маску облачка."""
+    rgb = np.full((140, 260, 3), (70, 75, 80), np.uint8)
+    cv2.ellipse(rgb, (80, 70), (70, 45), 0, 0, 360, (250, 250, 250), -1)
+    cv2.ellipse(rgb, (80, 70), (70, 45), 0, 0, 360, (20, 20, 20), 2)
+    expected_hi = np.zeros(rgb.shape[:2], np.uint8)
+    cv2.putText(rgb, "HI", (52, 80), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (15, 15, 15), 2)
+    cv2.putText(expected_hi, "HI", (52, 80), cv2.FONT_HERSHEY_SIMPLEX, 1.0, 255, 2)
+    expected_ding = np.zeros(rgb.shape[:2], np.uint8)
+    cv2.putText(rgb, "DING", (165, 85), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 6)
+    cv2.putText(expected_ding, "DING", (165, 85), cv2.FONT_HERSHEY_SIMPLEX, 0.9, 255, 6)
+    cv2.putText(rgb, "DING", (165, 85), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (10, 10, 10), 2)
+    cv2.putText(expected_ding, "DING", (165, 85), cv2.FONT_HERSHEY_SIMPLEX, 0.9, 255, 2)
+    speech = TextRegion(1, (45, 45, 70, 50), text="HI", block_type="dialogue",
+                        bubble_bbox=(8, 22, 145, 95))
+    sound = TextRegion(2, (160, 55, 85, 45), text="DING", block_type="sfx")
+    balloon = segment_region(rgb, speech)
+    sfx = segment_region(rgb, sound)
+    assert np.mean(balloon[expected_hi > 0] > 0) >= .90
+    assert np.mean(sfx[expected_ding > 0] > 0) >= .70
+    assert np.mean(balloon[expected_ding > 0] > 0) < .12
+
+
 def test_two_tone_light_bubble_covers_every_word_without_outline():
     rgb = np.full((160, 300, 3), (80, 30, 110), np.uint8)
     cv2.rectangle(rgb, (10, 10), (290, 150), (235, 235, 240), -1)

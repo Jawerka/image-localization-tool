@@ -86,6 +86,9 @@ def can_merge_paragraph(
     left_delta = abs(a.bbox[0] - b.bbox[0])
     aligned = left_delta <= 0.25 * max(a.bbox[2], b.bbox[2])
     stacked = horizontal_overlap_ratio(a.bbox, b.bbox) >= 0.4
+    # Два высоких сдвинутых блока — соседние реплики, не строки абзаца.
+    if min(ha, hb) >= 72 and left_delta > 0.18 * max(a.bbox[2], b.bbox[2]):
+        return False
     return aligned or stacked
 
 
@@ -107,6 +110,9 @@ def can_merge_column(a: TextRegion, b: TextRegion) -> bool:
         return False
     aligned = abs(a.bbox[0] - b.bbox[0]) <= 0.2 * max(wa, wb)
     stacked = horizontal_overlap_ratio(a.bbox, b.bbox) >= 0.45
+    # На комиксе два высоких сдвинутых блока — соседние реплики, не колонка.
+    if min(ha, hb) >= 72 and abs(a.bbox[0] - b.bbox[0]) > 0.18 * max(wa, wb):
+        return False
     return aligned or stacked
 
 
@@ -133,12 +139,17 @@ def _project_span(points: list[tuple[float, float]], axis: tuple[float, float]) 
 def can_merge_collinear(a: TextRegion, b: TextRegion) -> bool:
     """Соседние фрагменты одной линии: близкий угол, малый зазор, общее проекционное перекрытие.
 
-    Два разных замкнутых баллона не сливаются. Тип sfx рядом с dialogue
-    не мешает, если это одна линия.
+    Два разных замкнутых баллона не сливаются. Свободный sfx рядом с
+    баллонной репликой остаётся отдельным. Без баллона тип sfx рядом с
+    dialogue не мешает, если это одна линия.
     """
     if a.document or b.document:
         return False
     if a.bubble_bbox is not None and b.bubble_bbox is not None:
+        return False
+    if (a.block_type == "sfx" and b.bubble_bbox is not None) or (
+        b.block_type == "sfx" and a.bubble_bbox is not None
+    ):
         return False
     ax, ay, aw, ah = a.bbox
     bx, by, bw, bh = b.bbox
@@ -167,6 +178,16 @@ def can_merge_collinear(a: TextRegion, b: TextRegion) -> bool:
     a_along = _project_span(_box_corners(a.bbox), along)
     b_along = _project_span(_box_corners(b.bbox), along)
     projected = max(0.0, max(a_along[0], b_along[0]) - min(a_along[1], b_along[1]))
+    along_overlap = max(0.0, min(a_along[1], b_along[1]) - max(a_along[0], b_along[0]))
+    along_span = min(a_along[1] - a_along[0], b_along[1] - b_along[0])
+    # Высокие блоки с большим перекрытием вдоль линии — соседние реплики,
+    # а не стык коротких фрагментов одной строки.
+    if (
+        min(ah, bh) >= 80
+        and along_span > 0
+        and along_overlap > 0.12 * along_span
+    ):
+        return False
     dx = max(0.0, max(ax - (bx + bw), bx - (ax + aw)))
     dy = max(0.0, max(ay - (by + bh), by - (ay + ah)))
     gap = math.hypot(dx, dy)

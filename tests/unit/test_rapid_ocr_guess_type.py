@@ -172,6 +172,20 @@ def test_unassigned_sound_does_not_override_excluded_region():
     assert regions[0].skip
 
 
+def test_empty_free_region_retries_ocr_on_crop():
+    """Пустой свободный бланк тоже дочитывается кропом, не только баллон."""
+    ocr = RapidOcr()
+    calls = []
+    def words(image):
+        calls.append(image.size)
+        return [] if len(calls) == 1 else [OcrWord("LINDA", (4, 4, 40, 12), .99)]
+    ocr._words = words
+    form = TextRegion(1, (20, 20, 50, 20), class_name="text_free", block_type="narration")
+    _, regions = ocr.recognize(Image.new("RGB", (100, 100), "white"), [form])
+    assert regions[0].text == "LINDA"
+    assert calls == [(100, 100), (66, 36)]
+
+
 def test_empty_balloon_retries_ocr_on_crop():
     """Пустая короткая реплика получает отдельный шанс, исключённая — нет."""
     ocr = RapidOcr()

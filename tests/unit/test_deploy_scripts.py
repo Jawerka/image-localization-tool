@@ -49,8 +49,10 @@ def test_deploy_preserves_files_when_bundle_contains_persistent_placeholders(tmp
     for name in folders:
         assert (target / name / "nested" / "saved.bin").read_bytes() == b"user-data-must-survive"
     assert (target / 'personal-notes.txt').read_bytes() == b'keep root files'
-    backups = list(target.parent.glob('.ImageLocalizationTool.backup-*'))
+    backups = list(target.parent.glob('.ImageLocalizationTool.backup'))
     assert len(backups) == 1
+    assert not list(target.parent.glob('.ImageLocalizationTool.backup-*'))
+    assert not list(target.parent.glob('.ImageLocalizationTool.backup.staging'))
     assert (backups[0]/'data/nested/saved.bin').read_bytes() == b'user-data-must-survive'
     assert (target / "web" / "index.html").read_text(encoding="utf-8") == "new-code"
 
@@ -72,10 +74,45 @@ def test_windows_dry_run_does_not_create_target_or_backup(tmp_path):
                              '-Dest', str(target), '-DryRun'], capture_output=True, timeout=60)
     assert result.returncode == 0, result.stderr.decode(errors='replace')
     assert not target.exists()
+    assert not list(tmp_path.glob('.*.backup'))
     assert not list(tmp_path.glob('.*.backup-*'))
+    assert not list(tmp_path.glob('.*.backup.staging'))
 
 
 @pytest.mark.skipif(os.name != 'nt', reason='Проверяется PowerShell Windows')
+@pytest.mark.skipif(os.name != "nt", reason="Проверяется реальный robocopy Windows")
+def test_windows_second_deploy_replaces_single_backup(tmp_path):
+    """Повторный деплой перезаписывает одну .backup и не оставляет GUID-копии."""
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "deploy-windows.ps1").write_bytes(WIN.read_bytes())
+    source = tmp_path / "dist" / "ImageLocalizationTool"
+    target = tmp_path / "apps" / "ImageLocalizationTool"
+    for rel in ["desktop/ImageLocalizationTool.exe", "sidecar/ImageLocalizationTool.exe", "web/index.html"]:
+        staged = source / rel
+        staged.parent.mkdir(parents=True, exist_ok=True)
+        staged.write_text("first-code", encoding="utf-8")
+    data = target / "data" / "project.json"
+    data.parent.mkdir(parents=True)
+    data.write_bytes(b"user project")
+    command = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(scripts / "deploy-windows.ps1"), "-Dest", str(target)]
+    first = subprocess.run(command, capture_output=True, timeout=60)
+    assert first.returncode == 0, (first.stdout + first.stderr).decode(errors="replace")
+    (source / "web" / "index.html").write_text("second-code", encoding="utf-8")
+    leftover = target.parent / ".ImageLocalizationTool.backup-deadbeef"
+    leftover.mkdir()
+    (leftover / "stale.txt").write_text("old", encoding="utf-8")
+    second = subprocess.run(command, capture_output=True, timeout=60)
+    assert second.returncode == 0, (second.stdout + second.stderr).decode(errors="replace")
+    backups = list(target.parent.glob(".ImageLocalizationTool.backup"))
+    assert len(backups) == 1
+    assert not list(target.parent.glob(".ImageLocalizationTool.backup-*"))
+    assert not leftover.exists()
+    assert (backups[0] / "web" / "index.html").read_text(encoding="utf-8") == "first-code"
+    assert (target / "web" / "index.html").read_text(encoding="utf-8") == "second-code"
+    assert data.read_bytes() == b"user project"
+
+
 def test_windows_incomplete_backup_blocks_code_changes_even_with_zero_exit_code(tmp_path):
     """Ложный успех копирования не должен разрешать запись поверх установки."""
     scripts = tmp_path/'scripts'
@@ -113,6 +150,8 @@ def test_deploy_windows_script_is_ascii_and_skips_models_by_default():
     assert "robocopy" in text
     assert "models" in text
     assert "data" in text
+    assert ".backup" in text
+    assert "NewGuid" not in text
     assert "ImageLocalizationTool.exe" in text
     assert r"D:\Documents\apps\ImageLocalizationTool" in text or "apps\\ImageLocalizationTool" in text
 

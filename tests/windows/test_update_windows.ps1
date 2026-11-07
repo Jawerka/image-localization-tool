@@ -146,6 +146,25 @@ function Assert-DataUnchanged {
     }
 }
 
+function Assert-SinglePrevious {
+    $previous = Join-Path $Work '.ImageLocalizationTool.previous'
+    if (-not (Test-Path -LiteralPath $previous -PathType Container)) { throw 'Fixed previous folder missing' }
+    $stale = @(Get-ChildItem -LiteralPath $Work -Force | Where-Object {
+        $_.PSIsContainer -and (
+            $_.Name -like '.ImageLocalizationTool.previous-*' -or
+            $_.Name -like '.ImageLocalizationTool.failed*' -or
+            $_.Name -like '.ImageLocalizationTool.rollback-stage*' -or
+            $_.Name -like '.ImageLocalizationTool.stage*' -or
+            $_.Name -eq '.ImageLocalizationTool.previous.old'
+        )
+    })
+    if ($stale.Count -gt 0) { throw "Stale sibling folders remain: $($stale.Name -join ', ')" }
+    $pointer = Get-Content -LiteralPath $pointerPath -Raw | ConvertFrom-Json
+    if ($pointer.folder -ne '.ImageLocalizationTool.previous') {
+        throw "Expected pointer folder .ImageLocalizationTool.previous, got $($pointer.folder)"
+    }
+}
+
 try {
     if ($Fixture) {
         Copy-TestBundle $SourceRoot '1.0.0' -FailHealth
@@ -187,6 +206,7 @@ try {
     if (-not (Test-Path -LiteralPath $pointerPath)) { throw 'Previous-release pointer was not written' }
     $pointer = Get-Content -LiteralPath $pointerPath -Raw | ConvertFrom-Json
     if ($pointer.version -ne $legacyVersion) { throw "Expected probed legacy version $legacyVersion, got $($pointer.version)" }
+    Assert-SinglePrevious
 
     Assert-DataUnchanged
     if ((Get-Content -LiteralPath $keyPath -Raw).Trim() -ne 'synthetic-key') {
@@ -203,6 +223,7 @@ try {
     if ($script:LastUpdaterOutput -notmatch 'после активации') { throw 'Fixture did not reach the post-activation rollback check' }
     Assert-Version '1.0.3'
     Assert-DataUnchanged
+    Assert-SinglePrevious
 
     # Повреждённый сохранённый релиз должен блокировать откат до переключения.
     $previousRoot = Join-Path $Work $pointer.folder
@@ -219,6 +240,7 @@ try {
     if ($code -ne 0) { throw "Explicit rollback returned $code" }
     Assert-Version $legacyVersion
     Assert-DataUnchanged
+    Assert-SinglePrevious
     $activeVersion = $legacyVersion
 
     # Некорректный и выходящий за каталог указатели должны быть безопасно отклонены.

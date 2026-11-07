@@ -18,11 +18,12 @@ def confirmed_light_ink(crop: np.ndarray) -> tuple[np.ndarray | None, bool]:
     height, width = gray.shape
     neutral = np.ptp(crop, axis=2) < 45
     white = (np.min(crop, axis=2) >= 210) & neutral
+    coloured = _colour_outline(crop)
     # Просветы обычных чёрных букв на бумаге тоже окружены чёрным:
     # преобладающее белое поле не является белой сердцевиной наклейки.
+    # Цветная оболочка на таком поле всё же ищется отдельно.
     if float(np.mean(white)) > .5:
-        return None, False
-    coloured = _colour_outline(crop)
+        return (coloured, True) if coloured is not None else (None, False)
     dark_panel = float(np.percentile(gray, 50)) < 120 and float(np.percentile(gray, 70)) < 170
     if not dark_panel:
         enclosed = _inverse_outline(gray, white)
@@ -112,48 +113,86 @@ def _close_shell_near_cores(cores: np.ndarray, shell: np.ndarray) -> np.ndarray 
     return closed
 
 
+def _chroma_peak_shell(crop: np.ndarray) -> np.ndarray:
+    """Оболочка как локальный пик насыщенности относительно медианы поля."""
+    hsv = cv2.cvtColor(crop, cv2.COLOR_RGB2HSV)
+    sat = hsv[:, :, 1].astype(np.float32)
+    chroma = np.ptp(crop, axis=2).astype(np.float32)
+    med_sat = float(np.median(sat))
+    med_chroma = float(np.median(chroma))
+    peak = (sat > med_sat + 32) | (chroma > med_chroma + 22)
+    peak &= (sat > med_sat + 18) & (chroma > max(28.0, med_chroma + 12))
+    neigh = cv2.blur(sat, (15, 15))
+    peak &= sat > neigh + 10
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    return cv2.morphologyEx(peak.astype(np.uint8), cv2.MORPH_CLOSE, kernel) > 0
+
+
 def _colour_outline(crop: np.ndarray) -> np.ndarray | None:
     """Замкнутая цветная обводка светлых букв, подтверждённая их ядрами.
 
     Цвет выбирается из кольца самих букв. Сплошная цветная плашка
     отбрасывается по выходу на границу и отношению оболочки к ядру.
+    Если «ядра» покрывают поле, оболочка — локальный пик хромы.
+    На тёмной текстуре пик хромы дополняет глобальное кольцо: второй
+    оттенок обводки не обязан попасть в dist < 38 к яркому цвету.
     """
     cores = ((np.min(crop, axis=2) >= 170) & (np.max(crop, axis=2) >= 200)
              & (np.ptp(crop, axis=2) < 65))
-    chroma = np.ptp(crop, axis=2) > 35
-    ring = (cv2.dilate(cores.astype(np.uint8), np.ones((5, 5), np.uint8)) > 0) & ~cores
-    pixels = crop[ring & chroma]
-    if len(pixels) < 20:
+    field = float(np.mean(cores)) > .35
+    if field:
+        cores = np.zeros(cores.shape, bool)
+        shell = _chroma_peak_shell(crop)
+        letter_cores = 0
+    else:
+        chroma = np.ptp(crop, axis=2) > 35
+        ring = (cv2.dilate(cores.astype(np.uint8), np.ones((5, 5), np.uint8)) > 0) & ~cores
+        pixels = crop[ring & chroma]
+        if len(pixels) < 20:
+            return None
+        colours, counts = np.unique(pixels.astype(np.int32) // 16, axis=0, return_counts=True)
+        if counts.max() < len(pixels) * .12:
+            return None
+        colour = colours[counts.argmax()] * 16 + 8
+        colour_match = (np.linalg.norm(crop.astype(np.float32) - colour, axis=2) < 38) & chroma
+        # Второй оттенок той же обводки (тень на волосах) дальше глобального
+        # dist < 38; локальный пик хромы дополняет кольцо, не ослабляя порог.
+        shell = colour_match | _chroma_peak_shell(crop)
+        letter_cores = _letter_like_cores(cores)
+        if letter_cores:
+            closed = _close_shell_near_cores(cores, shell)
+            if closed is not None:
+                shell = shell | (closed > 0)
+    if not np.any(shell):
         return None
-    colours, counts = np.unique(pixels.astype(np.int32) // 16, axis=0, return_counts=True)
-    if counts.max() < len(pixels) * .12:
-        return None
-    colour = colours[counts.argmax()] * 16 + 8
-    shell = (np.linalg.norm(crop.astype(np.float32) - colour, axis=2) < 38) & chroma
-    letter_cores = _letter_like_cores(cores)
-    if letter_cores:
-        closed = _close_shell_near_cores(cores, shell)
-        if closed is not None:
-            shell = shell | (closed > 0)
-    count, labels, stats, _ = cv2.connectedComponentsWithStats((cores | shell).astype(np.uint8))
-    result = np.zeros(cores.shape, np.uint8)
+    union = shell if field else (cores | shell)
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(union.astype(np.uint8))
+    result = np.zeros(shell.shape, np.uint8)
     accepted = 0
-    height, width = cores.shape
+    height, width = shell.shape
     for idx in range(1, count):
         x, y, w, h, area = (int(v) for v in stats[idx])
         body = labels[y:y+h, x:x+w] == idx
-        core = cores[y:y+h, x:x+w] & body
-        size = np.count_nonzero(core)
-        if size < 8 or not size * 1.2 <= area <= size * 6 or area > cores.size * .55:
-            continue
-        touches_edge = x == 0 or y == 0 or x + w == width or y + h == height
-        if touches_edge:
-            rows, cols = np.where(core)
-            if not len(cols):
+        if field:
+            if area < 16 or min(w, h) < 3 or area > shell.size * .20:
                 continue
-            gx, gy = x + cols, y + rows
-            if gx.min() == 0 or gy.min() == 0 or gx.max() == width - 1 or gy.max() == height - 1:
+            if w > width * .85 or h > height * .85:
                 continue
+            if area / max(1, w * h) > .70:
+                continue
+        else:
+            core = cores[y:y+h, x:x+w] & body
+            size = np.count_nonzero(core)
+            if size < 8 or not size * 1.2 <= area <= size * 6 or area > cores.size * .55:
+                continue
+            touches_edge = x == 0 or y == 0 or x + w == width or y + h == height
+            if touches_edge:
+                rows, cols = np.where(core)
+                if not len(cols):
+                    continue
+                gx, gy = x + cols, y + rows
+                if gx.min() == 0 or gy.min() == 0 or gx.max() == width - 1 or gy.max() == height - 1:
+                    continue
         contours, _ = cv2.findContours(body.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         filled = cv2.drawContours(np.zeros((h, w), np.uint8), contours, -1, 255, -1)
         result[y:y+h, x:x+w] = np.maximum(result[y:y+h, x:x+w], filled)

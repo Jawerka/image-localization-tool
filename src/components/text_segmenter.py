@@ -314,8 +314,10 @@ def segment_region(
     # но не даёт права заливать весь белый фон или захватывать линии края.
     unbound_dialogue = (not has_bubble and origin == "dialogue" and
                         np.percentile(cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY), 35) >= 225)
+    paper_free = (not has_bubble and origin != "sfx" and not region.document and
+                  np.percentile(cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY), 40) >= 220)
     if (not region.document and (outlined is not None or glyph_mask is not None or unbound_dialogue or
-            (has_bubble and origin != "sfx"))):
+            paper_free or (has_bubble and origin != "sfx"))):
         gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
         if float(np.percentile(gray, 60)) >= 180:
             cutoff = min(170, max(60, otsu_threshold(gray)))

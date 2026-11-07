@@ -137,6 +137,61 @@ def test_fit_stroke_width_matches_render_width():
                     )
 
 
+def _ellipse_region(region_id, center, axes, translation, canvas):
+    mask = np.zeros(canvas, np.uint8)
+    cv2.ellipse(mask, center, axes, 0, 0, 360, 255, -1)
+    ys, xs = np.nonzero(mask)
+    bbox = (int(xs.min()), int(ys.min()), int(xs.max() - xs.min() + 1), int(ys.max() - ys.min() + 1))
+    region = TextRegion(
+        region_id, bbox, translation=translation, bubble_bbox=None,
+        auto_layout={'version': 1, 'kind': 'bubble'},
+    )
+    return mask, region
+
+
+def test_inferred_neighbour_bubbles_split_overlap_by_centroid():
+    """Без bubble_bbox пересекающиеся маски режутся по центроиду, глифы не слипаются."""
+    from src.components.bubble_layout import separate_neighbour_bubbles
+    from src.components.typesetter import Typesetter
+
+    canvas = (220, 420)
+    left_mask, left = _ellipse_region(1, (150, 110), (120, 80), "Эй, Рарити!", canvas)
+    right_mask, right = _ellipse_region(2, (280, 115), (125, 85), "Какие кроссовки.", canvas)
+    assert np.any((left_mask > 0) & (right_mask > 0))
+    lx, ly, lw, lh = left.bbox
+    rx, ry, rw, rh = right.bbox
+    assert min(lx + lw, rx + rw) > max(lx, rx) and min(ly + lh, ry + rh) > max(ly, ry)
+    a = separate_neighbour_bubbles(left_mask, left, [left, right])
+    b = separate_neighbour_bubbles(right_mask, right, [left, right])
+    assert not np.any((a > 0) & (b > 0))
+    image = Image.new('RGB', (canvas[1], canvas[0]), (30, 30, 30))
+    setter = Typesetter(min_font_size=10, max_font_size=48, font_scale=1.0, lang='ru')
+    setter.render(image, [left, right])
+    draw = ImageDraw.Draw(Image.new('RGB', (canvas[1], canvas[0])))
+    boxes = []
+    for region_id in (1, 2):
+        layout = setter._last_layouts[region_id]
+        font = _load_font(_font_file(left if region_id == 1 else right), layout['font_size'])
+        union = None
+        for line, x, y in layout['lines']:
+            box = draw.textbbox((x, y), line, font=font)
+            union = box if union is None else (
+                min(union[0], box[0]), min(union[1], box[1]),
+                max(union[2], box[2]), max(union[3], box[3]),
+            )
+        boxes.append(union)
+    left_box, right_box = boxes
+    assert left_box[2] <= right_box[0] or right_box[2] <= left_box[0] or left_box[3] <= right_box[1] or right_box[3] <= left_box[1]
+
+
+def test_single_inferred_bubble_with_two_lines_is_not_bisected():
+    """Одно облачко из двух строк остаётся целой маской."""
+    from src.components.bubble_layout import separate_neighbour_bubbles
+
+    mask, region = _ellipse_region(1, (160, 110), (140, 85), "Первая строка вторая", (220, 320))
+    assert np.array_equal(separate_neighbour_bubbles(mask, region, [region]), mask)
+
+
 def test_separated_tails_do_not_form_a_wide_line():
     from src.components.bubble_layout import shape_row_spans
 

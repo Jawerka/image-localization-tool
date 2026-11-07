@@ -234,3 +234,71 @@ def test_gradient_panel_without_letter_cores_is_not_an_outline():
     found, outlined = confirmed_light_ink(rgb)
     assert found is None
     assert not outlined
+
+
+def _outlined_words(background, outline, fill=(235, 235, 235), texture=False):
+    """Циановая/цветная оболочка с белой заливкой на заданном поле."""
+    if texture:
+        rng = np.random.default_rng(3)
+        rgb = rng.integers(188, 236, (160, 400, 3), dtype=np.uint8)
+        rgb[..., 0] = np.clip(rgb[..., 0].astype(np.int16) - 8, 0, 255).astype(np.uint8)
+    else:
+        rgb = np.full((160, 400, 3), background, np.uint8)
+    expected = np.zeros(rgb.shape[:2], np.uint8)
+    for y, word in [(65, "YOUR"), (130, "PRINCESS")]:
+        cv2.putText(rgb, word, (25, y), cv2.FONT_HERSHEY_SIMPLEX, 1.2, outline, 12)
+        cv2.putText(expected, word, (25, y), cv2.FONT_HERSHEY_SIMPLEX, 1.2, 255, 12)
+        cv2.putText(rgb, word, (25, y), cv2.FONT_HERSHEY_SIMPLEX, 1.2, fill, 3)
+    return rgb, expected
+
+
+def test_cyan_outline_on_pale_sky_covers_stroke_not_the_field():
+    """Бледное небо не ядра букв: маска берёт циановую обводку, не заливку поля."""
+    rgb, expected = _outlined_words((200, 222, 236), (0, 200, 200), fill=(255, 255, 255))
+    found, outlined = confirmed_light_ink(rgb)
+    assert found is not None and outlined
+    assert np.mean(found[expected > 0] > 0) >= .90
+    assert np.mean(found[expected == 0] > 0) < .08
+    assert np.mean(found > 0) < .35
+
+
+def test_cyan_outline_on_pale_texture_follows_letters():
+    """Светлая мозаика тоже поле, а не белые ядра; оболочка остаётся буквенной."""
+    rgb, expected = _outlined_words((210, 215, 220), (0, 190, 190), fill=(250, 250, 250), texture=True)
+    found, outlined = confirmed_light_ink(rgb)
+    assert found is not None and outlined
+    assert np.mean(found[expected > 0] > 0) >= .85
+    assert np.mean(found > 0) < .35
+
+
+def test_hair_mass_on_pale_sky_is_not_an_outline():
+    """Крупное цветное пятно (волосы) на светлом поле не становится оболочкой букв."""
+    rgb = np.full((140, 220, 3), (205, 220, 235), np.uint8)
+    cv2.ellipse(rgb, (110, 70), (55, 40), 20, 0, 360, (40, 25, 18), -1)
+    found, outlined = confirmed_light_ink(rgb)
+    assert found is None
+    assert not outlined
+
+
+def test_two_shade_outline_on_dark_texture_covers_shadow_glyphs():
+    """Тёмная текстура не поле: теневой циан справа входит в маску вместе с ядрами."""
+    rng = np.random.default_rng(4)
+    height, width = 180, 540
+    base = rng.integers(18, 48, (height, width), dtype=np.uint8)
+    noise = rng.integers(-7, 8, (height, width, 3), dtype=np.int16)
+    rgb = np.clip(base[:, :, None].astype(np.int16) + noise, 0, 255).astype(np.uint8)
+    expected_right = np.zeros(rgb.shape[:2], np.uint8)
+    cv2.putText(rgb, 'THIS', (18, 95), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 200, 200), 14)
+    cv2.putText(rgb, 'THIS', (18, 95), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (245, 245, 245), 4)
+    cv2.putText(rgb, 'S?', (310, 95), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (70, 120, 125), 14)
+    cv2.putText(expected_right, 'S?', (310, 95), cv2.FONT_HERSHEY_SIMPLEX, 1.5, 255, 14)
+    cv2.putText(rgb, 'S?', (310, 95), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (245, 245, 245), 4)
+    cv2.ellipse(rgb, (90, 155), (55, 18), 12, 0, 360, (42, 28, 20), -1)
+    cores = ((np.min(rgb, axis=2) >= 170) & (np.max(rgb, axis=2) >= 200)
+             & (np.ptp(rgb, axis=2) < 65))
+    assert float(np.mean(cores)) < .35
+    found, outlined = confirmed_light_ink(rgb)
+    assert found is not None and outlined
+    assert np.mean(found[expected_right > 0] > 0) >= .85
+    assert not np.any(found[140:178, 40:140])
+    assert np.mean(found[:, :8] > 0) < .05
