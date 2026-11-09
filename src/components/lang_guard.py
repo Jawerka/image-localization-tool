@@ -15,6 +15,18 @@ _QUOTE_RE = re.compile(r"«[^»]*»|“[^”]*”|\"[^\"]*\"")
 _SENTENCE_MARK_RE = re.compile(r"[.!?…\n\r]")
 _FOREIGN_SHARE = 0.25
 _FOREIGN_LETTERS = 4
+_ADDRESS_RE = re.compile(r"https?://\S+|www\.\S+|\b[\w-]+\.(?:com|net|org|ru|io|me|dev|art|adult|co)(?:/[^\s]*)?", re.IGNORECASE)
+
+
+def unchanged_foreign_words(source: str, translation: str, target_lang: str, allowed=None) -> bool:
+    """Непереведённое WILDFIRE/SLAM не становится именем из-за заглавных букв."""
+    if (target_lang or '').lower() not in _CYRILLIC_TARGETS:
+        return False
+    # Строчные исходные слова тоже проверяются ниже общего порога латиницы.
+    # Имена вида Yanfei, глоссарий и адреса сохраняют прежние исключения.
+    original = {word.casefold() for word in re.findall(r'\b(?:[A-Z]{4,}|[a-z]{4,})\b', _strip(source, allowed or []))}
+    remaining = {word.casefold() for word in re.findall(r'\b[A-Za-z]{4,}\b', _strip(translation, allowed or []))}
+    return bool(original & remaining)
 
 
 def foreign_leak(text: str, target_lang: str, allowed: list[str] | None = None) -> bool:
@@ -74,6 +86,7 @@ def route_for_argos(text: str, target_lang: str) -> ArgosRoute:
 
 def _strip(text: str, allowed: list[str]) -> str:
     cleaned = _QUOTE_RE.sub(" ", text or "")
+    cleaned = _ADDRESS_RE.sub(' ', cleaned)
     for item in allowed:
         token = str(item or "").strip()
         if token:

@@ -244,3 +244,27 @@ def test_pipeline_forwards_ocr_warnings():
     warnings = []
     PagePipeline(ocr=_Ocr())._recognize(Image.new("RGB", (8, 8)), [], warnings)
     assert warnings == ["VLM перепутал номера рамок (баллоны), текст дочитан по кропам"]
+
+
+def test_crop_failure_without_previous_text_propagates():
+    """Ошибка сервера не превращается в успешный ответ без букв."""
+    import pytest
+    class Failed:
+        def chat_json(self, **kwargs):
+            raise RuntimeError('offline')
+    ocr = VlmOcr(Failed())
+    with pytest.raises(RuntimeError, match='offline'):
+        ocr.recognize(Image.new('RGB', (80, 80)), [_region(1, (10, 10, 40, 40), bubble=False)])
+    assert len(ocr.warnings) == 1
+
+
+def test_crop_verification_failure_keeps_previous_text_and_warns():
+    """Уже прочитанный текст сохраняется при отказе повторной проверки."""
+    class Failed:
+        def chat_json(self, **kwargs):
+            raise RuntimeError('offline')
+    ocr = VlmOcr(Failed())
+    region = _region(1, (10, 10, 40, 40), bubble=False)
+    region.text = 'READABLE'
+    assert ocr.read_crop(Image.new('RGB', (80, 80)), region) == 'READABLE'
+    assert len(ocr.warnings) == 1

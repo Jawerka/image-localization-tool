@@ -1,7 +1,17 @@
 """Слияние строк, привязка к баллону и порядок чтения."""
 
 from src.components.bubble_detector import Detection
-from src.components.text_regions import build_regions, can_merge_paragraph, merge_columns
+import numpy as np
+
+from src.components.text_regions import (
+    build_regions,
+    can_merge_collinear,
+    can_merge_column,
+    can_merge_paragraph,
+    merge_collinear,
+    merge_columns,
+    refine_document_regions,
+)
 from src.models import TextRegion
 
 
@@ -80,6 +90,57 @@ def test_page_sized_box_is_dropped():
     )
     assert len(kept) == 1
     assert kept[0].bbox == (10, 10, 120, 40)
+
+
+def test_sfx_does_not_merge_into_ballooned_replica():
+    """Отдельный звук рядом с баллоном не склеивается с репликой."""
+    speech = TextRegion(1, bbox=(20, 40, 120, 40), block_type="dialogue",
+                        bubble_bbox=(10, 20, 150, 80))
+    sound = TextRegion(2, bbox=(165, 48, 70, 32), block_type="sfx")
+    assert not can_merge_collinear(speech, sound)
+    assert len(merge_collinear([speech, sound])) == 2
+
+
+def test_collinear_slanted_fragments_merge_even_if_types_differ():
+    """Два наклонных AABB одной фразы сливаются; два баллона — нет."""
+    left = TextRegion(1, bbox=(20, 40, 160, 50), block_type="sfx")
+    right = TextRegion(2, bbox=(165, 58, 90, 48), block_type="dialogue")
+    assert can_merge_collinear(left, right)
+    merged = merge_collinear([left, right])
+    assert len(merged) == 1
+    assert merged[0].bbox == (20, 40, 235, 66)
+    two_bubbles = [
+        TextRegion(3, bbox=(20, 40, 160, 50), bubble_bbox=(10, 30, 180, 70)),
+        TextRegion(4, bbox=(165, 58, 90, 48), bubble_bbox=(160, 50, 110, 70)),
+    ]
+    assert not can_merge_collinear(two_bubbles[0], two_bubbles[1])
+    assert len(merge_collinear(two_bubbles)) == 2
+    distant = TextRegion(5, bbox=(20, 40, 200, 80))
+    other = TextRegion(6, bbox=(280, 200, 160, 70))
+    assert not can_merge_collinear(distant, other)
+
+
+def test_side_by_side_dialogue_blocks_do_not_merge():
+    """Перекрывающиеся AABB двух реплик не склеиваются в одну надпись."""
+    left = TextRegion(1, bbox=(640, 20, 639, 261))
+    right = TextRegion(2, bbox=(1111, 24, 726, 389))
+    assert not can_merge_collinear(left, right)
+    assert not can_merge_paragraph(left, right)
+    assert len(merge_collinear([left, right])) == 2
+    upper = TextRegion(3, bbox=(823, 1387, 712, 214))
+    lower = TextRegion(4, bbox=(1068, 1590, 701, 340))
+    assert not can_merge_paragraph(upper, lower)
+    assert not can_merge_column(upper, lower)
+    assert len(merge_columns([upper, lower])) == 2
+    regions = build_regions([
+        _text(left.bbox),
+        _text(right.bbox),
+        _text(upper.bbox),
+        _text(lower.bbox),
+    ])
+    assert len(regions) == 4
+    page = np.zeros((4096, 2372, 3), np.uint8)
+    assert len(refine_document_regions(page, [upper, lower])) == 2
 
 
 def test_rtl_puts_the_right_box_first():

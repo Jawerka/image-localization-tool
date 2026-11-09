@@ -195,7 +195,12 @@ def _scale_regions(regions: list[TextRegion], factor: float) -> None:
                 meta["source_bbox"] = list(_scale_box(meta["source_bbox"], factor))
             if meta.get("contour"):
                 meta["contour"] = _scale_points(meta["contour"], factor)
-            for key in ("outline_px", "mask_pad_px"):
+            if meta.get("protected_text"):
+                meta["protected_text"] = [_scale_points(points, factor) for points in meta["protected_text"]]
+            if meta.get("source_lines"):
+                meta["source_lines"] = [[round(float(v)*factor, 6) for v in row]
+                                        for row in meta["source_lines"]]
+            for key in ("outline_px", "mask_pad_px", "caption_padding"):
                 if key in meta:
                     meta[key] = round(float(meta[key]) * factor, 6)
 
@@ -306,6 +311,7 @@ class PagePipeline:
             stroke_ratio=self.config.text_stroke_ratio,
             margin_ratio=self.config.text_margin,
             adaptive_text=self.config.adaptive_text,
+            font_scale=self.config.text_scale,
         )
         self.ocr_name = ""
         self.translator_name = ""
@@ -387,6 +393,7 @@ class PagePipeline:
             progress_callback=progress_callback,
             cancel_check=cancel_check,
             _skip_layout_scale=True,
+            _native_pixel_scale=layout_scale,
         )
         overflow_ids = set(overflow)
         for region in regions:
@@ -478,7 +485,9 @@ class PagePipeline:
                 discovery_started = time.perf_counter()
                 try:
                     client = self._shared_client or self._client()
-                    extras = discover_missing_text(work, regions, client, self.config.vlm_max_side)
+                    extras = discover_missing_text(
+                        work, regions, client, self.config.vlm_max_side, warnings=warnings,
+                    )
                     regions.extend(extras)
                     if extras:
                         from src.components.text_regions import assign_reading_order
@@ -563,7 +572,8 @@ class PagePipeline:
         bubble_inset = int(getattr(self.config, "bubble_mask_inset_px", 2) or 0)
         letter_grow = max(0, int(getattr(self.config, "letter_mask_grow_px", 1) or 0))
         ordinary = [r for r in other_regions if not adaptive or not r.auto_layout or
-                    (r.auto_layout.get("kind") == "bubble" and r.bubble_bbox is not None)]
+                    ((r.auto_layout.get("kind") == "bubble" or r.auto_layout.get("mask_kind") == "bubble")
+                     and r.bubble_bbox is not None)]
         legacy_sfx = [r for r in sfx_regions if not adaptive or not r.auto_layout]
         mask_other = segment_regions(
             work, ordinary, bubble_inset_px=bubble_inset, letter_grow_px=letter_grow,
@@ -585,6 +595,10 @@ class PagePipeline:
             mask_sfx = clip_outlined_mask(mask_sfx, sfx_regions, seg)
         mask = np.maximum(mask_other, mask_sfx)
         self._merge_captured_sfx(work, sfx_regions, inks)
+        if self.config.ocr_backend == "vlm" and self.ocr_name in ("", "vlm"):
+            from src.components.neighbor_text import protect_neighbor_text
+
+            mask = protect_neighbor_text(work, drawable, mask, warnings=warnings)
         mask = apply_strokes(mask, strokes or [], work)
         # Плашки с просвечивающим рисунком и подтверждённая обводка требуют
         # восстановления изображения, даже если узкое кольцо локально ровное.
@@ -600,7 +614,8 @@ class PagePipeline:
                 continue
             picture = (region.bubble_bbox is not None and preserves_picture(work_rgb[ya:yb, xa:xb]))
             if picture or getattr(region, '_retouch_preserve_background', False):
-                pad = 34 if (region.auto_layout or {}).get('kind') == 'free' else 16
+                geometry = region.auto_layout or {}
+                pad = 34 if geometry.get('kind') == 'free' and geometry.get('mask_kind') != 'bubble' else 16
                 preserve[max(0, ya-pad):min(work.height, yb+pad), max(0, xa-pad):min(work.width, xb+pad)] = 255
         self._step_timings["segment"] = time.perf_counter() - started
         if debug:
@@ -621,6 +636,24 @@ class PagePipeline:
                 if np.any(other_part):
                     cleaned = self._inpaint(cleaned, other_part, warnings)
                 cleaned = self._inpaint(cleaned, sfx_part, warnings, allow_flat_fill=False)
+        # На подтверждённом гладком фоне LaMa иногда рисует тонкую линию.
+        # Медианный фильтр убирает её только внутри автоматической маски,
+        # не меняя исходные границы облачка и соседний рисунок.
+        smooth_regions = [r for r in drawable if getattr(r, '_retouch_smooth_background', False)
+                          and not r.manual and not r.edited]
+        if smooth_regions and np.any(mask):
+            rgb = np.array(cleaned)
+            for region in smooth_regions:
+                x, y, w, h = region.bbox
+                xa, ya = max(0, x-3), max(0, y-3)
+                xb, yb = min(work.width, x+w+3), min(work.height, y+h+3)
+                patch = rgb[ya:yb, xa:xb]
+                if min(patch.shape[:2]) < 25:
+                    continue
+                filtered = cv2.medianBlur(patch, 25)
+                selected = mask[ya:yb, xa:xb] > 0
+                patch[selected] = filtered[selected]
+            cleaned = Image.fromarray(rgb)
         self._step_timings["inpaint"] = time.perf_counter() - started
         if not np.any(mask):
             if layout_scale != 1.0:
@@ -649,6 +682,7 @@ class PagePipeline:
         cancel_check: CancelCheck | None = None,
         _skip_layout_scale: bool = False,
         incremental: dict | None = None,
+        _native_pixel_scale: float = 1.0,
     ) -> tuple[Image.Image, list[int]]:
         """Вёрстка переводов. Второй результат — id регионов, которые не влезли."""
         report = _bind_report(progress_callback, cancel_check)
@@ -676,26 +710,31 @@ class PagePipeline:
             incremental.get("previous_regions") or []
         ):
             incremental = None
-        if incremental and layout_scale == 1.0:
-            assign_stylized_fonts(
-                active,
-                enabled=bool(getattr(self.config, "auto_stylized_fonts", True)),
-                adaptive=bool(getattr(self.config, "adaptive_text", True)),
-            )
-            rendered, overflow, incremental_details = self.typesetter.render_incremental(
-                work,
-                active,
-                incremental["previous_regions"],
-                incremental["previous_result"],
-                incremental["previous_bounds"],
-                incremental["changed_region_ids"],
-                force=True,
-            )
-            warnings[:] = [item for item in warnings if not item.startswith("Текст не влез полностью:")]
-            if overflow:
-                warnings.append(f"Текст не влез полностью: {overflow}")
-        else:
-            rendered, overflow = self._typeset(work, active, target_lang, warnings)
+        original_min = self.typesetter.min_font_size
+        self.typesetter.min_font_size = math.ceil(self.config.min_font_size * layout_scale * _native_pixel_scale)
+        try:
+            if incremental and layout_scale == 1.0:
+                assign_stylized_fonts(
+                    active,
+                    enabled=bool(getattr(self.config, "auto_stylized_fonts", True)),
+                    adaptive=bool(getattr(self.config, "adaptive_text", True)),
+                )
+                rendered, overflow, incremental_details = self.typesetter.render_incremental(
+                    work,
+                    active,
+                    incremental["previous_regions"],
+                    incremental["previous_result"],
+                    incremental["previous_bounds"],
+                    incremental["changed_region_ids"],
+                    force=True,
+                )
+                warnings[:] = [item for item in warnings if not item.startswith("Текст не влез полностью:")]
+                if overflow:
+                    warnings.append(f"Текст не влез полностью: {overflow}")
+            else:
+                rendered, overflow = self._typeset(work, active, target_lang, warnings)
+        finally:
+            self.typesetter.min_font_size = original_min
         self._last_typeset_details = incremental_details or {"mode": "full"}
         self._step_timings["typeset"] = time.perf_counter() - started
         overflow_ids = set(overflow)

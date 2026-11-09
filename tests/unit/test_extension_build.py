@@ -65,7 +65,7 @@ def test_extension_build_manifests():
     assert firefox["browser_specific_settings"]["gecko"]["id"] == "image-localization-tool@local"
 
     for tree in (ROOT / "dist" / "chromium", ROOT / "dist" / "firefox"):
-        for name in ("safe-content.js", "native-swap.js", "log.js", "button-model.js", "ui.css"):
+        for name in ("safe-content.js", "native-swap.js", "log.js", "image-source.js", "button-model.js", "ui.css"):
             assert (tree / name).read_bytes() == (ROOT / "extension" / "src" / name).read_bytes()
         assert not (tree / "panel.html").exists()
         assert not (tree / "content.js").exists()
@@ -85,6 +85,9 @@ def test_extension_build_manifests():
     assert "downloads" in firefox["permissions"]
     assert "native-swap.js" in chromium["content_scripts"][0]["js"]
     assert chromium["content_scripts"][0]["js"].index("native-swap.js") < chromium["content_scripts"][0]["js"].index("inline-content.js")
+    for manifest in (chromium, firefox):
+        scripts = manifest["content_scripts"][0]["js"]
+        assert scripts.index("image-source.js") < scripts.index("inline-content.js")
     options = (ROOT / "extension" / "src" / "options.js").read_text(encoding="utf-8")
     for text in ERROR_STRINGS:
         assert text in options

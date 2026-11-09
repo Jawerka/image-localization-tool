@@ -237,6 +237,10 @@
     const naturalWidth = previous?.naturalWidth || img.naturalWidth;
     const naturalHeight = previous?.naturalHeight || img.naturalHeight;
     if (!naturalWidth || !naturalHeight) return { ok: false, error: "Нет размера изображения" };
+    // currentSrc после подмены blob может быть верным, а рисуется всё ещё <source type="image/webp">.
+    if (pictureSources(img).length) {
+      return { ok: false, error: "Страница показывает изображение через picture" };
+    }
     let pixels;
     try { pixels = await measurePixels(img, previous); }
     catch (_) { pixels = { width: naturalWidth, height: naturalHeight }; }

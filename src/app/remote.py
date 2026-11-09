@@ -5,7 +5,7 @@
 
 Контракт:
 
-* ``GET /v1/health`` → ``{"version": "dev", "ready": true|false}``
+* ``GET /v1/health`` → ``version``, ``ready`` и ``max_body_bytes`` (лимит тела).
 * ``POST /v1/pair`` ``{"code": "123456"}`` → ``{"token": "<secret>"}`` или 401
 * ``POST /v1/translate`` → всегда **202** ``{"job_id": "..."}``.
   Попадание в кэш не отдаёт PNG в этом ответе: задание сразу ``done``,
@@ -57,7 +57,7 @@ from src.app.settings import AppSettings
 logger = logging.getLogger("image_localization.remote")
 
 API_VERSION = "dev"
-MAX_BODY_BYTES = 20 * 1024 * 1024
+MAX_BODY_BYTES = 64 * 1024 * 1024
 MAX_PIXELS = 40_000_000
 MAX_PENDING = 8
 INBOX_NAME = "Входящие"
@@ -946,7 +946,11 @@ def _make_handler() -> type[BaseHTTPRequestHandler]:
                 return 204
             remote = self._remote()
             if self.command == "GET" and path == "/v1/health":
-                self._send_json({"version": API_VERSION, "ready": remote.ready}, 200)
+                self._send_json({
+                    "version": API_VERSION,
+                    "ready": remote.ready,
+                    "max_body_bytes": MAX_BODY_BYTES,
+                }, 200)
                 return 200
             if self.command == "POST" and path == "/v1/pair":
                 return self._pair(remote)
@@ -1042,7 +1046,7 @@ def _make_handler() -> type[BaseHTTPRequestHandler]:
             if raw is None:
                 data = self.rfile.read(MAX_BODY_BYTES + 1)
                 if body_too_large(len(data)):
-                    raise _HttpError(413, "Тело больше 20 МиБ")
+                    raise _HttpError(413, f"Тело запроса больше {MAX_BODY_BYTES // (1024 * 1024)} МиБ")
                 return data
             try:
                 size = int(str(raw).strip())
@@ -1051,7 +1055,7 @@ def _make_handler() -> type[BaseHTTPRequestHandler]:
             if size < 0:
                 raise _HttpError(400, "Некорректный Content-Length")
             if body_too_large(size):
-                raise _HttpError(413, "Тело больше 20 МиБ")
+                raise _HttpError(413, f"Тело запроса больше {MAX_BODY_BYTES // (1024 * 1024)} МиБ")
             return self.rfile.read(size)
 
         def _apply_cors(self) -> None:

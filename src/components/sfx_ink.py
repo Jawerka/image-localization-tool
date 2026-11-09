@@ -13,7 +13,7 @@ import numpy as np
 _MIN_LETTERS = 2
 
 
-def outlined_glyphs(crop: np.ndarray) -> np.ndarray | None:
+def outlined_glyphs(crop: np.ndarray, *, reject_cut_cores: bool = False) -> np.ndarray | None:
     """Буквы с контрастной обводкой в обеих полярностях.
 
     Возвращает маску букв и самой обводки или None, если таких букв меньше двух.
@@ -27,7 +27,7 @@ def outlined_glyphs(crop: np.ndarray) -> np.ndarray | None:
     gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
     candidates = []
     for dark_core in (True, False):
-        mask, letters, widths = _polarity(gray, dark_core)
+        mask, letters, widths = _polarity(gray, dark_core, reject_cut_cores=reject_cut_cores)
         pixels = int(np.count_nonzero(mask))
         if letters >= _MIN_LETTERS and pixels > 0:
             candidates.append((mask, pixels, widths))
@@ -37,6 +37,9 @@ def outlined_glyphs(crop: np.ndarray) -> np.ndarray | None:
     # Низ буквы на чёрном фоне не имеет белой обводки и сливается с заливкой.
     # Добираем только несколько соседних тёмных пикселей, не всю заливку.
     best = _absorb_dark_edge(gray, best, steps=3)
+    # Толстый белый stroke на тёмном поле дальше sandwich-лимита 6 px.
+    if float(np.median(gray)) < 140:
+        best = _absorb_light_halo(gray, best, steps=12)
     return _drop_edge_components(best)
 
 
@@ -65,7 +68,7 @@ def _variation(widths: list[float]) -> float:
     return float(np.std(widths) / mean)
 
 
-def _polarity(gray: np.ndarray, dark_core: bool) -> tuple[np.ndarray, int, list[float]]:
+def _polarity(gray: np.ndarray, dark_core: bool, *, reject_cut_cores: bool = False) -> tuple[np.ndarray, int, list[float]]:
     """Одна полярность: тёмное ядро и тонкая обводка между ядром и фоном."""
     if dark_core:
         core_px = gray <= 80
@@ -85,6 +88,9 @@ def _polarity(gray: np.ndarray, dark_core: bool) -> tuple[np.ndarray, int, list[
     height, width = gray.shape
     for index in range(1, count):
         x, y, w, h, area = (int(v) for v in stats[index])
+        # При поиске расширенной рамки обрезанный рисунок не подтверждает букву.
+        if reject_cut_cores and (x == 0 or y == 0 or x+w == width or y+h == height):
+            continue
         if area < 8 or w < 2 or h < 2:
             continue
         if area > width * height * 0.3:
@@ -179,6 +185,19 @@ def _sandwich(core: np.ndarray, halo: np.ndarray, limit: int) -> np.ndarray | No
     if int(np.count_nonzero(body)) < 12:
         return None
     return body
+
+
+def _absorb_light_halo(gray: np.ndarray, mask: np.ndarray, steps: int) -> np.ndarray:
+    """Добрать белую обводку вокруг уже найденных ядер, не заливая бумагу."""
+    reached = mask > 0
+    light = gray >= 215
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    for _step in range(steps):
+        ring = (cv2.dilate(reached.astype(np.uint8), kernel) > 0) & light & ~reached
+        if not np.any(ring):
+            break
+        reached = reached | ring
+    return reached.astype(np.uint8) * 255
 
 
 def _absorb_dark_edge(gray: np.ndarray, mask: np.ndarray, steps: int) -> np.ndarray:

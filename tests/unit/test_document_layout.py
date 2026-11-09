@@ -1,9 +1,10 @@
 """Прямоугольники документов не теряют текст и не становятся комиксовыми облачками."""
 
+import cv2
 import numpy as np
 from PIL import Image, ImageDraw
 
-from src.components.document_layout import is_document_page, layout_rectangle
+from src.components.document_layout import document_layout_mask, is_document_page, layout_rectangle
 from src.components.font_catalog import role_font_id
 from src.components.typesetter import _font_file, _load_font, _row_spans
 from src.models import TextRegion
@@ -61,6 +62,20 @@ def test_document_mask_never_erases_outside_text_box():
     assert np.any(mask[30:55, 32:38])
     mask[25:65, 30:100] = 0
     assert not np.any(mask)
+
+
+def test_document_layout_mask_cuts_colour_photo_from_column():
+    """Цветной снимок справа не входит в маску раскладки колонки."""
+    rgb = np.full((240, 360, 3), 250, np.uint8)
+    rgb[20:220, 230:350] = (30, 90, 200)
+    rgb[40:50, 240:340] = (220, 40, 40)
+    rgb[90:110, 245:335] = (40, 180, 70)
+    for y, word in [(50, "Hello"), (90, "there"), (130, "friends"), (170, "today")]:
+        cv2.putText(rgb, word, (24, y), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (20, 20, 20), 2)
+    region = TextRegion(1, (16, 16, 330, 210), document=True)
+    mask = document_layout_mask(rgb, region)
+    assert np.mean(mask[20:220, 230:350] > 0) < .08
+    assert np.mean(mask[40:180, 24:120] > 0) > .80
 
 
 def test_document_long_url_preserves_every_character_and_stays_inside():

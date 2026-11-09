@@ -216,11 +216,11 @@ def test_saved_pikabu_has_no_idle_changes(safe_extension):
             storage: {local: {get(keys, callback) {callback({});}}}
           };
         }""")
-        for name in ("button-model.js", "log.js", "inline-content.js", "safe-content.js"):
+        for name in ("button-model.js", "log.js", "image-source.js", "inline-content.js", "safe-content.js"):
             page.add_script_tag(content=(ROOT / "extension/src" / name).read_text(encoding="utf-8"))
         page.wait_for_timeout(100)
         # add_script_tag сам добавляет два тега; удаляем их перед сравнением.
-        page.evaluate("document.querySelectorAll('script:not([src])').forEach(e=>{const t=e.textContent; if(t.includes('iltSafeContent')||t.includes('iltInlineContent')||t.includes('iltButtonModel')||t.includes('iltLog')) e.remove()})")
+        page.evaluate("document.querySelectorAll('script:not([src])').forEach(e=>{const t=e.textContent; if(t.includes('iltSafeContent')||t.includes('iltInlineContent')||t.includes('iltButtonModel')||t.includes('iltLog')||t.includes('iltImageSource')) e.remove()})")
         assert page.evaluate("document.documentElement.outerHTML") == before
         assert page.locator("img").evaluate_all("es=>es.map(e=>({src:e.src,rect:e.getBoundingClientRect().toJSON()}))") == geometry
         page.close()
@@ -244,8 +244,14 @@ def test_inline_picture_scroll_resize_source_and_removal(safe_extension):
     page.locator("#pic").click()
     result = _wait_done(page)
     assert len(context.pages) == count
-    assert page.locator("#pic").evaluate("e=>e.currentSrc.startsWith('blob:')")
-    assert page.locator("source").evaluate("e=>e.srcset.startsWith('blob:')")
+    # Picture вправе сохранить source и использовать наложение: проверяем видимые пиксели.
+    from PIL import Image
+    import io
+    result.locator("button.face").evaluate("e=>e.style.opacity='0'")
+    shot = Image.open(io.BytesIO(page.screenshot()))
+    box = page.locator("#pic").bounding_box()
+    pixel = shot.getpixel((int(box["x"] + box["width"] / 2), int(box["y"] + box["height"] / 2)))
+    assert pixel[:3] == (200, 48, 48)
     assert _geometry(page) == before_geo
     page.evaluate("scrollTo(0, 70)")
     page.set_viewport_size({"width": 1100, "height": 850})
@@ -571,3 +577,132 @@ def test_inline_save_translation_download(safe_extension):
     }""", {"tabId": tab_id, "src": base + "/pic.png"})
     assert downloads and downloads[0]["filename"].endswith(".ru.png")
     assert downloads[0]["saveAs"] is True
+
+
+
+@pytest.mark.parametrize('picture', [False, True])
+def test_panel_geometry(safe_extension, picture):
+    context, options, base, _ = safe_extension
+    page = context.new_page()
+    page.goto(base + '/page.html')
+    if picture:
+        page.evaluate('''() => {
+          const img=document.querySelector('#pic'),picture=document.createElement('picture');
+          img.before(picture);picture.append(img);
+          const source=document.createElement('source');source.srcset=img.src;picture.prepend(source);
+        }''')
+    page.wait_for_function("document.querySelector('#pic').complete")
+    _start_select(options, _tab_id(options, page.url))
+    page.locator('#pic').click()
+    result = _wait_done(page)
+    result.locator('button.face').dispatch_event('pointerenter')
+    rows = []
+    def measure(label):
+        page.wait_for_timeout(100)
+        data = result.evaluate('''e => {
+            const r=e.shadowRoot, b=r.querySelector('button.face').getBoundingClientRect();
+            const p=r.querySelector('.panel').getBoundingClientRect();
+            return {button:b.toJSON(),panel:p.toJSON(),width:innerWidth,height:innerHeight,
+                children:[...r.querySelector('.panel').children].filter(x=>!x.hidden).map(x=>({text:x.textContent,rect:x.getBoundingClientRect().toJSON()}))};
+        }''')
+        data['label'] = label
+        rows.append(data)
+    measure('initial')
+    page.evaluate('scrollTo(0,70)')
+    measure('scroll')
+    result.locator("button[aria-label='Ещё']").evaluate('e=>e.click()')
+    measure('menu')
+    page.set_viewport_size({'width':320,'height':600})
+    page.evaluate("document.querySelector('#contain').style.cssText='position:fixed;left:8px;top:200px;width:280px;height:280px'; document.querySelector('#pic').style.cssText='width:280px;height:280px'")
+    result.locator('button.face').hover()
+    result.locator("button[aria-label='Ещё']").evaluate('e=>e.click()')
+    measure('narrow-menu')
+    # Настоящий zoom вкладки меняет CSS viewport, в отличие от CSS transform.
+    worker = context.service_workers[0]
+    tab_id = _tab_id(options, page.url)
+    for zoom in (.8, 1.5):
+        worker.evaluate('async ({id,zoom})=>chrome.tabs.setZoom(id,zoom)', {'id': tab_id, 'zoom': zoom})
+        measure(f'zoom-{zoom}')
+        assert worker.evaluate('id=>chrome.tabs.getZoom(id)', tab_id) == zoom
+        assert abs(rows[-1]['width'] - 320 / zoom) <= 2
+    worker.evaluate('async id=>chrome.tabs.setZoom(id,1)', tab_id)
+    for row in rows:
+        for child in row['children']:
+            assert child['rect']['right'] <= row['width'], (row['label'],child)
+            assert child['rect']['left'] >= 0, (row['label'],child)
+
+
+
+def test_neighbor_error(safe_extension):
+    context,options,base,_=safe_extension
+    page=context.new_page()
+    page.goto(base+'/page.html')
+    page.wait_for_function("document.querySelector('#pic').complete")
+    tab=_tab_id(options,page.url)
+    _start_select(options,tab)
+    page.locator('#pic').click()
+    _wait_done(page)
+    done=page.locator("[data-ilt-result][data-state='done']")
+    options.evaluate("chrome.storage.local.set({token:''})")
+    page.evaluate('''()=>{
+      const img=document.createElement('img');img.id='other';img.src='/pic.png?other';
+      img.style.cssText='position:absolute;left:440px;top:220px;width:300px;height:180px';document.body.append(img);
+    }''')
+    page.wait_for_function("document.querySelector('#other').complete")
+    _start_select(options,tab)
+    page.locator('#other').click()
+    error=page.locator("[data-ilt-result][data-state='error']")
+    error.wait_for()
+    done.locator('button.face').click()
+    page.wait_for_function("getComputedStyle(document.querySelector('[data-ilt-result][data-state=done]').shadowRoot.querySelector('.panel')).opacity==='1'")
+    page.wait_for_timeout(200)
+    a=done.locator('.panel').bounding_box()
+    b=error.locator('.detail').bounding_box()
+    assert error.locator('button.face').is_visible()
+    if b is None:
+        return
+    overlap=max(0,min(a['x']+a['width'],b['x']+b['width'])-max(a['x'],b['x']))*max(0,min(a['y']+a['height'],b['y']+b['height'])-max(a['y'],b['y']))
+    assert overlap==0
+
+
+
+def test_layout_shift(safe_extension):
+    context,options,base,_=safe_extension
+    page=context.new_page()
+    page.goto(base+'/page.html')
+    page.wait_for_function("document.querySelector('#pic').complete")
+    _start_select(options,_tab_id(options,page.url))
+    page.locator('#pic').click()
+    result=_wait_done(page)
+    result.locator('button.face').click()
+    page.wait_for_function("getComputedStyle(document.querySelector('[data-ilt-result]').shadowRoot.querySelector('.panel')).opacity==='1'")
+    def geometry():
+        return result.evaluate('''e=>{
+          const root=e.shadowRoot,b=root.querySelector('button.face'),p=root.querySelector('.panel');
+          return {anchored:b.classList.contains('anchored'),image:document.querySelector('#pic').getBoundingClientRect().toJSON(),button:b.getBoundingClientRect().toJSON(),panel:p.getBoundingClientRect().toJSON(),opacity:getComputedStyle(p).opacity};
+        }''')
+    before=geometry()
+    page.evaluate("document.querySelector('#contain').style.transform='translateY(100px)'")
+    page.wait_for_timeout(150)
+    after=geometry()
+    row={'before':before,'after':after,'image_shift':after['image']['top']-before['image']['top'],'button_shift':after['button']['top']-before['button']['top'],'panel_shift':after['panel']['top']-before['panel']['top']}
+    assert abs(row['button_shift']-row['panel_shift'])<=1
+    assert abs(row['image_shift']-row['button_shift'])<=1
+    page.evaluate('''() => {
+      const contain=document.querySelector('#contain'),scroller=document.createElement('div');
+      scroller.id='nested-scroll';
+      scroller.style.cssText='position:fixed;left:100px;top:100px;width:420px;height:350px;overflow:auto';
+      contain.before(scroller);scroller.append(contain);
+      contain.style.position='relative';contain.style.top='0';contain.style.left='0';contain.style.height='650px';
+    }''')
+    page.wait_for_timeout(100)
+    before=geometry()
+    page.evaluate("document.querySelector('#nested-scroll').scrollTop=80")
+    page.wait_for_timeout(150)
+    after=geometry()
+    image_shift=after['image']['top']-before['image']['top']
+    button_shift=after['button']['top']-before['button']['top']
+    panel_shift=after['panel']['top']-before['panel']['top']
+    assert image_shift == -80
+    assert abs(button_shift-image_shift)<=1
+    assert abs(panel_shift-button_shift)<=1

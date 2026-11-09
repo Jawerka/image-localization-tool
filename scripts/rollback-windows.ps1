@@ -11,7 +11,8 @@ $ErrorActionPreference = 'Stop'
 $layout = Get-WindowsInstallLayout $InstallRoot
 if (-not (Test-Path -LiteralPath $layout.Root -PathType Container)) { throw "Установка не найдена: $($layout.Root)" }
 $lock = Enter-WindowsUpdateLock $layout
-$swap = Join-Path $layout.Parent ".$($layout.Name).rollback-stage-$([guid]::NewGuid().ToString('N'))"
+$siblings = Get-WindowsSiblingLayout $layout
+$swap = $siblings.RollbackStage
 $previous = $null
 $currentMetadata = $null
 $oldMoved = $false
@@ -28,34 +29,42 @@ try {
     $candidateProbe = Test-WindowsReleaseHealth $previous.Path $HealthTimeoutSec
     if (-not $candidateProbe.Ready) { throw "Предыдущая версия не прошла проверку до отката: $($candidateProbe.Detail)" }
 
-    Move-Item -LiteralPath $layout.Root -Destination $swap
+    if ((Test-Path -LiteralPath $swap) -and (Test-Path -LiteralPath $layout.Root)) {
+        Remove-WindowsDirectory $swap
+    }
+    Move-WindowsDirectory $layout.Root $swap
     $oldMoved = $true
     $movedFolders = @(Move-WindowsPersistentFolders $swap $previous.Path)
-    Move-Item -LiteralPath $previous.Path -Destination $layout.Root
+    Move-WindowsDirectory $previous.Path $layout.Root
     $previousActivated = $true
 
     $activeProbe = Test-WindowsReleaseHealth $layout.Root $HealthTimeoutSec
     if (-not $activeProbe.Ready) { throw "Предыдущая версия не прошла проверку после переключения: $($activeProbe.Detail)" }
-    Set-WindowsPreviousRelease $layout.Root $swap $currentMetadata.version
+    $saved = Promote-WindowsPreviousFolder $layout $swap
+    Set-WindowsPreviousRelease $layout.Root $saved $currentMetadata.version
+    Remove-WindowsDirectory $siblings.PreviousOld
+    Remove-WindowsDirectory $siblings.Failed
+    Remove-WindowsStaleReleaseFolders $layout @($saved)
 
     Write-Host "Откат завершён: $($currentMetadata.version) → $($previous.Metadata.version)."
-    Write-Host "Версия $($currentMetadata.version) сохранена для повторного обновления: $swap"
+    Write-Host "Версия $($currentMetadata.version) сохранена для повторного обновления: $saved"
 } catch {
     $failure = $_.Exception.Message
     try {
         if ($previousActivated -and (Test-Path -LiteralPath $layout.Root -PathType Container)) {
             Restore-WindowsPersistentFolders $layout.Root $swap $movedFolders
-            Move-Item -LiteralPath $layout.Root -Destination $previous.Path
+            Move-WindowsDirectory $layout.Root $previous.Path
             $previousActivated = $false
-        } elseif ($movedFolders.Count -gt 0 -and (Test-Path -LiteralPath $previous.Path -PathType Container)) {
+        } elseif ($movedFolders.Count -gt 0 -and $previous -and (Test-Path -LiteralPath $previous.Path -PathType Container)) {
             Restore-WindowsPersistentFolders $previous.Path $swap $movedFolders
         }
         if ($oldMoved -and (Test-Path -LiteralPath $swap -PathType Container) -and -not (Test-Path -LiteralPath $layout.Root)) {
-            Move-Item -LiteralPath $swap -Destination $layout.Root
+            Move-WindowsDirectory $swap $layout.Root
             $oldMoved = $false
         }
     } catch {
-        throw "Откат отклонён: $failure. Автоматическое восстановление не завершилось: $($_.Exception.Message). Проверьте каталоги $swap и $($previous.Path)."
+        $previousPath = if ($previous) { $previous.Path } else { $siblings.Previous }
+        throw "Откат отклонён: $failure. Автоматическое восстановление не завершилось: $($_.Exception.Message). Проверьте каталоги $swap и $previousPath."
     }
     throw "Откат отклонён; оставлена версия $($currentMetadata.version): $failure"
 } finally {

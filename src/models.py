@@ -64,6 +64,8 @@ def _auto_layout(value, bbox):
     if not isinstance(value, dict) or value.get('version') != 1 or value.get('kind') not in ('free', 'bubble'):
         return None
     try:
+        if value.get('writing_mode', 'horizontal') not in ('horizontal', 'vertical', 'auto'):
+            return None
         source = value.get('source_bbox')
         if source and list(source) != list(bbox):
             return None
@@ -74,9 +76,16 @@ def _auto_layout(value, bbox):
                         not all(isinstance(v, (int, float)) and not isinstance(v, bool) and
                                 math.isfinite(v) and abs(v) < 1_000_000 for v in box) or min(float(box[2]), float(box[3])) <= 0):
                     return None
-        for key in ('outline_px', 'mask_pad_px'):
+        for key in ('outline_px', 'mask_pad_px', 'caption_padding'):
             if key in value and not 0 <= float(value[key]) <= 10000:
                 return None
+        rows = value.get('source_lines')
+        if rows is not None and (not isinstance(rows, list) or not 1 <= len(rows) <= 12 or any(
+                not isinstance(row, (list, tuple)) or len(row) != 4 or
+                any(not isinstance(v, (int, float)) or isinstance(v, bool) or
+                    not math.isfinite(v) or abs(v) >= 1_000_000 for v in row) or
+                min(row[2:]) <= 0 for row in rows)):
+            return None
         if value.get('contour') is not None:
             points = value['contour']
             if (not isinstance(points, list) or not 3 <= len(points) <= 4096 or

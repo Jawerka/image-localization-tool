@@ -13,6 +13,7 @@
   let port = null;
   let theme = "system";
   let anchorOk = null;
+  let trackingFrame = 0;
 
   const GLYPH = `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M4 5.5h9.2a1.5 1.5 0 0 1 1.5 1.5v6.2a1.5 1.5 0 0 1-1.5 1.5H8.2L6 17.2v-2.5H4a1.5 1.5 0 0 1-1.5-1.5V7A1.5 1.5 0 0 1 4 5.5Z"/><path fill="none" stroke="currentColor" stroke-width="1.6" d="M14.2 8.2h5.3v4.6h-2.2L16 14.6v-1.8h-1.8z"/></svg>`;
 
@@ -123,6 +124,7 @@
   function remove(record) {
     if (records.get(record.node) !== record) return;
     records.delete(record.node);
+    if (!records.size) { cancelAnimationFrame(trackingFrame); trackingFrame = 0; }
     record.revision += 1;
     record.observer?.disconnect();
     record.addressObserver?.disconnect();
@@ -143,13 +145,24 @@
   function watchAddress(record) {
     record.addressObserver?.disconnect();
     if (!(record.node instanceof HTMLImageElement) || typeof MutationObserver !== "function") return;
-    const observer = new MutationObserver(() => {
+    const observer = new MutationObserver((changes) => {
       if (records.get(record.node) !== record || record.mode === "swap") return;
+      if (record.phase === "done" && changes.some(change => change.target !== record.node)) {
+        remove(record);
+        return;
+      }
       const next = absoluteUrl(record.node.getAttribute("src") || "");
       if (!next || next.startsWith("blob:") || next === record.imageUrl) return;
       remove(record);
     });
     observer.observe(record.node, { attributes: true, attributeFilter: ["src", "srcset"] });
+    const picture = record.node.closest("picture");
+    if (picture) {
+      observer.observe(picture, {childList:true});
+      for (const source of picture.querySelectorAll("source")) {
+        observer.observe(source, {attributes:true, attributeFilter:["srcset", "sizes", "type", "media"]});
+      }
+    }
     record.addressObserver = observer;
   }
 
@@ -374,6 +387,28 @@
     for (const record of records.values()) place(record);
   }
 
+  // Размер не меняется при transform и сдвиге соседнего содержимого.
+  function followGeometry() {
+    trackingFrame = 0;
+    for (const record of records.values()) {
+      const rect = record.node.getBoundingClientRect();
+      const button = record.button.getBoundingClientRect();
+      const key = [rect.left, rect.top, rect.width, rect.height, button.left, button.top, innerWidth, innerHeight].join("|");
+      if (key !== record.geometryKey) { record.geometryKey = key; place(record); }
+    }
+    if (records.size) trackingFrame = requestAnimationFrame(followGeometry);
+  }
+
+  // Ошибка остаётся доступной на своей кнопке, но раскрытая поверхность одна.
+  function activateSurface(record) {
+    for (const other of records.values()) {
+      if (other === record) continue;
+      other.panelOpen = false;
+      other.detail.hidden = true;
+      applyFade(other);
+    }
+  }
+
   window.addEventListener("scroll", track, true);
   window.addEventListener("resize", track);
 
@@ -550,6 +585,7 @@
       record.errorCode = error.code || "";
       show(record, "error", error.message || "Ошибка перевода");
       record.note.textContent = [error.message, record.errorCode].filter(Boolean).join(" · ");
+      activateSurface(record);
       record.detail.hidden = false;
       place(record);
       log("translate-error", error.message || "ошибка", { code: record.errorCode });
@@ -569,6 +605,7 @@
   }
 
   function openPanel(record, on) {
+    if (on) activateSurface(record);
     record.panelOpen = on && record.phase === "done";
     applyFade(record);
     if (record.panelOpen) buttonFace(record);
@@ -605,8 +642,9 @@
       .ring{position:absolute;inset:3px;border-radius:50%;background:conic-gradient(var(--primary) calc(var(--p)*1%), #0000 0);-webkit-mask:radial-gradient(circle, transparent 58%, #000 60%);mask:radial-gradient(circle, transparent 58%, #000 60%)}
       .pct{position:relative;font:10px/1 system-ui}
       .panel,.detail{position:fixed;display:flex;align-items:center;max-width:calc(100vw - 16px);gap:2px;padding:0 4px;border-radius:10px;background:color-mix(in srgb,var(--glass) 92%,transparent);color:var(--fg);box-shadow:0 2px 10px #0006;pointer-events:auto;transition:opacity .15s}
-      .panel{height:32px;flex-wrap:nowrap;white-space:nowrap;border:1px solid var(--line)}
+      .panel{min-height:32px;height:auto;flex-wrap:wrap;white-space:normal;border:1px solid var(--line);max-height:calc(100vh - 16px);overflow:auto}
       .detail{min-height:32px;flex-wrap:wrap;padding:4px;max-width:min(360px,calc(100vw - 16px))}
+      .panel button,.detail button{max-width:100%;overflow-wrap:anywhere;flex-shrink:0}
       .note{font:12px/1.3 system-ui;padding:0 6px;flex-basis:100%}
       .panel button,.detail button{font:12px/1.2 system-ui;color:inherit;background:transparent;border:0;border-radius:8px;padding:4px 6px;cursor:pointer;pointer-events:auto}
       .status{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
@@ -680,6 +718,7 @@
       if (!event.isTrusted) return;
       if (record.phase === "idle") void watch(record, false);
       else if (record.phase === "error") {
+        if (detail.hidden) activateSurface(record);
         detail.hidden = !detail.hidden;
         place(record);
       } else if (record.phase === "done") openPanel(record, true);
@@ -716,6 +755,8 @@
     saveLog.addEventListener("click", () => { void globalThis.iltLog?.save(); });
     record.observer = new ResizeObserver(() => place(record));
     record.observer.observe(node);
+    record.observer.observe(panel);
+    record.observer.observe(detail);
     return record;
   }
 
@@ -733,28 +774,13 @@
     if (existing) return existing;
     const record = build(node);
     records.set(node, record);
+    if (!trackingFrame) trackingFrame = requestAnimationFrame(followGeometry);
     mount(record);
     return record;
   }
 
   async function readInlineBytes(choice) {
-    if (choice.imageBase64) return { imageBase64: choice.imageBase64, imageMime: choice.imageMime || "image/png" };
-    const url = choice.url || "";
-    if (!url.startsWith("blob:") && !url.startsWith("data:")) return {};
-    try {
-      const response = await fetch(url);
-      const blob = await response.blob();
-      const buffer = await blob.arrayBuffer();
-      const bytes = new Uint8Array(buffer);
-      let binary = "";
-      for (let offset = 0; offset < bytes.length; offset += 0x2000) {
-        binary += String.fromCharCode.apply(null, bytes.subarray(offset, offset + 0x2000));
-      }
-      return { imageBase64: btoa(binary), imageMime: blob.type || "image/png" };
-    } catch (error) {
-      log("read-bytes", error.message || "не прочитано", {});
-      return {};
-    }
+    return globalThis.iltImageSource?.read(choice, log) || {};
   }
 
   async function start(choice, permitted = false, error = "") {
@@ -771,6 +797,7 @@
     record.imageMime = bytes.imageMime || "";
     if (error) {
       show(record, "error", error);
+      activateSurface(record);
       record.detail.hidden = false;
       record.note.textContent = error;
       place(record);
@@ -780,6 +807,7 @@
     else {
       show(record, "error", "Нужен доступ к изображению и серверу");
       record.retry.textContent = "Разрешить и перевести";
+      activateSurface(record);
       record.detail.hidden = false;
       record.retry.onclick = () => {
         record.retry.disabled = true;

@@ -21,7 +21,7 @@
         "*://ozon.kz/*",
         "*://*.ozon.kz/*"
       ],
-      "js": ["chime.js", "native-swap.js", "button-model.js", "log.js", "inline-content.js", "safe-content.js"],
+      "js": ["chime.js", "native-swap.js", "button-model.js", "log.js", "image-source.js", "inline-content.js", "safe-content.js"],
       "run_at": "document_idle",
       "all_frames": true
     }

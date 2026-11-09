@@ -202,6 +202,7 @@ def _prompt(
         "(text printed on objects: book spines, labels, screens), noise (a box with no "
         "real text).\n"
         "Use narration for complete thoughts or captions outside balloons, even near a character. "
+        "Character name labels in story panels are narration and must be read, not sign. "
         "Mark signatures, credits and watermarks as sign rather than narration.\n"
         "Keep the original wording. Join wrapped lines with spaces.\n"
         "Return every id.\n\n"
@@ -357,7 +358,8 @@ class VlmOcr:
         document_hint=(
             "This is printed text from a document or screenshot. Transcribe every visible "
             "line literally, including Cyrillic. Ordinary paragraphs are narration, "
-            "not sign or noise. Use sign only for isolated names, brands or URLs. "
+            "not sign or noise. Character name labels are narration, including isolated names. "
+            "Use sign for brands, URLs, signatures, credits and watermarks. "
         ) if region.document else ""
         try:
             payload = self.client.chat_json(
@@ -368,6 +370,7 @@ class VlmOcr:
                     "If the crop is a speech or thought balloon, type is dialogue even "
                     "when the text is ALL CAPS. Use sfx only for sound effects or "
                     "stylized onomatopoeia, not ordinary balloon speech. "
+                    "Character name labels in story panels are narration, not sign. "
                     "If there is no text, use an empty string and type noise."
                 ),
                 schema=CROP_SCHEMA,
@@ -383,6 +386,11 @@ class VlmOcr:
                 )
         except Exception as exc:
             logger.warning(f"Crop reread failed for region {region.id}: {exc}")
+            self.warnings.append(f"VLM не прочитал кроп региона {region.id}: {type(exc).__name__}")
+            if not region.text.strip():
+                # Пустой результат ошибки не равен ответу модели «текста нет».
+                # Общий пайплайн уже умеет переключать OCR на локальный движок.
+                raise
             return region.text
         region.text = str(payload.get("text") or "").strip()
         block_type = str(payload.get("type") or "").strip().lower()

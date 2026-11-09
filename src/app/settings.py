@@ -279,6 +279,7 @@ class AppSettings:
     ort_intra_op_threads: int = _PIPELINE.ort_intra_op_threads
     text_stroke_ratio: float = _PIPELINE.text_stroke_ratio
     text_margin: float = _PIPELINE.text_margin
+    text_scale: float = _PIPELINE.text_scale
     layout_long_side: int = _PIPELINE.layout_long_side
     min_font_size: int = _PIPELINE.min_font_size
     max_font_size: int = _PIPELINE.max_font_size
@@ -343,6 +344,7 @@ class AppSettings:
         self.ort_intra_op_threads = _as_int(self.ort_intra_op_threads, 0, 0, 256)
         self.text_stroke_ratio = _as_float(self.text_stroke_ratio, 0.08, 0.0, 0.5)
         self.text_margin = _as_float(self.text_margin, 0.08, 0.0, 0.3)
+        self.text_scale = _as_float(self.text_scale, 1.1, 0.5, 2.0)
         try:
             self.layout_long_side = max(0, int(self.layout_long_side))
         except (TypeError, ValueError):
@@ -415,6 +417,7 @@ class AppSettings:
             "ort_intra_op_threads": self.ort_intra_op_threads,
             "text_stroke_ratio": self.text_stroke_ratio,
             "text_margin": self.text_margin,
+            "text_scale": self.text_scale,
             "layout_long_side": self.layout_long_side,
             "min_font_size": self.min_font_size,
             "max_font_size": self.max_font_size,
@@ -526,6 +529,7 @@ class AppSettings:
         config.ort_intra_op_threads = self.ort_intra_op_threads
         config.text_stroke_ratio = self.text_stroke_ratio
         config.text_margin = self.text_margin
+        config.text_scale = self.text_scale
         config.layout_long_side = self.layout_long_side
         config.min_font_size = self.min_font_size
         config.max_font_size = self.max_font_size

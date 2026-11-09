@@ -324,6 +324,73 @@ function Get-WindowsPreviousRelease([string] $InstallRoot) {
     return [pscustomobject]@{ Path = $path; Metadata = $metadata; Layout = $layout }
 }
 
+function Get-WindowsSiblingLayout($Layout) {
+    $prefix = '.' + $Layout.Name
+    [pscustomobject]@{
+        Backup = Join-Path $Layout.Parent "$prefix.backup"
+        Previous = Join-Path $Layout.Parent "$prefix.previous"
+        PreviousOld = Join-Path $Layout.Parent "$prefix.previous.old"
+        Failed = Join-Path $Layout.Parent "$prefix.failed"
+        Stage = Join-Path $Layout.Parent "$prefix.stage"
+        RollbackStage = Join-Path $Layout.Parent "$prefix.rollback-stage"
+    }
+}
+
+function Remove-WindowsDirectory([string] $Path) {
+    if ($Path -and (Test-Path -LiteralPath $Path)) {
+        Remove-Item -LiteralPath $Path -Recurse -Force
+    }
+}
+
+function Move-WindowsDirectory([string] $Source, [string] $Destination) {
+    if (-not (Test-Path -LiteralPath $Source)) { throw "Нет каталога для переноса: $Source" }
+    if (Test-Path -LiteralPath $Destination) { throw "Каталог назначения уже существует: $Destination" }
+    Move-Item -LiteralPath $Source -Destination $Destination
+}
+
+function Reserve-WindowsPreviousSlot($Layout) {
+    $siblings = Get-WindowsSiblingLayout $Layout
+    if (Test-Path -LiteralPath $siblings.Previous) {
+        Remove-WindowsDirectory $siblings.PreviousOld
+        Move-WindowsDirectory $siblings.Previous $siblings.PreviousOld
+    }
+    return $siblings
+}
+
+function Restore-WindowsPreviousSlot($Siblings) {
+    if ((Test-Path -LiteralPath $Siblings.PreviousOld) -and -not (Test-Path -LiteralPath $Siblings.Previous)) {
+        Move-WindowsDirectory $Siblings.PreviousOld $Siblings.Previous
+    }
+}
+
+function Promote-WindowsPreviousFolder($Layout, [string] $SourcePath) {
+    $siblings = Get-WindowsSiblingLayout $Layout
+    $source = [IO.Path]::GetFullPath($SourcePath).TrimEnd('\')
+    $target = [IO.Path]::GetFullPath($siblings.Previous).TrimEnd('\')
+    if ($source -ne $target) {
+        if (Test-Path -LiteralPath $siblings.Previous) { throw "Фиксированная предыдущая версия уже существует: $($siblings.Previous)" }
+        Move-WindowsDirectory $source $siblings.Previous
+    }
+    return $siblings.Previous
+}
+
+function Remove-WindowsStaleReleaseFolders($Layout, [string[]] $Keep) {
+    $keepSet = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach ($path in @($Keep)) {
+        if ($path) { [void]$keepSet.Add([IO.Path]::GetFullPath($path).TrimEnd('\')) }
+    }
+    $escaped = [regex]::Escape($Layout.Name)
+    $pattern = "^\.$escaped\.(previous|failed|rollback-stage|stage)(-.*|\.old)?$"
+    Get-ChildItem -LiteralPath $Layout.Parent -Force | Where-Object {
+        $_.PSIsContainer -and $_.Name -match $pattern
+    } | ForEach-Object {
+        $full = [IO.Path]::GetFullPath($_.FullName).TrimEnd('\')
+        if (-not $keepSet.Contains($full)) {
+            Remove-Item -LiteralPath $_.FullName -Recurse -Force
+        }
+    }
+}
+
 function Set-WindowsPreviousRelease([string] $InstallRoot, [string] $PreviousPath, [string] $Version) {
     $layout = Get-WindowsInstallLayout $InstallRoot
     $folder = Split-Path -Leaf $PreviousPath

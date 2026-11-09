@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import math
 from pathlib import Path
@@ -20,6 +21,7 @@ from src.utils.paths import resolve_font
 
 COMIC_FONT = resolve_font("Heroika-Regular.otf")
 _HYPHENATORS: dict[str, object] = {}
+_NONWHITE_STROKE_MULTIPLIER = 1.75
 
 
 def _font_file(region: TextRegion) -> Path | None:
@@ -161,6 +163,7 @@ def _layout_key(region: TextRegion) -> str:
     }
     return json.dumps(
         {
+            "algorithm": 2,
             "id": int(region.id),
             "bbox": [int(value) for value in region.bbox],
             "bubble_bbox": [int(value) for value in region.bubble_bbox]
@@ -302,7 +305,10 @@ def interior_mask(image_rgb: np.ndarray, region: TextRegion) -> np.ndarray:
             pad = max(4, math.ceil(float(region.auto_layout.get('outline_px', 3))) + 5)
             mask[max(0, int(y)-pad):min(height, int(y+h)+pad), max(0, int(x)-pad):min(width, int(x+w)+pad)] = 255
             return mask
-    if region.document or region.bubble_bbox is None:
+    if region.document:
+        from src.components.document_layout import document_layout_mask
+        return document_layout_mask(image_rgb, region)
+    if region.bubble_bbox is None:
         x, y, box_w, box_h = region.bbox
         x0, y0 = max(0, x), max(0, y)
         x1, y1 = min(width, x + box_w), min(height, y + box_h)
@@ -311,13 +317,25 @@ def interior_mask(image_rgb: np.ndarray, region: TextRegion) -> np.ndarray:
 
     from src.components.bubble_contour import balloon_flood_mask, bubble_interior_mask
     silhouette = bubble_interior_mask(image_rgb, region, inset_px=0)
-    if np.any(silhouette):
-        return silhouette
+    from src.components.bubble_layout import (
+        bbox_ellipse_layout_area, colour_layout_area, covers_source, light_layout_area,
+    )
+    coloured = colour_layout_area(image_rgb, region, silhouette)
+    lit = light_layout_area(image_rgb, region, coloured)
+    if coloured is silhouette and lit is coloured:
+        lit = bbox_ellipse_layout_area(region, lit)
+    if np.any(lit) and covers_source(lit, region):
+        return lit
     flood = balloon_flood_mask(image_rgb, region)
     if flood is not None:
         if int(np.sum(flood > 0)) > 200:
             flood = cv2.erode(flood, np.ones((3, 3), np.uint8), iterations=1)
         return flood
+    from src.components.bubble_layout import fallback_light_core
+    core = fallback_light_core(image_rgb, region)
+    if core is not None:
+        region._layout_light_core = True
+        return core
     tx, ty, tw, th = region.bbox
     xa, ya = max(0, tx), max(0, ty)
     xb, yb = min(width, tx + tw), min(height, ty + th)
@@ -454,6 +472,12 @@ def _background_is_complex(image_rgb: np.ndarray, mask: np.ndarray) -> bool:
     if pixels.shape[0] < 20:
         return False
     return float(pixels.astype(np.float32).std(axis=0).mean()) > 22
+
+
+def _nonwhite_background(image_rgb: np.ndarray, mask: np.ndarray) -> bool:
+    """Цветной, серый и тёмный фон; редкие JPEG-точки на белом не учитываем."""
+    pixels = image_rgb[mask > 0]
+    return bool(len(pixels) and np.mean(np.min(pixels, axis=1) < 245) > .10)
 
 
 def _median_rgb(image_rgb: np.ndarray, mask: np.ndarray) -> tuple[int, int, int]:
@@ -749,6 +773,127 @@ def _union_bounds(
     )
 
 
+def _placed_ink_bounds(
+    placed,
+    font,
+    draw,
+    stroke_width: int = 0,
+    letter_spacing: float = 0.0,
+) -> tuple[int, int, int, int] | None:
+    """AABB нарисованных строк с запасом 2px под слой, без клипа к своему боксу."""
+    bounds = None
+    pad = max(0, int(stroke_width))
+    for line, x, y in placed:
+        box = draw.textbbox((x, y), line, font=font, stroke_width=pad)
+        extra = int(math.ceil(abs(letter_spacing) * max(0, len(line) - 1))) + 2
+        bounds = _union_bounds(
+            bounds, (box[0] - extra, box[1] - 2, box[2] + extra, box[3] + 2),
+        )
+    return bounds
+
+
+def _hits_neighbour_beyond_own(bounds, own_bbox, other_bbox, slack: int = 3) -> bool:
+    """Растр заходит в bbox соседа заметно за пределы своего прямоугольника."""
+    if bounds is None or own_bbox is None or other_bbox is None:
+        return False
+    ox, oy, ow, oh = other_bbox
+    ix0 = max(bounds[0], ox)
+    iy0 = max(bounds[1], oy)
+    ix1 = min(bounds[2], ox + ow)
+    iy1 = min(bounds[3], oy + oh)
+    if ix1 <= ix0 or iy1 <= iy0:
+        return False
+    x, y, w, h = own_bbox
+    return ix0 < x - slack or iy0 < y - slack or ix1 > x + w + slack or iy1 > y + h + slack
+
+
+def _placed_off_page(bounds, page_size, slack: int = 1) -> bool:
+    """Растр выходит за край холста — глифы срезаются при рисовании."""
+    if bounds is None or page_size is None:
+        return False
+    width, height = int(page_size[0]), int(page_size[1])
+    return (bounds[0] < -slack or bounds[1] < -slack
+            or bounds[2] > width + slack or bounds[3] > height + slack)
+
+
+def _document_scale_pivot(align: str, boxes):
+    """1.1 документа растёт от края выравнивания, а не из геометрического центра."""
+    left = min(box[0] for box in boxes)
+    right = max(box[2] for box in boxes)
+    top = min(box[1] for box in boxes)
+    bottom = max(box[3] for box in boxes)
+    cy = (top + bottom) / 2
+    if align == "left":
+        return left, cy
+    if align == "right":
+        return right, cy
+    return (left + right) / 2, cy
+
+
+def _document_hits_neighbours(
+    placed, font, draw, stroke_width, letter_spacing, region, regions,
+    page_size=None,
+) -> bool:
+    bounds = _placed_ink_bounds(placed, font, draw, stroke_width, letter_spacing)
+    if _placed_off_page(bounds, page_size):
+        return True
+    for other in regions:
+        if other.id == region.id or other.skip or not other.translation.strip():
+            continue
+        if _hits_neighbour_beyond_own(bounds, region.bbox, other.bbox):
+            return True
+    return False
+
+
+def _fit_document_away_from_neighbours(
+    text,
+    region,
+    regions,
+    font_path,
+    draw,
+    spans,
+    hyphenator,
+    align,
+    letter_spacing,
+    line_spacing,
+    stroke_pad,
+    layout_fn,
+    min_size: int,
+    high_size: int,
+    page_size=None,
+):
+    """Наибольший кегль в [min_size, high_size], чей растр не лезет в bbox соседа и за край страницы."""
+    best_placed, best_font = None, None
+    low, high = min_size, high_size
+    while low <= high:
+        mid = (low + high) // 2
+        font = _load_font(font_path, mid)
+        candidate, fits = layout_fn(
+            text, font, draw, spans, hyphenator, align,
+            letter_spacing=letter_spacing, line_spacing=line_spacing,
+            stroke_pad=int(stroke_pad(mid)),
+        )
+        if fits and candidate and not _document_hits_neighbours(
+            candidate, font, draw, stroke_pad(mid), letter_spacing, region, regions,
+            page_size=page_size,
+        ):
+            best_placed, best_font = candidate, font
+            low = mid + 1
+        else:
+            high = mid - 1
+    if best_placed is not None:
+        return best_placed, best_font
+    font = _load_font(font_path, min_size)
+    candidate, _fits = layout_fn(
+        text, font, draw, spans, hyphenator, align,
+        letter_spacing=letter_spacing, line_spacing=line_spacing,
+        stroke_pad=int(stroke_pad(min_size)),
+    )
+    if candidate:
+        return candidate, font
+    return None, None
+
+
 def _clip_bounds(
     bounds: tuple[int, int, int, int] | None,
     size: tuple[int, int],
@@ -843,7 +988,10 @@ def _field_center(region: TextRegion | None, fallback: tuple[float, float]) -> t
     """Центр текстового поля (рамки) на странице — общая ось ручки и вёрстки."""
     if region is None:
         return fallback
-    box = region.bubble_bbox or region.bbox
+    geometry = region.auto_layout or {}
+    box = (geometry.get('source_bbox', region.bbox)
+           if geometry.get('kind') == 'free' and geometry.get('mask_kind') == 'bubble'
+           else region.bubble_bbox or region.bbox)
     if not box or len(box) < 4:
         return fallback
     x, y, width, height = (float(box[0]), float(box[1]), float(box[2]), float(box[3]))
@@ -1083,6 +1231,39 @@ def _readable_fill(
     return black
 
 
+def _tight_spacing(size: int) -> tuple[float, float]:
+    """Умеренное сжатие интервалов, когда при минимуме текст ещё не влезает."""
+    return -max(1.0, round(size * 0.08, 1)), -max(1.0, round(size * 0.15, 1))
+
+
+def _can_tighten_spacing(region, override, frozen) -> bool:
+    if frozen is not None or int(override or 0) > 0:
+        return False
+    if region.manual or region.edited:
+        return False
+    return not (region.style.letter_spacing or region.style.line_spacing)
+
+
+def _complete_fallback(text, region, font_path, draw, hyphenator, min_size, spacing, line_spacing, stroke_pad, spans=None):
+    """Сохранить всю реплику в исходной рамке вместо молчаливой потери строк."""
+    from src.components.document_layout import layout_rectangle
+    x, y, w, h = region.bbox
+    if spans is None:
+        spans = [None] * max(1, y + h)
+        for row in range(max(0, y), len(spans)):
+            spans[row] = (max(0, x), max(0, x) + max(1, w) - 1)
+    size = max(1, min_size)
+    font = _load_font(font_path, size)
+    placed, fits = layout_rectangle(text, font, draw, spans, hyphenator, 'center',
+                                   letter_spacing=spacing, line_spacing=line_spacing,
+                                   stroke_pad=stroke_pad(size))
+    if fits:
+        return placed, font
+    # Чрезвычайно длинный неделимый токен тоже остаётся в выводе и в предупреждении.
+    lines = _wrap(text.split(), font, draw, max(1, w), hyphenator, spacing)
+    return [(line, x, y + i * _advance(font, 1, line_spacing)) for i, line in enumerate(lines)], font
+
+
 def _fit_size(
     text: str,
     draw,
@@ -1102,8 +1283,9 @@ def _fit_size(
     chosen = None
     fits_any = False
     layout_fn = layout_fn or _layout
-    if layout_fn is not _layout:
-        # При смене числа строк допустимость не обязана быть монотонной.
+    from src.components.document_layout import layout_rectangle
+    if layout_fn is not _layout and layout_fn is not layout_rectangle:
+        # При смене числа строк в фигурном баллоне допустимость не монотонна.
         for size in range(high, low - 1, -1):
             font = _load_font(font_path, size)
             candidate, fits = layout_fn(
@@ -1117,7 +1299,7 @@ def _fit_size(
     while low <= high:
         mid = (low + high) // 2
         font = _load_font(font_path, mid)
-        candidate, fits = _layout(
+        candidate, fits = layout_fn(
             text, font, draw, spans, word_break, align,
             letter_spacing=letter_spacing, line_spacing=line_spacing,
             stroke_pad=int(stroke_pad(mid)),
@@ -1144,6 +1326,7 @@ class Typesetter:
         user_fonts: str | Path | None = None,
         margin_ratio: float = 0.0,
         adaptive_text: bool = True,
+        font_scale: float = 1.0,
     ):
         self.min_font_size = min_font_size
         self.max_font_size = max_font_size
@@ -1151,6 +1334,9 @@ class Typesetter:
         self.stroke_ratio = stroke_ratio
         self.margin_ratio = margin_ratio
         self.adaptive_text = adaptive_text
+        self.font_scale = float(font_scale)
+        if not math.isfinite(self.font_scale) or not .5 <= self.font_scale <= 2.0:
+            self.font_scale = 1.0
         self.user_fonts = Path(user_fonts) if user_fonts else None
         self._font_faces = None
         self._last_region_bounds: dict[int, tuple[int, int, int, int] | None] = {}
@@ -1241,7 +1427,7 @@ class Typesetter:
         region: TextRegion,
         size: int,
     ) -> tuple[tuple[int, int, int] | None, int]:
-        """Обводка: auto — как раньше, none — без обводки, custom — цвет и толщина стиля."""
+        """Обводка: auto — по фону, none — отсутствует, custom — цвет и толщина стиля."""
         mode = str(region.style.stroke_mode or "auto").strip().lower()
         if mode not in ("auto", "none", "custom"):
             mode = "auto"
@@ -1264,16 +1450,9 @@ class Typesetter:
         region: TextRegion,
         size: int,
     ) -> tuple[tuple[int, int, int] | None, int]:
-        """Ореол цвета фона или контрастная обводка на сложном фоне."""
-        if self.stroke_ratio <= 0:
-            if _background_is_complex(image_rgb, area):
-                return region.style.stroke_rgb or (255, 255, 255), max(1, size // 12)
-            return None, 0
-        if _background_is_complex(image_rgb, area):
-            color = region.style.stroke_rgb or _contrast_stroke(region.style.fill_rgb)
-            return color, max(2, int(round(size * 0.12)))
-        width = max(1, int(round(size * self.stroke_ratio)))
-        return _median_rgb(image_rgb, area), width
+        """На тёмном фоне белые буквы обводятся чёрным, на остальном — белым."""
+        dark = not region.style.fill_locked and _relative_luminance(_area_color(image_rgb, area)) < .08
+        return ((0, 0, 0) if dark else (255, 255, 255)), self._fit_stroke_width(region, size, _nonwhite_background(image_rgb, area))
 
     def _fit_stroke_width(self, region: TextRegion, size: int, complex_background: bool) -> int:
         """Ширина обводки для подбора кегля без повторного измерения фона."""
@@ -1282,11 +1461,10 @@ class Typesetter:
             return 0
         if mode == "custom" and region.style.stroke_width > 0:
             return max(1, int(round(region.style.stroke_width)))
-        if self.stroke_ratio <= 0:
-            return max(1, size // 12) if complex_background else 0
-        if complex_background:
-            return max(2, int(round(size * 0.12)))
-        return max(1, int(round(size * self.stroke_ratio)))
+        width = max(1, int(round(size * max(.06, self.stroke_ratio))))
+        if mode == 'auto' and complex_background:
+            return max(width + 1, int(math.ceil(width * _NONWHITE_STROKE_MULTIPLIER)))
+        return width
 
     def render(
         self,
@@ -1362,8 +1540,11 @@ class Typesetter:
         self._last_anchors = {}
         self._last_layouts = {}
         self._last_layer_parts = {}
+        from src.components.neighbor_text import protected_text_mask
+        protected = {r.id: protected_text_mask(rgb.shape, r) for r in regions}
 
         for region in regions:
+            complete_fallback = False
             text = region.translation.strip()
             if not text:
                 continue
@@ -1372,6 +1553,15 @@ class Typesetter:
             area = interior_mask(rgb, region)
             from src.components.bubble_layout import separate_neighbour_bubbles
             area = separate_neighbour_bubbles(area, region, regions)
+            if (not (region.auto_layout or {}).get('readable_caption') and
+                    (region.bubble_bbox is not None or (region.auto_layout or {}).get('kind') == 'bubble')
+                    and region.block_type != 'sfx'):
+                from src.components.bubble_layout import balloon_body
+                area = balloon_body(area, region)
+            blocked = protected.get(region.id)
+            if blocked is not None:
+                area = area.copy()
+                area[blocked > 0] = 0
             text_moved = _text_is_moved(region)
             if not np.any(area):
                 overflow.append(region.id)
@@ -1391,7 +1581,8 @@ class Typesetter:
             chosen_font = None
             override = int(region.style.font_size_override or 0)
             is_sfx = region.block_type == "sfx"
-            native_free = (region.auto_layout or {}).get('kind') == 'free' and font_path is not None and len(text) <= 1000
+            native_free = ((region.auto_layout or {}).get('kind') == 'free' or
+                           (region.auto_layout or {}).get('writing_mode') == 'vertical') and font_path is not None and len(text) <= 1000 and blocked is None
             native_bubble = ((region.auto_layout or {}).get('kind') == 'bubble' and font_path is not None
                              and not region.style.skew_x and _warp_spec(region.style)[0] == 'none')
             raster_fit = None
@@ -1410,7 +1601,17 @@ class Typesetter:
             area_y, area_x = np.nonzero(area)
             paint_rgb = rgb[area_y.min():area_y.max()+1, area_x.min():area_x.max()+1]
             paint_area = area[area_y.min():area_y.max()+1, area_x.min():area_x.max()+1]
-            complex_background = _background_is_complex(paint_rgb, paint_area)
+            complex_background = _nonwhite_background(paint_rgb, paint_area)
+            raster_style = region.style
+            free_outline = float((region.auto_layout or {}).get('outline_px', 3))
+            if native_free and region.style.stroke_mode == 'auto':
+                if complex_background:
+                    free_outline *= _NONWHITE_STROKE_MULTIPLIER
+                # Одна ширина резервируется при подборе свободной надписи
+                # и применяется при рисовании; геометрия проекта не меняется.
+                raster_style = copy.copy(region.style)
+                raster_style.stroke_mode = 'custom'
+                raster_style.stroke_width = free_outline
 
             def stroke_pad(size: int) -> int:
                 return self._fit_stroke_width(region, size, complex_background)
@@ -1418,7 +1619,7 @@ class Typesetter:
             if native_free:
                 from src.components.free_text_layout import free_raster
                 cached_fit = frozen.get('raster_fit') if frozen else None
-                _raw, raster_fit = free_raster(text, font_path, region.style, region.auto_layout, _LAYER_SCALE, cached_fit)
+                _raw, raster_fit = free_raster(text, font_path, raster_style, region.auto_layout, _LAYER_SCALE, cached_fit)
                 chosen_font = _load_font(font_path, int(raster_fit.get('font_size', 144)))
                 placed = [(line, int(region.bbox[0]), int(region.bbox[1]) + i * 160)
                           for i, line in enumerate(text.split('\n')) if line]
@@ -1430,11 +1631,26 @@ class Typesetter:
                     max_size=self.max_font_size,
                     stroke_pad=stroke_pad,
                 )
+                if not fits and _can_tighten_spacing(region, override, frozen):
+                    letter_spacing, line_spacing = _tight_spacing(self.min_font_size)
+                    region.style.letter_spacing = letter_spacing
+                    region.style.line_spacing = line_spacing
+                    placed, chosen_font, fits = fit_balloon_shape(
+                        area, region, text, font_path, self.lang,
+                        min_size=self.min_font_size,
+                        max_size=self.max_font_size,
+                        stroke_pad=stroke_pad,
+                    )
+                    if not fits:
+                        region.style.letter_spacing = 0.0
+                        region.style.line_spacing = 0.0
+                        letter_spacing = line_spacing = 0.0
                 if not fits:
                     overflow.append(region.id)
-                    # Полный текст остаётся видимым через явный запасной путь.
-                    chosen_font = _load_font(font_path, self.min_font_size)
-                    placed, _ = _layout(text, chosen_font, draw, spans, word_break, align, strict=False)
+                    placed, chosen_font = _complete_fallback(
+                        text, region, font_path, draw, word_break, self.min_font_size,
+                        letter_spacing, line_spacing, stroke_pad)
+                    complete_fallback = True
             elif frozen is not None:
                 # Раскладка уже закреплена preview: не подбираем строки заново.
                 size = int(frozen["font_size"])
@@ -1473,6 +1689,17 @@ class Typesetter:
                     text, draw, spans, None, align, font_path,
                     self.min_font_size, high, letter_spacing, line_spacing, stroke_pad,
                 )
+                if not fits_any and _can_tighten_spacing(region, override, frozen):
+                    letter_spacing, line_spacing = _tight_spacing(self.min_font_size)
+                    placed, chosen_font, fits_any = _fit_size(
+                        text, draw, spans, None, align, font_path,
+                        self.min_font_size, high, letter_spacing, line_spacing, stroke_pad,
+                    )
+                    if fits_any:
+                        region.style.letter_spacing = letter_spacing
+                        region.style.line_spacing = line_spacing
+                    else:
+                        letter_spacing = line_spacing = 0.0
                 if not fits_any:
                     overflow.append(region.id)
                     placed = None
@@ -1504,13 +1731,18 @@ class Typesetter:
                     self.min_font_size, high, letter_spacing, line_spacing, stroke_pad,
                     layout_fn=layout_fn,
                 )
-                if (not fits_any and self.adaptive_text and region.document and not region.manual and
-                        not region.edited and 6 < self.min_font_size <= 10):
-                    # Маленькие подписи интерфейса: полный текст важнее прежнего порога10px.
+                if not fits_any and _can_tighten_spacing(region, override, frozen):
+                    letter_spacing, line_spacing = _tight_spacing(self.min_font_size)
                     placed, chosen_font, fits_any = _fit_size(
                         text, draw, spans, hyphenator, align, font_path,
-                        6, self.min_font_size - 1, letter_spacing, line_spacing, stroke_pad, layout_fn=layout_fn,
+                        self.min_font_size, high, letter_spacing, line_spacing, stroke_pad,
+                        layout_fn=layout_fn,
                     )
+                    if fits_any:
+                        region.style.letter_spacing = letter_spacing
+                        region.style.line_spacing = line_spacing
+                    else:
+                        letter_spacing = line_spacing = 0.0
                 if not fits_any:
                     overflow.append(region.id)
                     placed = None
@@ -1522,8 +1754,63 @@ class Typesetter:
                             stroke_pad=stroke_pad(self.min_font_size),
                         )
 
+            if force and not override and (not placed or
+                    ''.join(line for line, _, _ in placed).replace(' ', '').replace('-', '') !=
+                    text.replace(' ', '').replace('\n', '').replace('-', '')):
+                placed, chosen_font = _complete_fallback(
+                    text, region, font_path, draw, word_break, self.min_font_size,
+                    letter_spacing, line_spacing, stroke_pad,
+                    spans=spans if region.document else None)
+                complete_fallback = True
+                if region.id not in overflow:
+                    overflow.append(region.id)
             if not placed or chosen_font is None:
                 continue
+            scaled_font = (self.font_scale != 1.0 and frozen is None and override == 0
+                           and not region.manual and not region.edited)
+            old_size = int(getattr(chosen_font, "size", self.min_font_size))
+            scaled_font = scaled_font or (frozen is None and old_size < self.min_font_size)
+            if scaled_font:
+                multiplier = self.font_scale if not region.manual and not region.edited and override == 0 else 1.0
+                new_size = max(self.min_font_size, round(old_size * multiplier))
+                factor = new_size / max(1, old_size)
+                if raster_fit is not None:
+                    raster_fit = dict(raster_fit)
+                    for key in ('width', 'height'):
+                        raster_fit[key] = max(1, round(raster_fit[key] * factor))
+                    raster_fit['font_size'] = new_size
+                else:
+                    # Масштабируем строки вокруг центра блока, сохраняя слова.
+                    # Документ — от края выравнивания, иначе 1.1 срезает первые буквы у холста.
+                    boxes = [draw.textbbox((x, y), line, font=chosen_font) for line, x, y in placed]
+                    if region.document:
+                        cx, cy = _document_scale_pivot(align, boxes)
+                    else:
+                        cx = (min(box[0] for box in boxes) + max(box[2] for box in boxes)) / 2
+                        cy = (min(box[1] for box in boxes) + max(box[3] for box in boxes)) / 2
+                    enlarged = _load_font(font_path, new_size)
+                    updated = []
+                    for (line, _, _), box in zip(placed, boxes):
+                        bounds = enlarged.getbbox(line)
+                        updated.append((line, round(cx + (box[0]-cx)*factor - bounds[0]),
+                                        round(cy + (box[1]-cy)*factor - bounds[1])))
+                    placed = updated
+                chosen_font = _load_font(font_path, new_size)
+            if (region.document and frozen is None and override == 0
+                    and not region.manual and not region.edited
+                    and placed and chosen_font is not None):
+                size_now = int(getattr(chosen_font, "size", self.min_font_size))
+                if _document_hits_neighbours(
+                    placed, chosen_font, draw, stroke_pad(size_now),
+                    letter_spacing, region, regions, page_size=image.size,
+                ):
+                    shrunk, shrunk_font = _fit_document_away_from_neighbours(
+                        text, region, regions, font_path, draw, spans, word_break,
+                        align, letter_spacing, line_spacing, stroke_pad, layout_fn,
+                        self.min_font_size, size_now, page_size=image.size,
+                    )
+                    if shrunk and shrunk_font is not None:
+                        placed, chosen_font = shrunk, shrunk_font
             before_alpha = np.array(overlay)[..., 3].copy()
             size = int(getattr(chosen_font, "size", self.min_font_size))
             region.style.font_size = size
@@ -1540,12 +1827,25 @@ class Typesetter:
             if raster_fit is not None:
                 self._last_layouts[int(region.id)]['raster_fit'] = raster_fit
             stroke, stroke_width = self._stroke_paint(rgb, area, region, size)
-            if native_bubble and region.style.stroke_mode == 'auto':
-                stroke, stroke_width = None, 0
             if native_free and region.style.stroke_mode == 'auto':
-                stroke = (255, 255, 255)
-                stroke_width = max(1, round(float(region.auto_layout.get('outline_px', 3))))
+                stroke = (0, 0, 0) if (not region.style.fill_locked and
+                         _relative_luminance(_area_color(rgb, area)) < .08) else (255, 255, 255)
+                stroke_width = max(1, round(free_outline))
             fill = region.style.fill_rgb
+            if ((region.auto_layout or {}).get('readable_caption') and
+                    region.style.stroke_mode == 'auto' and not region.style.fill_locked):
+                # На пёстрой карточке толстые белые буквы с тёмным краем
+                # читаются устойчивее тонкого чёрного ядра в белом ореоле.
+                fill, stroke = (255, 255, 255), (0, 0, 0)
+            if (region.style.stroke_mode == 'auto' and not region.style.fill_locked and
+                    _relative_luminance(_area_color(rgb, area)) < .08):
+                fill = (255, 255, 255)
+                region.style.fill_rgb = fill
+            elif (region.style.stroke_mode == 'auto' and not region.style.fill_locked and
+                    stroke is not None and stroke_width > 0 and _contrast_ratio(fill, stroke) < 3):
+                # Белая заливка с белой обводкой сливает мелкие буквы в пятно.
+                fill = (18, 18, 18)
+                region.style.fill_rgb = fill
             if region.block_type != "sfx" and not region.style.fill_locked:
                 fill = _readable_fill(
                     fill,
@@ -1557,14 +1857,16 @@ class Typesetter:
                 _style_needs_layer(region.style)
                 or native_free
                 or native_bubble
+                or scaled_font
                 or frozen is not None
                 or not apply_geometry
             )
             if needs_layer:
                 capture = {} if (not apply_geometry or capture_layers) else None
+                raster_style.fill_rgb = fill
                 visible_bounds = _composite_styled_layer(
                     overlay, placed, chosen_font, font_path, fill, stroke, stroke_width,
-                    region.style, draw, region=region, apply_geometry=apply_geometry,
+                    raster_style, draw, region=region, apply_geometry=apply_geometry,
                     stable_pad=stable_pad, layer_bounds=self._last_layer_bounds,
                     capture=capture, raster_fit=raster_fit,
                 )
@@ -1611,19 +1913,39 @@ class Typesetter:
                     region_bounds[int(region.id)] = _union_bounds(
                         region_bounds.get(int(region.id)), visible_bounds,
                     )
-            if text_moved:
+            if region.document:
+                after_alpha = np.asarray(overlay)[..., 3]
+                leaked = (after_alpha > 20) & (after_alpha > before_alpha) & (area == 0)
+                if np.any(leaked) and region.id not in overflow:
+                    overflow.append(region.id)
+                from src.components.document_layout import document_paint_mask
+                overlay = _keep_own_ink(overlay, before_alpha, document_paint_mask(rgb, region))
+                after_alpha = np.asarray(overlay)[..., 3]
+                moved_ink = np.maximum(moved_ink, ((after_alpha > before_alpha) * 255).astype(np.uint8))
+            elif text_moved or complete_fallback:
                 after_alpha = np.asarray(overlay)[..., 3]
                 moved_ink = np.maximum(moved_ink, ((after_alpha > before_alpha) * 255).astype(np.uint8))
             else:
-                if region.auto_layout and apply_geometry and frozen is None:
+                leaked = None
+                if (region.auto_layout or scaled_font) and apply_geometry and frozen is None:
                     after_alpha = np.asarray(overlay)[..., 3]
                     leaked = (after_alpha > 20) & (after_alpha > before_alpha) & (area == 0)
                     if np.any(leaked) and region.id not in overflow:
                         overflow.append(region.id)
-                overlay = _keep_own_ink(overlay, before_alpha, area)
+                if leaked is not None and np.any(leaked):
+                    # Предупреждённый выход за форму не должен отрезать буквы и обводку.
+                    drawn = (after_alpha > before_alpha) * 255
+                    moved_ink = np.maximum(moved_ink, drawn.astype(np.uint8))
+                else:
+                    overlay = _keep_own_ink(overlay, before_alpha, area)
             draw = ImageDraw.Draw(overlay)
 
         overlay_arr = np.array(overlay)
+        for ident, blocked in protected.items():
+            if blocked is not None:
+                if np.any((blocked > 0) & (overlay_arr[..., 3] > 0)) and ident not in overflow:
+                    overflow.append(ident)
+                overlay_arr[..., 3][blocked > 0] = 0
         visible = (clip > 0) | (moved_ink > 0)
         overlay_arr[..., 3] = np.where(visible, overlay_arr[..., 3], 0)
         self._last_overlay = Image.fromarray(overlay_arr)

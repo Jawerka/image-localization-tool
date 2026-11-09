@@ -7,7 +7,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from src.components.lang_guard import foreign_leak, route_for_argos
+from src.components.lang_guard import foreign_leak, route_for_argos, unchanged_foreign_words
 from src.components.sfx_dict import as_glossary, lookup
 from src.models import TextRegion, should_translate
 from src.utils.llm_client import LlmClient
@@ -113,6 +113,7 @@ def language_lock(target_lang: str) -> str:
         "Exceptions: a span inside quotation marks, a name from the glossary, and a short word "
         "the character says as-is (a brand or a title). The rest of the sentence stays in the target language.",
         "Do not add the original language next to the translation. Do not add explanations.",
+        "Translate every story caption, including isolated character names; transliterate names into the target script.",
     ]
     if code == "ru":
         lines.append("Transliterate Japanese names with the Polivanov system.")
@@ -391,7 +392,8 @@ class LlmTranslator:
         leaked = [
             region
             for region in regions
-            if region.translation.strip() and foreign_leak(region.translation, target_lang, allowed)
+            if region.translation.strip() and (foreign_leak(region.translation, target_lang, allowed)
+                or unchanged_foreign_words(region.text, region.translation, target_lang, allowed))
         ]
         if not leaked:
             return
@@ -406,7 +408,8 @@ class LlmTranslator:
         self._apply_items(leaked, payload.get("items") or [])
         code = (target_lang or "ru").strip().lower() or "ru"
         for region in leaked:
-            if foreign_leak(region.translation, target_lang, allowed):
+            if (foreign_leak(region.translation, target_lang, allowed) or
+                    unchanged_foreign_words(region.text, region.translation, target_lang, allowed)):
                 self.warnings.append(f"Регион {region.id} не удержался в языке {code}")
 
     def shorten(

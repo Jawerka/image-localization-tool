@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import cv2
 import numpy as np
 
@@ -84,6 +86,9 @@ def can_merge_paragraph(
     left_delta = abs(a.bbox[0] - b.bbox[0])
     aligned = left_delta <= 0.25 * max(a.bbox[2], b.bbox[2])
     stacked = horizontal_overlap_ratio(a.bbox, b.bbox) >= 0.4
+    # Два высоких сдвинутых блока — соседние реплики, не строки абзаца.
+    if min(ha, hb) >= 72 and left_delta > 0.18 * max(a.bbox[2], b.bbox[2]):
+        return False
     return aligned or stacked
 
 
@@ -105,6 +110,9 @@ def can_merge_column(a: TextRegion, b: TextRegion) -> bool:
         return False
     aligned = abs(a.bbox[0] - b.bbox[0]) <= 0.2 * max(wa, wb)
     stacked = horizontal_overlap_ratio(a.bbox, b.bbox) >= 0.45
+    # На комиксе два высоких сдвинутых блока — соседние реплики, не колонка.
+    if min(ha, hb) >= 72 and abs(a.bbox[0] - b.bbox[0]) > 0.18 * max(wa, wb):
+        return False
     return aligned or stacked
 
 
@@ -116,6 +124,86 @@ def merge_paragraphs(regions: list[TextRegion]) -> list[TextRegion]:
 def merge_columns(regions: list[TextRegion]) -> list[TextRegion]:
     """Собрать колонку документа из кусков, которые детектор разрезал по строкам."""
     return _merge_regions(regions, can_merge_column)
+
+
+def _box_corners(box: tuple[int, int, int, int]) -> list[tuple[float, float]]:
+    x, y, w, h = box
+    return [(x, y), (x + w, y), (x + w, y + h), (x, y + h)]
+
+
+def _project_span(points: list[tuple[float, float]], axis: tuple[float, float]) -> tuple[float, float]:
+    values = [point[0] * axis[0] + point[1] * axis[1] for point in points]
+    return min(values), max(values)
+
+
+def can_merge_collinear(a: TextRegion, b: TextRegion) -> bool:
+    """Соседние фрагменты одной линии: близкий угол, малый зазор, общее проекционное перекрытие.
+
+    Два разных замкнутых баллона не сливаются. Свободный sfx рядом с
+    баллонной репликой остаётся отдельным. Без баллона тип sfx рядом с
+    dialogue не мешает, если это одна линия.
+    """
+    if a.document or b.document:
+        return False
+    if a.bubble_bbox is not None and b.bubble_bbox is not None:
+        return False
+    if (a.block_type == "sfx" and b.bubble_bbox is not None) or (
+        b.block_type == "sfx" and a.bubble_bbox is not None
+    ):
+        return False
+    ax, ay, aw, ah = a.bbox
+    bx, by, bw, bh = b.bbox
+    if min(aw, ah, bw, bh) <= 0:
+        return False
+    if max(ah, bh) / min(ah, bh) > 2.2:
+        return False
+    ca = (ax + aw / 2, ay + ah / 2)
+    cb = (bx + bw / 2, by + bh / 2)
+    dx, dy = cb[0] - ca[0], cb[1] - ca[1]
+    dist = math.hypot(dx, dy)
+    if dist < 1:
+        return False
+    ux, uy = dx / dist, dy / dist
+    angle = math.atan2(uy, ux)
+    if abs(angle) > math.pi / 2:
+        angle -= math.copysign(math.pi, angle)
+    for width, height in ((aw, ah), (bw, bh)):
+        box_angle = 0.0 if width >= height else math.pi / 2
+        delta = abs(angle - box_angle)
+        delta = min(delta, math.pi - delta)
+        if delta > math.radians(40):
+            return False
+    along = (ux, uy)
+    across = (-uy, ux)
+    a_along = _project_span(_box_corners(a.bbox), along)
+    b_along = _project_span(_box_corners(b.bbox), along)
+    projected = max(0.0, max(a_along[0], b_along[0]) - min(a_along[1], b_along[1]))
+    along_overlap = max(0.0, min(a_along[1], b_along[1]) - max(a_along[0], b_along[0]))
+    along_span = min(a_along[1] - a_along[0], b_along[1] - b_along[0])
+    # Высокие блоки с большим перекрытием вдоль линии — соседние реплики,
+    # а не стык коротких фрагментов одной строки.
+    if (
+        min(ah, bh) >= 80
+        and along_span > 0
+        and along_overlap > 0.12 * along_span
+    ):
+        return False
+    dx = max(0.0, max(ax - (bx + bw), bx - (ax + aw)))
+    dy = max(0.0, max(ay - (by + bh), by - (ay + ah)))
+    gap = math.hypot(dx, dy)
+    line_h = min(ah, bh)
+    if gap > 0.4 * line_h or projected > line_h:
+        return False
+    a_across = _project_span(_box_corners(a.bbox), across)
+    b_across = _project_span(_box_corners(b.bbox), across)
+    overlap = min(a_across[1], b_across[1]) - max(a_across[0], b_across[0])
+    narrower = min(a_across[1] - a_across[0], b_across[1] - b_across[0])
+    return narrower > 0 and overlap / narrower >= 0.55
+
+
+def merge_collinear(regions: list[TextRegion]) -> list[TextRegion]:
+    """Склеить коллинеарные фрагменты одной надписи."""
+    return _merge_regions(regions, can_merge_collinear)
 
 
 def _merge_regions(regions: list[TextRegion], can_merge) -> list[TextRegion]:
@@ -144,15 +232,29 @@ def _merge_regions(regions: list[TextRegion], can_merge) -> list[TextRegion]:
         if len(members) == 1:
             merged.append(members[0])
             continue
+        members.sort(key=lambda item: (item.bbox[0], item.bbox[1] + item.bbox[3] / 2))
         first = members[0]
+        bubbles = [item.bubble_bbox for item in members if item.bubble_bbox is not None]
+        types = {item.block_type for item in members}
+        if "dialogue" in types:
+            block_type = "dialogue"
+        elif types == {"sfx"}:
+            block_type = "sfx"
+        else:
+            block_type = first.block_type
+        class_name = "text_bubble" if any(item.class_name == "text_bubble" for item in members) else first.class_name
+        text = " ".join(item.text.strip() for item in members if item.text.strip())
+        translation = " ".join(item.translation.strip() for item in members if item.translation.strip())
         merged.append(TextRegion(
             id=first.id,
             bbox=union_box([item.bbox for item in members]),
-            class_name=first.class_name,
+            class_name=class_name,
             confidence=max(item.confidence for item in members),
-            block_type=first.block_type,
-            bubble_bbox=None,
+            block_type=block_type,
+            bubble_bbox=bubbles[0] if len(bubbles) == 1 else None,
             document=all(item.document for item in members),
+            text=text,
+            translation=translation,
         ))
     return merged
 
@@ -440,6 +542,7 @@ def build_regions(
         ))
 
     regions = merge_paragraphs(regions)
+    regions = merge_collinear(regions)
     direction = "rtl" if reading_order == "rtl" else "ltr"
     regions = assign_reading_order(regions, direction)
     for index, region in enumerate(regions, start=1):
