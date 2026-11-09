@@ -113,6 +113,7 @@ def language_lock(target_lang: str) -> str:
         "Exceptions: a span inside quotation marks, a name from the glossary, and a short word "
         "the character says as-is (a brand or a title). The rest of the sentence stays in the target language.",
         "Do not add the original language next to the translation. Do not add explanations.",
+        "Translate every story caption, including isolated character names; transliterate names into the target script.",
     ]
     if code == "ru":
         lines.append("Transliterate Japanese names with the Polivanov system.")

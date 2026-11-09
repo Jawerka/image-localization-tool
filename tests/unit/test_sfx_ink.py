@@ -79,6 +79,21 @@ def test_polarity_prefers_even_strokes_over_larger_artwork():
     assert mask[100, 180] == 0
 
 
+def test_thick_white_outline_covers_halo_not_only_cores():
+    """Толстая белая обводка SFX входит в маску целиком."""
+    rgb = np.full((100, 240, 3), (35, 40, 38), np.uint8)
+    expected = np.zeros(rgb.shape[:2], np.uint8)
+    cv2.putText(rgb, "TUG", (20, 65), cv2.FONT_HERSHEY_SIMPLEX, 1.6, (255, 255, 255), 11)
+    cv2.putText(expected, "TUG", (20, 65), cv2.FONT_HERSHEY_SIMPLEX, 1.6, 255, 11)
+    cv2.putText(rgb, "TUG", (20, 65), cv2.FONT_HERSHEY_SIMPLEX, 1.6, (8, 8, 8), 2)
+    region = TextRegion(1, (10, 20, 210, 70), text="TUG", block_type="sfx")
+    mask = segment_region(rgb, region)
+    halo = (expected > 0) & np.all(rgb == (255, 255, 255), axis=2)
+    assert np.mean(mask[expected > 0] > 0) >= 0.9
+    if np.any(halo):
+        assert np.mean(mask[halo] > 0) >= 0.75
+
+
 def test_thick_artwork_mass_is_cut_from_letters():
     """Толстый диск, прилипший к буквам, не входит в маску."""
     rgb = np.full((110, 260, 3), (90, 90, 90), np.uint8)

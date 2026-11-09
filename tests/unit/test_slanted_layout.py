@@ -55,6 +55,51 @@ def test_line_positions_survive_roundtrip_and_scaling():
     assert restored.auto_layout['source_lines'] == region.auto_layout['source_lines']
 
 
+def test_caption_rows_use_text_pivot_despite_wrong_balloon_box():
+    """Общая рамка двух карточек не сдвигает поворот и не обрезает буквы."""
+    ink = glyph_mask('FIRST LINE\nSECOND LINE', ImageFont.truetype(str(COMIC_FONT), 40))
+    turned = ink.rotate(12, Image.Resampling.BICUBIC, expand=True)
+    bbox = (100, 80, turned.width, turned.height)
+    rows = source_lines(np.asarray(turned), (100, 80), bbox, 12)
+    region = TextRegion(1, bbox, bubble_bbox=(10, 10, 650, 400), block_type='dialogue',
+                        translation='ПЕРВАЯ СТРОКА\nВТОРАЯ СТРОКА',
+                        style=TextStyle(rotation=12, stroke_mode='none'),
+                        auto_layout=dict(version=1, kind='free', mask_kind='bubble',
+                                         source_bbox=list(bbox), ink_bbox=list(bbox), source_lines=rows))
+    result, overflow = Typesetter().render(Image.new('RGB', (800, 500), 'white'), [region])
+    assert not overflow
+    observed = (np.asarray(result).min(axis=2) < 128).astype(np.uint8)*255
+    actual = source_lines(observed, (0, 0), bbox, 12)
+    assert len(actual) == 2
+    for expected, found in zip(rows, actual):
+        assert abs(expected[0]+expected[2]/2-found[0]-found[2]/2) <= 2
+        assert abs(expected[1]+expected[3]/2-found[1]-found[3]/2) <= 2
+
+
+def test_readable_caption_uses_line_gaps_for_larger_letters_and_roundtrips():
+    """Читаемая реплика не наследует мелкий кегль самой тесной исходной строки."""
+    from pathlib import Path
+    from src.components.slanted_layout import line_raster
+    font = Path('src/resources/fonts/Heroika-Regular.otf')
+    geometry = dict(version=1, kind='free', source_bbox=[40, 40, 400, 180],
+                    ink_bbox=[40, 40, 400, 180], source_lines=[[70, 70, 300, 30], [70, 140, 300, 30]])
+    style = TextStyle(stroke_mode='none')
+    text = 'Первая длинная реплика которую нужно удобно прочитать'
+    _, old = line_raster(text, font, style, geometry)
+    geometry.update(readable_caption=True, caption_padding=15)
+    layer, fit = line_raster(text, font, style, geometry)
+    assert fit['font_size'] >= old['font_size']*1.5
+    assert fit['text'].replace('\n', ' ') == text
+    repeated, _ = line_raster(text, font, style, geometry, frozen=fit)
+    assert np.array_equal(np.asarray(layer), np.asarray(repeated))
+    region = TextRegion(1, (40, 40, 400, 180), auto_layout=geometry)
+    restored = TextRegion.from_dict(region.to_dict())
+    _scale_regions([restored], 2)
+    assert restored.auto_layout['caption_padding'] == 30
+    _scale_regions([restored], .5)
+    assert restored.auto_layout == geometry
+
+
 @pytest.mark.parametrize('rows', [[], [[0, 0, -1, 5]], [[0, float('nan'), 5, 5]], [[0, 1, 3]], 'bad'])
 def test_invalid_source_lines_are_ignored(rows):
     region = TextRegion(1, (10, 20, 200, 100))
@@ -106,6 +151,22 @@ def test_outline_remains_in_external_roi():
                         source_lines=rows, outline_px=3))
     _, overflow = Typesetter().render(Image.new('RGB', (400, 250), (50, 50, 50)), [region])
     assert not overflow
+
+
+def test_thin_outlier_row_does_not_cap_common_kegl():
+    """Ложно-тонкая полоса не душит кегль остальных свободных строк."""
+    from src.components.slanted_layout import line_raster
+    style = TextStyle(stroke_mode='none')
+    fat = [[20, 20, 360, 90], [20, 130, 340, 12], [20, 160, 380, 100]]
+    ink = [20, 20, 380, 240]
+    geometry = dict(source_lines=fat, source_bbox=ink, ink_bbox=ink)
+    _layer, fit = line_raster('ПРИНЦЕССА ПОМОГИТЕ ТОЖЕ', COMIC_FONT, style, geometry, 2)
+    only_fat = dict(source_lines=[fat[0], fat[2]], source_bbox=ink, ink_bbox=ink)
+    _same, expected = line_raster('ПРИНЦЕССА ПОМОГИТЕ ТОЖЕ', COMIC_FONT, style, only_fat, 2)
+    thin_only = dict(source_lines=[fat[1]], source_bbox=ink, ink_bbox=ink)
+    _tiny, tiny = line_raster('ТОЖЕ', COMIC_FONT, style, thin_only, 2)
+    assert fit['font_size'] == expected['font_size']
+    assert fit['font_size'] > tiny['font_size']
 
 
 def test_frozen_source_rows_apply_enlarged_raster():

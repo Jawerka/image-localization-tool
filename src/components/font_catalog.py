@@ -232,6 +232,8 @@ def assign_stylized_fonts(
             preferred = 'jupiteroid-light' if region.block_type == 'sfx' else 'comicz'
             selected = next((face.id for face in catalog if Path(face.path).stem.casefold() == preferred and face.cyrillic), None)
             font_id = selected or font_id
+            if (getattr(region, 'auto_layout', None) or {}).get('readable_caption'):
+                font_id = FONT_ROLE_DIALOGUE
         if font_id == FONT_ROLE_TITLE and font_id not in available:
             # Нет файла заголовка — откат на прежний shout, затем на диалог.
             font_id = FONT_ROLE_SHOUT if FONT_ROLE_SHOUT in available else FONT_ROLE_DIALOGUE

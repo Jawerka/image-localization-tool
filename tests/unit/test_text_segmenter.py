@@ -328,6 +328,32 @@ def test_contrast_sfx_next_to_balloon_keeps_separate_masks():
     assert np.mean(balloon[expected_ding > 0] > 0) < .12
 
 
+def test_pink_letters_are_not_dots_in_the_mask():
+    """Цветной ink на светлом поле покрывается маской, а не точками просветов."""
+    rgb = np.full((90, 280, 3), (255, 245, 235), np.uint8)
+    expected = np.zeros(rgb.shape[:2], np.uint8)
+    cv2.putText(rgb, "WHY OF COURSE", (12, 55), cv2.FONT_HERSHEY_SIMPLEX, 0.85, (230, 40, 140), 2)
+    cv2.putText(expected, "WHY OF COURSE", (12, 55), cv2.FONT_HERSHEY_SIMPLEX, 0.85, 255, 2)
+    region = TextRegion(1, (8, 20, 260, 50), text="WHY OF COURSE", block_type="dialogue")
+    mask = segment_region(rgb, region)
+    assert np.mean(mask[expected > 0] > 0) >= 0.85
+    assert np.count_nonzero(mask[expected > 0]) > np.count_nonzero(expected) * 0.5
+
+
+def test_pink_letters_on_dark_body_are_not_dots():
+    """Розовые буквы на тёмном цветном поле не остаются точками маски."""
+    rgb = np.full((110, 300, 3), (40, 20, 50), np.uint8)
+    expected = np.zeros(rgb.shape[:2], np.uint8)
+    cv2.putText(rgb, "WHY OF COURSE", (10, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (235, 70, 170), 2)
+    cv2.putText(expected, "WHY OF COURSE", (10, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.9, 255, 2)
+    region = TextRegion(1, (6, 25, 285, 60), text="WHY OF COURSE", block_type="dialogue")
+    mask = segment_region(rgb, region)
+    assert np.mean(mask[expected > 0] > 0) >= 0.8
+    from src.components.adaptive_text import source_ink
+    _, ink, (a, b, c, d) = source_ink(Image.fromarray(rgb), region)
+    assert np.mean(ink[expected[b:d, a:c] > 0] > 0) >= 0.7
+
+
 def test_two_tone_light_bubble_covers_every_word_without_outline():
     rgb = np.full((160, 300, 3), (80, 30, 110), np.uint8)
     cv2.rectangle(rgb, (10, 10), (290, 150), (235, 235, 240), -1)
@@ -341,3 +367,18 @@ def test_two_tone_light_bubble_covers_every_word_without_outline():
     m = segment_region(rgb,r)
     assert np.mean(m[expected>0]>0)>=.99
     assert m[10,150]==0
+
+
+def test_colour_accent_keeps_adjacent_dark_words_on_gray_paper():
+    """Насыщенный акцент не заменяет обычные буквы соседнего слова."""
+    rgb = np.full((110, 380, 3), (175, 175, 175), np.uint8)
+    dark = np.zeros(rgb.shape[:2], np.uint8)
+    coloured = np.zeros_like(dark)
+    cv2.putText(rgb, "DARK", (12, 70), cv2.FONT_HERSHEY_SIMPLEX, 1.1, (20, 20, 20), 3)
+    cv2.putText(dark, "DARK", (12, 70), cv2.FONT_HERSHEY_SIMPLEX, 1.1, 255, 3)
+    cv2.putText(rgb, "PINK", (180, 70), cv2.FONT_HERSHEY_SIMPLEX, 1.1, (235, 30, 140), 3)
+    cv2.putText(coloured, "PINK", (180, 70), cv2.FONT_HERSHEY_SIMPLEX, 1.1, 255, 3)
+    region = TextRegion(1, (8, 25, 350, 65), text="DARK PINK")
+    mask = segment_region(rgb, region)
+    assert np.mean(mask[dark > 0] > 0) >= .99
+    assert np.mean(mask[coloured > 0] > 0) >= .99

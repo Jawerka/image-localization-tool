@@ -50,7 +50,8 @@ def test_automatic_outline_is_white_and_manual_modes_survive():
         area = np.full((150, 250), 255, np.uint8)
         color, actual = setter._stroke_paint(np.array(image), area, manual, 28)
         assert actual == width
-        if mode == 'custom': assert color == (200, 10, 20)
+        if mode == 'custom':
+            assert color == (200, 10, 20)
 
 
 def test_thin_tail_does_not_set_balloon_body_center():

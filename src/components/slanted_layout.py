@@ -41,7 +41,17 @@ def source_lines(ink, origin, source_bbox, angle):
             return []
         rows.append([float(lo[0] + left), float(lo[1] + top),
                      float(right - left), float(bottom - top)])
-    return rows if 1 <= len(rows) <= 12 else []
+    return _usable_source_rows(rows) if 1 <= len(rows) <= 12 else []
+
+
+def _usable_source_rows(rows):
+    """Убрать ложно-тонкую полосу, которая душит общий кегль всех строк."""
+    if not rows or len(rows) < 2:
+        return rows
+    heights = [float(row[3]) for row in rows]
+    median_h = float(np.median(heights))
+    kept = [row for row in rows if float(row[3]) >= median_h * 0.4]
+    return kept if kept else rows
 
 
 def _split_lines(text, widths, font, spacing):
@@ -75,9 +85,12 @@ def _split_lines(text, widths, font, spacing):
 
 def line_raster(text, font_path, style, geometry, scale=2, frozen=None):
     """Новый свободный растр: строки сохраняют поля без растяжения самих глифов."""
-    rows = geometry.get('source_lines')
+    rows = _usable_source_rows(list(geometry.get('source_lines') or []))
     if not rows or len(text) > 2000 or len(text.split()) > 160:
         return None
+    if geometry.get('readable_caption') and (not frozen or frozen.get('caption')) and not (
+            style.font_size_override or style.letter_spacing or style.line_spacing):
+        return _caption_raster(text, font_path, style, geometry, rows, scale, frozen)
     if (style.font_size_override or style.letter_spacing or style.line_spacing or
             (frozen and not frozen.get('source_lines'))):
         return None
@@ -126,4 +139,57 @@ def line_raster(text, font_path, style, geometry, scale=2, frozen=None):
         # Повторный рендер обязан учитывать увеличенный кегль свободных строк.
         layer = layer.resize((max(1, int(frozen["width"])), max(1, int(frozen["height"]))), Image.Resampling.LANCZOS)
         fit = dict(frozen)
+    return layer, fit
+
+
+def _caption_raster(text, font_path, style, geometry, rows, scale, frozen=None):
+    """Максимально читаемые строки в общем поле карточки, без мелкого общего кегля.
+
+    Пробуем число строк по реальным глифам. Промежутки исходных строк
+    доступны переводу, но поворот и внешние границы остаются исходными.
+    """
+    font = ImageFont.truetype(str(font_path), 144)
+    if frozen:
+        alpha = glyph_mask(frozen['text'], font, stroke_width=3, line_spacing=20).resize(
+            (int(frozen['width']), int(frozen['height'])), Image.Resampling.LANCZOS)
+        layer = Image.new('RGBA', alpha.size, tuple(style.fill_rgb)+(255,))
+        layer.putalpha(alpha)
+        return layer, dict(frozen)
+    left, top = min(r[0] for r in rows), min(r[1] for r in rows)
+    width = max(r[0]+r[2] for r in rows)-left
+    height = max(r[1]+r[3] for r in rows)-top
+    center = (left+width/2, top+height/2)
+    height += 2*float(geometry.get('caption_padding', 0))
+    bx, by, bw, bh = geometry['source_bbox']
+    ix, iy, iw, ih = geometry['ink_bbox']
+    matrix = cv2.getRotationMatrix2D((bx+bw/2, by+bh/2), float(style.rotation), 1.)
+    cx, cy = matrix @ np.array([*center, 1.])
+    cosine, sine = abs(matrix[0, 0]), abs(matrix[0, 1])
+    pad = (max(0., float(style.stroke_width)) if style.stroke_mode == 'custom'
+           else float(geometry.get('outline_px', 0)) if style.stroke_mode == 'auto' else 0.)
+    room_x = max(1., min(cx-ix, ix+iw-cx)-pad-2)
+    room_y = max(1., min(cy-iy, iy+ih-cy)-pad-2)
+    best = None
+    for count in range(1, min(6, len(text.split()))+1):
+        lines = _split_lines(text, [width]*count, font, 0)
+        if not lines:
+            continue
+        alpha = glyph_mask('\n'.join(lines), font, stroke_width=3, line_spacing=20)
+        factor = min(max(1, width-2*pad)/alpha.width, max(1, height-2*pad)/alpha.height,
+                     2*room_x/max(1, cosine*alpha.width+sine*alpha.height),
+                     2*room_y/max(1, sine*alpha.width+cosine*alpha.height))
+        score = (factor, -abs(count-len(rows)))
+        if best is None or score > best[0]:
+            best = (score, alpha, lines)
+    if best is None:
+        return None
+    _, alpha, lines = best
+    factor = min(best[0][0], 8192/max(alpha.size)/scale)
+    alpha = alpha.resize((max(1, round(alpha.width*factor*scale)),
+                          max(1, round(alpha.height*factor*scale))), Image.Resampling.LANCZOS)
+    layer = Image.new('RGBA', alpha.size, tuple(style.fill_rgb)+(255,))
+    layer.putalpha(alpha)
+    fit = dict(text='\n'.join(lines), width=alpha.width, height=alpha.height,
+               center=list(center), spacing=0, line_gap=20, font_size=max(1, round(144*factor)),
+               writing_mode='horizontal', caption=True)
     return layer, fit

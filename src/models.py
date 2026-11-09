@@ -76,7 +76,7 @@ def _auto_layout(value, bbox):
                         not all(isinstance(v, (int, float)) and not isinstance(v, bool) and
                                 math.isfinite(v) and abs(v) < 1_000_000 for v in box) or min(float(box[2]), float(box[3])) <= 0):
                     return None
-        for key in ('outline_px', 'mask_pad_px'):
+        for key in ('outline_px', 'mask_pad_px', 'caption_padding'):
             if key in value and not 0 <= float(value[key]) <= 10000:
                 return None
         rows = value.get('source_lines')

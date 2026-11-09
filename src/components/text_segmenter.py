@@ -216,6 +216,54 @@ def _colors(crop: np.ndarray, ink: np.ndarray, background: np.ndarray) -> tuple[
     return fill, stroke
 
 
+def _saturated_letter_ink(crop: np.ndarray) -> np.ndarray | None:
+    """Цветные буквы, которые серый порог и светлые ядра берут точками."""
+    if crop.ndim != 3 or min(crop.shape[:2]) < 8:
+        return None
+    hsv = cv2.cvtColor(crop, cv2.COLOR_RGB2HSV)
+    sat = hsv[:, :, 1]
+    chroma = np.ptp(crop, axis=2)
+    med_sat = float(np.median(sat))
+    med_chroma = float(np.median(chroma))
+    peak = (sat > max(70, med_sat + 36)) & (chroma > max(40, med_chroma + 24))
+    coverage = float(np.mean(peak))
+    if coverage < 0.008:
+        return None
+    u8 = peak.astype(np.uint8) * 255
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(u8)
+    height, width = peak.shape
+    kept = []
+    for index in range(1, count):
+        x, y, w, h, area = (int(v) for v in stats[index])
+        if area < 8 or min(w, h) < 3:
+            continue
+        touches_edge = x == 0 or y == 0 or x + w == width or y + h == height
+        if touches_edge and (area > 40 or min(w, h) > 16):
+            continue
+        if w > width * 0.85 or h > height * 0.7:
+            continue
+        fill = area / float(max(1, w * h))
+        if not 0.08 <= fill <= 0.75:
+            continue
+        kept.append(index)
+    if len(kept) < 3:
+        return None
+    return np.isin(labels, kept).astype(np.uint8) * 255
+
+
+def _outline_halo_radius(crop: np.ndarray, ink: np.ndarray, line_height: int, grow: int) -> int:
+    """Отступ маски по толщине уже найденного ореола, не фиксированные 4 px."""
+    gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
+    cores = ((gray <= 80) & (ink > 0)).astype(np.uint8)
+    thickness = 0.0
+    if int(np.count_nonzero(cores)) >= 8:
+        dist = cv2.distanceTransform((cores == 0).astype(np.uint8), cv2.DIST_L2, 3)
+        ring = (ink > 0) & (cores == 0)
+        if np.any(ring):
+            thickness = float(np.percentile(dist[ring], 80))
+    return max(_INK_PAD_PX, int(thickness) + 2, int(round(line_height * 0.22))) + grow
+
+
 def _bubble_retouch_mask(
     image_rgb: np.ndarray,
     region: TextRegion,
@@ -271,6 +319,13 @@ def segment_region(
     crop = image_rgb[cy0:cy1, cx0:cx1]
     outlined = _outlined_text_mask(crop) if not region.document else None
     light_confirmed, inverse_outline = confirmed_light_ink(crop) if not region.document else (None, False)
+    if outlined is not None and light_confirmed is not None:
+        # Белый ореол тёмных букв нельзя использовать как светлое ядро
+        # цветного фона. Если все белые ядра уже объясняются замкнутой
+        # обводкой, отдельной светлой надписи здесь не подтверждено.
+        white = (np.min(crop, axis=2) >= 210) & (np.ptp(crop, axis=2) < 45)
+        if np.count_nonzero(white & (outlined == 0)) <= np.count_nonzero(white) * .05:
+            light_confirmed = None
     # Силуэт не собрался, но flood баллона есть: фон и чернила берём из него,
     # а не из кольца бокса, которое может лечь на тёмный рисунок снаружи.
     balloon = None
@@ -300,6 +355,7 @@ def segment_region(
     # иначе страницы вроде test-5 теряют обычные буквы.
     sfx_like = (not region.document) and origin == "sfx" and not has_bubble
     glyph_mask = outlined_glyphs(crop) if sfx_like else None
+    extra_outlined = None if (sfx_like or region.document or has_bubble) else outlined_glyphs(crop)
     if glyph_mask is not None:
         binary = glyph_mask
         region._outline_ink = True
@@ -362,6 +418,20 @@ def segment_region(
             binary = np.where(binary > 0, np.uint8(0), np.uint8(255))
             binary = _drop_border_components(binary)
         binary = _drop_non_letter_components(binary)
+    if extra_outlined is not None:
+        binary = np.maximum(binary, extra_outlined)
+        region._outline_ink = True
+    coloured = None if region.document else _saturated_letter_ink(crop)
+    if coloured is not None:
+        extra = coloured
+        if light_ink is not None:
+            extra = np.maximum(extra, light_ink)
+        if outlined is not None:
+            extra = np.maximum(extra, outlined)
+        # Цвет дополняет подтверждённые штрихи, а не заменяет весь текст:
+        # один насыщенный акцент не должен удалять соседние чёрные буквы.
+        binary = np.maximum(binary, extra)
+        region._colour_ink = True
 
     plain_light = (light_confirmed is not None and not inverse_outline and origin == "dialogue"
                    and float(np.median(cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY))) >= 120
@@ -373,7 +443,10 @@ def segment_region(
         # Белые буквы на цветном облачке задают и чернила, и размер отступа.
         # Добавление только после дилатации оставляло тонкий ореол букв,
         # когда прежняя тёмная маска давала высоту строки в один пиксель.
-        binary = light_confirmed
+        if coloured is not None and np.count_nonzero(coloured) > np.count_nonzero(light_confirmed) * 2:
+            binary = np.maximum(binary, coloured)
+        else:
+            binary = light_confirmed
         light_ink = None
         bubble = None
         balloon = None
@@ -400,7 +473,9 @@ def segment_region(
     # даже без flood остаётся с отступом от кегля, чтобы не терять ореол.
     tight_ink = region.block_type == "sfx" or region.bubble_bbox is None
     grow = max(0, int(letter_grow_px))
-    if tight_ink:
+    if glyph_mask is not None or extra_outlined is not None:
+        radius = _outline_halo_radius(crop, binary, line_height, grow)
+    elif tight_ink:
         radius = _INK_PAD_PX + grow
     else:
         radius = max(2, int(round(line_height * 0.22))) + grow
@@ -440,7 +515,7 @@ def segment_region(
         addition = cv2.dilate(light_confirmed, kernel, iterations=1)
         full[cy0:cy1, cx0:cx1] = np.maximum(full[cy0:cy1, cx0:cx1], addition)
         region._retouch_preserve_background = True
-    if not region.document and (light_confirmed is not None or outlined is not None):
+    if not region.document and light_confirmed is not None:
         extra = boundary_ink(Image.fromarray(image_rgb), region.bbox, (cx0, cy0, cx1, cy1))
         if extra is not None:
             addition, (aa, bb, cc, dd) = extra

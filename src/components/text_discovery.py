@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import math
 import unicodedata
+from difflib import SequenceMatcher
 from functools import lru_cache
 
 import cv2
@@ -15,7 +16,7 @@ _TYPES = ('sfx', 'dialogue', 'narration', 'title')
 _FIELDS = {name: {'type': 'number', 'minimum': 0, 'maximum': 1000}
            for name in ('x0', 'y0', 'x1', 'y1')}
 _FIELDS.update(text={'type': 'string'}, type={'type': 'string', 'enum': list(_TYPES)})
-SCHEMA = {'type': 'object', 'properties': {'blocks': {'type': 'array', 'maxItems': 100,
+SCHEMA = {'type': 'object', 'properties': {'blocks': {'type': 'array', 'maxItems': 24,
           'items': {'type': 'object', 'properties': _FIELDS, 'required': list(_FIELDS),
                     'additionalProperties': False}}}, 'required': ['blocks'], 'additionalProperties': False}
 
@@ -50,6 +51,19 @@ def parse_discovery(payload, size, existing):
             if overlap / max(1, min(w * h, ow * oh)) > .4:
                 duplicate = True
                 break
+            # Неточная рамка кропа может захватить край уже известной
+            # вертикальной реплики: повторно переводить её фрагмент нельзя.
+            source = _source_word(text)
+            known = _source_word(region.text)
+            if (overlap > 0 and len(source) >= 3 and len(known) >= 3 and
+                    (source in known or known in source)):
+                duplicate = True
+                break
+            if (overlap > min(w*h, ow*oh)*.08 and 4 <= len(source) < len(known)*.85 and
+                    sum(match.size for match in SequenceMatcher(None, source, known, autojunk=False).get_matching_blocks())
+                    >= len(source)*.8):
+                duplicate = True
+                break
         if duplicate:
             continue
         ident = max((r.id for r in [*existing, *result]), default=0) + 1
@@ -59,24 +73,150 @@ def parse_discovery(payload, size, existing):
     return result
 
 
-def discover_missing_text(image, regions, client, max_side=1800):
-    """Один последовательный OCR-запрос, перевод выполняется общим переводчиком."""
-    shown = image.copy()
-    shown.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
-    known = [{'text': r.text, 'x0': round(r.bbox[0] / image.width * 1000),
-              'y0': round(r.bbox[1] / image.height * 1000),
-              'x1': round((r.bbox[0] + r.bbox[2]) / image.width * 1000),
-              'y1': round((r.bbox[1] + r.bbox[3]) / image.height * 1000)} for r in regions]
-    prompt = ('Find readable text MISSING from the existing list. Include sound effects, action captions, '
-              'narration, thoughts and missed speech. Return the literal source text, do not translate. '
-              'Exclude artwork, motion lines, signatures, credits, watermarks and social-media controls. '
-              'Do not repeat existing blocks. Each box uses explicit x0,y0,x1,y1 corners normalized '
-              'to 0..1000 of the FULL image. For ordinary labels with meaningful story content use narration. '
-              'Use sfx only for sounds/short actions, never for a full thought. Return blocks=[] if none. '
-              'Existing list: ' + json.dumps(known, ensure_ascii=False))
-    payload = client.chat_json(prompt, SCHEMA, 'missing_text', images=[shown], max_tokens=4096)
-    extras = parse_discovery(payload, image.size, regions)
-    return refine_discovery(image, extras, regions)
+def _discovery_tiles(size, max_side):
+    """До девяти перекрывающихся кропов с полным покрытием страницы."""
+    width, height = size
+    if max(size) <= max_side and (max(size) < 1500 or max(size) <= min(size) * 1.25):
+        return [(0, 0, width, height)]
+    # Кропы сохраняют контекст панели; число запросов ограничено даже для ленты.
+    # Три кропа с шагом не больше 80% стороны покрывают 2.6 стороны.
+    # Деление длинной оси на три оставляло почти нулевое перекрытие.
+    # Два пикселя запаса сохраняют 20% и после округления начальных точек.
+    side = max(min(max_side, min(size)), math.ceil((max(size) + 2) / 2.6))
+    def starts(length):
+        if length <= side:
+            return [0]
+        count = min(3, math.ceil((length - side) / (side * .8)) + 1)
+        return [round(i * (length - side) / (count - 1)) for i in range(count)]
+    return [(x, y, min(width, x + side), min(height, y + side))
+            for y in starts(height) for x in starts(width)]
+
+
+def _verify_sfx(image, region, client):
+    """Подтвердить исходные буквы и их рамку в локальном контексте VLM."""
+    x, y, w, h = region.bbox
+    pad = max(24, round(max(w, h) * .75))
+    a, b = max(0, x - pad), max(0, y - pad)
+    c, d = min(image.width, x + w + pad), min(image.height, y + h + pad)
+    crop = image.crop((a, b, c, d))
+    crop.thumbnail((1200, 1200), Image.Resampling.LANCZOS)
+    prompt = ('Locate this exact source text in the crop: ' + json.dumps(region.text, ensure_ascii=False) +
+              '. Return its literal text and a tight box around ALL its letters, excluding nearby artwork '
+              'and other words. Coordinates x0,y0,x1,y1 are 0..1000 of this CROP. '
+              'Do not translate or invent missing letters. If it is not visible return blocks=[].')
+    payload = client.chat_json(prompt, SCHEMA, 'verify_missing_text', images=[crop], max_tokens=1024)
+    candidates = parse_discovery(payload, (c-a, d-b), [])
+    wanted = _source_word(region.text)
+    candidates = [r for r in candidates if _source_word(r.text) == wanted]
+    if len(candidates) != 1:
+        return False
+    tx, ty, tw, th = candidates[0].bbox
+    # Повтор слова в запросе локализации провоцирует подтверждение даже
+    # соседнего рисунка. Читаем только предложенную рамку без ожидаемого текста.
+    reading = client.chat_json(
+        'Read all visible source text in this crop literally. Do not translate. '
+        'Return text="" if there are no readable letters. Do not infer cropped letters.',
+        {'type': 'object', 'properties': {'text': {'type': 'string'}},
+         'required': ['text'], 'additionalProperties': False},
+        'read_missing_text', images=[image.crop((tx+a, ty+b, tx+a+tw, ty+b+th))],
+        max_tokens=1024,
+    )
+    read_text = reading.get('text') if isinstance(reading, dict) else None
+    if not isinstance(read_text, str) or not read_text.strip():
+        return False
+    if wanted:
+        matches = _source_word(read_text) == wanted
+    else:
+        # Знаки «?!» тоже содержательны, пустой кроп им не равен.
+        matches = ''.join(unicodedata.normalize('NFKC', read_text).split()) == ''.join(
+            unicodedata.normalize('NFKC', region.text).split())
+    if not matches:
+        return False
+    region.bbox = (tx+a, ty+b, tw, th)
+    return True
+
+
+def discover_missing_text(image, regions, client, max_side=1800, warnings=None):
+    """Последовательный поиск по перекрывающимся кропам с проверкой звуков."""
+    extras = []
+    attempts = 0
+    completed_tiles = 0
+    tile_error = None
+    tiles = _discovery_tiles(image.size, max_side)
+    limit_reported = False
+    for tile_index, (a, b, c, d) in enumerate(tiles):
+        # Неизрасходованный бюджет переносится вперёд; первый фрагмент
+        # не может потратить все проверки на ложные предложения.
+        tile_budget = (24 - attempts) // (len(tiles) - tile_index)
+        tile_attempts = 0
+        budget_reported = False
+        shown = image.crop((a, b, c, d))
+        shown.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
+        known = [{'text': r.text, 'x0': round((r.bbox[0]-a)/(c-a)*1000),
+                  'y0': round((r.bbox[1]-b)/(d-b)*1000),
+                  'x1': round((r.bbox[0]+r.bbox[2]-a)/(c-a)*1000),
+                  'y1': round((r.bbox[1]+r.bbox[3]-b)/(d-b)*1000)}
+                 for r in [*regions, *extras]
+                 if r.bbox[0] >= a and r.bbox[1] >= b
+                 and r.bbox[0]+r.bbox[2] <= c and r.bbox[1]+r.bbox[3] <= d]
+        prompt = ('Find readable text MISSING from the existing list in this crop. '
+                  'Include sound effects in every writing system, '
+                  'action caption, narration, thought and missed speech. Return literal source text; '
+                  'keep the original writing system. List only text actually visible at each location. '
+                  'Exclude artwork, motion lines, signatures, credits, watermarks and social-media controls. '
+                  'Do not repeat existing blocks. Each tight box encloses ALL letters and uses explicit '
+                  'x0,y0,x1,y1 corners normalized to 0..1000 of this CROP. '
+                  'For ordinary story labels use narration. Use sfx only for sounds/short actions, '
+                  'never a full thought. Return blocks=[] if none. Existing list: '
+                  + json.dumps(known, ensure_ascii=False))
+        try:
+            payload = client.chat_json(prompt, SCHEMA, 'missing_text', images=[shown], max_tokens=4096)
+        except Exception as exc:
+            tile_error = exc
+            if warnings is not None:
+                warnings.append(f'VLM не проверил фрагмент страницы: {type(exc).__name__}')
+            continue
+        completed_tiles += 1
+        for region in parse_discovery(payload, (c-a, d-b), []):
+            x, y, w, h = region.bbox
+            region.bbox = (x+a, y+b, w, h)
+            # Общее ограничение защищает от неограниченного числа crop-запросов.
+            if len(extras) >= 24:
+                if warnings is not None and not limit_reported:
+                    warnings.append('Пропущены дополнительные блоки: предел 24 подтверждённых областей')
+                    limit_reported = True
+                continue
+            if region.block_type in _TYPES:
+                if tile_attempts >= tile_budget:
+                    if warnings is not None and not budget_reported:
+                        warnings.append('Пропущены дополнительные надписи: исчерпан бюджет проверки фрагмента')
+                        budget_reported = True
+                    continue
+                tile_attempts += 1
+                attempts += 1
+                # Уточнение обязано предшествовать независимому чтению:
+                # проверенная рамка больше не переносится к соседним буквам.
+                refine_discovery(image, [region], [*regions, *extras])
+                try:
+                    verified = _verify_sfx(image, region, client)
+                except Exception as exc:
+                    if warnings is not None:
+                        warnings.append(f'VLM не проверил кроп дополнительной надписи: {type(exc).__name__}')
+                    continue
+                if not verified:
+                    if warnings is not None:
+                        warnings.append('VLM не подтвердил рамку дополнительного звука' if region.block_type == 'sfx'
+                                        else 'VLM не подтвердил рамку дополнительного текста')
+                    continue
+            x, y, w, h = region.bbox
+            mapped = dict(text=region.text, type=region.block_type, x0=x/image.width*1000,
+                          y0=y/image.height*1000, x1=(x+w)/image.width*1000, y1=(y+h)/image.height*1000)
+            extras.extend(parse_discovery({'blocks': [mapped]}, image.size, [*regions, *extras]))
+    # Полный отказ остаётся ошибкой для общего обработчика пайплайна.
+    # Частичный результат сохраняется вместе с явными предупреждениями.
+    if completed_tiles == 0 and tile_error is not None:
+        raise tile_error
+    return extras
 
 
 def refine_discovery(image, regions, existing=()):
@@ -295,8 +435,10 @@ def _refine_plain_cjk_sfx(image, region, existing):
                 selected.add(idx)
     if len(selected)<2:
         return
-    left=min(stats[i,0]for i in selected);top=min(stats[i,1]for i in selected)
-    right=max(stats[i,0]+stats[i,2]for i in selected);bottom=max(stats[i,1]+stats[i,3]for i in selected)
+    left=min(stats[i,0]for i in selected)
+    top=min(stats[i,1]for i in selected)
+    right=max(stats[i,0]+stats[i,2]for i in selected)
+    bottom=max(stats[i,1]+stats[i,3]for i in selected)
     margin=max(2,round(max(stats[i,3]for i in selected)*.1))
     # Отдельные точки и верхние штрихи знака лежат внутри оболочки группы.
     for idx in range(1,count):
@@ -304,8 +446,10 @@ def _refine_plain_cjk_sfx(image, region, existing):
         if (pixels>=8 and left-margin<=xx and xx+ww<=right+margin and
                 top-margin<=yy and yy+hh<=bottom+margin and not protected(xx+a,yy+b,ww,hh)):
             selected.add(idx)
-    left=min(stats[i,0]for i in selected);top=min(stats[i,1]for i in selected)
-    right=max(stats[i,0]+stats[i,2]for i in selected);bottom=max(stats[i,1]+stats[i,3]for i in selected)
+    left=min(stats[i,0]for i in selected)
+    top=min(stats[i,1]for i in selected)
+    right=max(stats[i,0]+stats[i,2]for i in selected)
+    bottom=max(stats[i,1]+stats[i,3]for i in selected)
     tx,ty,tw,th=a+int(left),b+int(top),int(right-left),int(bottom-top)
     if ((tw<w*.95 and th<h*.95) or not .5<=tw*th/(w*h)<=4 or max(tw/w,th/h)>3 or protected(tx,ty,tw,th) or
             np.mean(gray[top:bottom,left:right]>180)<.5):

@@ -185,15 +185,50 @@ def test_ci_workflow_runs_filtered_unit_tests():
     assert "Frontend unit tests" in text
 
 
-def test_deploy_extension_script_builds_and_mirrors():
+def test_deploy_extension_script_uses_explicit_safe_operations():
     data = EXT.read_bytes()
-    text = data.decode("ascii")
+    # Windows PowerShell 5.1 требует BOM для русских комментариев UTF-8.
+    assert data.startswith(b"\xef\xbb\xbf")
+    text = data.decode("utf-8-sig")
     assert "$ErrorActionPreference = 'Stop'" in text
     assert "build-extension.py" in text
     assert "dist\\chromium" in text or "dist/chromium" in text
     assert "apps\\extension\\image-localization-tool" in text
-    assert "robocopy" in text
+    assert "robocopy" not in text
+    assert "/MIR" not in text and "/PURGE" not in text
+    assert "extension_deploy.py" in text
+    assert "DryRun" in text and "Rollback" in text and "Prepare" in text
     assert "SkipBuild" in text
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Проверяется Windows PowerShell 5.1")
+def test_extension_powershell_dry_run_with_spaces_preserves_target(tmp_path):
+    """Обёртка передаёт пути с пробелами и не меняет установку при предпросмотре."""
+    from scripts import extension_deploy as deploy
+
+    source = tmp_path / "source code"
+    source.mkdir()
+    (source / "manifest.json").write_text('{"manifest_version":3}', encoding="utf-8")
+    (source / "background.js").write_bytes(b"new")
+    artifact, target = tmp_path / "fixed artifact", tmp_path / "installed extension"
+    deploy.prepare(source, artifact)
+    target.mkdir()
+    (target / "background.js").write_bytes(b"old")
+    (target / "data").mkdir()
+    (target / "data/project.json").write_bytes(b"user project")
+    before = deploy.snapshot(target)
+    backup, plan = tmp_path / "backup copy", tmp_path / "preview plan.json"
+    result = subprocess.run(
+        ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+         "-File", str(EXT), "-DryRun", "-Artifact", str(artifact), "-Dest", str(target),
+         "-Backup", str(backup), "-Plan", str(plan)],
+        cwd=ROOT, env={**os.environ, "LOCALAPPDATA": ""}, capture_output=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr.decode(errors="replace")
+    assert plan.is_file()
+    assert not backup.exists()
+    assert deploy.snapshot(target) == before
 
 
 def test_update_probe_keeps_temp_data_in_app():

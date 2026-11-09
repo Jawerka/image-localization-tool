@@ -958,6 +958,26 @@ def test_document_column_shrinks_to_min_and_misses_the_photo():
     assert not np.any(np.array(result)[20:300, 250:400] != photo)
 
 
+def test_document_font_scale_stays_on_the_page():
+    """После 1.1 левые буквы не срезаются краем холста."""
+    image = Image.new("RGB", (200, 90), "white")
+    region = TextRegion(
+        1, (4, 8, 192, 74), document=True,
+        translation="Любимое занятие играть во дворе",
+        style=TextStyle(fill_rgb=(0, 0, 0), alignment="left"),
+    )
+    setter = Typesetter(min_font_size=16, max_font_size=16, font_scale=1.1, lang="ru")
+    result, _overflow = setter.render(image, [region])
+    ink = np.any(np.asarray(result) != 255, axis=2)
+    ys, xs = np.where(ink)
+    assert xs.size
+    assert int(xs.min()) >= 1
+    assert int(xs.max()) <= 198
+    assert np.any(ink[8:82, 4:48])
+    words = " ".join(line for line, _, _ in setter._last_layouts[1]["lines"])
+    assert words.replace(" ", "").replace("-", "") == region.translation.replace(" ", "")
+
+
 def test_document_title_shrinks_before_body_bbox_after_font_scale():
     """После fit и 1.1 заголовок не заходит в bbox абзаца, текст и пол 10 сохраняются."""
     import copy

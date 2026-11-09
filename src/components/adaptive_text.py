@@ -30,22 +30,44 @@ def prepare_regions(image, regions, pixel_scale=1.0):
                 region.text_position is not None or region.block_type in ('title', 'sign', 'noise')):
             continue
         crop, ink, box = source_ink(image, region)
+        vertical_source = (any('\u3040' <= ch <= '\u9fff' for ch in region.text)
+                           and region.bbox[3] > region.bbox[2] * 1.2)
+        colour_rows = False
+        if not vertical_source and getattr(region, '_colour_ink', False) and getattr(region, '_retouch_preserve_background', False):
+            # На цветной карточке контрастная маска ретуши включает фон.
+            # Геометрию измеряем по светлым ядрам букв, независимо от неё.
+            rgb = np.asarray(crop)
+            cores = ((rgb.min(axis=2) > 170) & (np.ptp(rgb, axis=2) < 100)).astype(np.uint8)
+            count, labels, stats, _ = cv2.connectedComponentsWithStats(cores)
+            kept = [i for i in range(1, count) if stats[i, 4] >= 5 and stats[i, 3] >= max(5, crop.height*.06)
+                    and stats[i, 2] < crop.width * .45 and stats[i, 3] < crop.height * .8]
+            typical = float(np.median([stats[i, 3] for i in kept])) if kept else 0
+            kept = [i for i in kept if typical*.4 <= stats[i, 3] <= typical*2.2]
+            measured = np.isin(labels, kept).astype(np.uint8) * 255
+            if len(kept) >= 6 and .008 < np.mean(measured > 0) < .4:
+                ink = measured
+                colour_rows = True
         ys, xs = np.where(ink > 0)
         if not len(xs):
             continue
-        angle, evidence = text_angle(ink)
         bubble = is_balloon(region)
-        if (region.bubble_bbox is None and abs(angle) >= 3 and
+        if colour_rows:
+            bubble = False
+        angle, evidence = speech_angle(ink) if bubble and region.bubble_bbox is not None else text_angle(ink)
+        if (not vertical_source and abs(angle) >= (3 if region.bubble_bbox is None else 8) and
                 getattr(region, '_retouch_preserve_background', False)):
             bubble = False
         if bubble and (sum(ch.isalnum() for ch in region.text) < 4 or
-                       (any('\u3040' <= ch <= '\u9fff' for ch in region.text) and region.bbox[3] > region.bbox[2] * 1.2)):
+                       vertical_source):
             angle = 0.
             evidence = {'reason': 'короткий знак или вертикальная японская строка'}
         a, b, _, _ = box
         pad = 8. * pixel_scale
         if getattr(region, "_outline_ink", False):
-            pad = outline_pad_px(ink, pixel_scale)
+            pad = max(8. * pixel_scale, outline_pad_px(ink, pixel_scale))
+        if (getattr(region, "_outline_ink", False) or getattr(region, "_colour_ink", False)
+                or not bubble):
+            pad += 2. * pixel_scale
         geometry = dict(version=1, kind='bubble' if bubble else 'free', angle=angle, evidence=evidence,
                         source_bbox=list(region.bbox),
                         ink_bbox=[a + int(xs.min()), b + int(ys.min()), int(xs.max() - xs.min() + 1), int(ys.max() - ys.min() + 1)],
@@ -83,11 +105,22 @@ def prepare_regions(image, regions, pixel_scale=1.0):
                 geometry['angle'] = angle = 0.
         if not bubble:
             geometry['allow_vertical'] = region.block_type == 'sfx'
-            if abs(angle) >= 3:
+            if region.bubble_bbox is not None:
+                geometry['mask_kind'] = 'bubble'
+            if abs(angle) >= 3 or colour_rows:
                 from src.components.slanted_layout import source_lines
                 rows = source_lines(ink, (a, b), region.bbox, angle)
                 if rows:
                     geometry['source_lines'] = rows
+                    if region.block_type == 'dialogue' and (colour_rows or region.bubble_bbox is not None):
+                        geometry['readable_caption'] = True
+                        margin = float(np.median([row[3] for row in rows])) * .5
+                        geometry['caption_padding'] = margin
+                        ix, iy, iw, ih = geometry['ink_bbox']
+                        geometry['ink_bbox'] = [ix-margin, iy-margin, iw+2*margin, ih+2*margin]
+        if bubble and region.bubble_bbox is not None and abs(angle) < 8:
+            angle = 0.
+            geometry['angle'] = 0.
         region.auto_layout = geometry
         style.rotation = angle
         if not bubble and style.stroke_mode == 'auto' and not style.fill_locked:
@@ -206,11 +239,11 @@ def adaptive_masks(image, regions, ordinary, free, grow_px=0):
         meta = region.auto_layout or {}
         if not meta or region.skip or not region.translation.strip():
             continue
-        if meta.get('kind') == 'bubble' and region.bubble_bbox is not None:
+        if region.bubble_bbox is not None and (meta.get('kind') == 'bubble' or meta.get('mask_kind') == 'bubble'):
             continue
         _, ink, (a, b, c, d) = source_ink(image, region)
         boundary = None
-        if meta.get('kind') == 'free':
+        if meta.get('kind') == 'free' or region.bubble_bbox is None:
             crop = np.asarray(image.crop((a, b, c, d)))
             confirmed, inverse_outline = confirmed_light_ink(crop)
             if confirmed is not None and inverse_outline:
@@ -219,13 +252,14 @@ def adaptive_masks(image, regions, ordinary, free, grow_px=0):
                 # добираются только компоненты, пересекающие прежний край ROI.
                 boundary = boundary_ink(image, region.bbox, (a, b, c, d))
         radius = max(1, min(64, round(float(meta.get('mask_pad_px', 8)))))
-        if meta.get('kind') == 'bubble':
+        if meta.get('kind') == 'bubble' and not getattr(region, '_outline_ink', False):
             radius = max(1, round(radius * .75))
         radius += max(0, int(grow_px))
         # Дилатация в расширенном ROI: прежний crop+5 обрезал отступ8px.
         xa, ya, xb, yb = max(0, a - radius), max(0, b - radius), min(image.width, c + radius), min(image.height, d + radius)
         local = np.zeros((yb - ya, xb - xa), np.uint8)
         local[b - ya:d - ya, a - xa:c - xa] = ink
+        core = local.copy()
         local = cv2.dilate(local, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (radius * 2 + 1, radius * 2 + 1)))
         if boundary is not None:
             extra, (aa, bb, cc, dd) = boundary
@@ -233,12 +267,19 @@ def adaptive_masks(image, regions, ordinary, free, grow_px=0):
             expanded = np.zeros((nd-nb, nc-na), np.uint8)
             expanded[ya-nb:yb-nb, xa-na:xb-na] = local
             expanded[bb-nb:dd-nb, aa-na:cc-na] = np.maximum(expanded[bb-nb:dd-nb, aa-na:cc-na], extra)
+            core_exp = np.zeros_like(expanded)
+            core_exp[ya-nb:yb-nb, xa-na:xb-na] = core
             local = expanded
+            core = core_exp
             xa, ya, xb, yb = na, nb, nc, nd
         if meta.get('kind') == 'bubble':
             area = geometry_area((image.height, image.width), region)
             if area is not None:
-                local[area[ya:yb, xa:xb] == 0] = 0
+                allowed = area[ya:yb, xa:xb] > 0
+                if region.bubble_bbox is None and core.shape == allowed.shape:
+                    # Слово в кропе региона может быть вне inferred-оболочки.
+                    allowed = allowed | (core > 0)
+                local[~allowed] = 0
             if region.bubble_bbox is None:
                 # Толстая буква может соединиться с тонким контуром и исчезнуть
                 # из геометрического фильтра. Восстанавливаем только её ядро,
@@ -337,7 +378,9 @@ def source_ink(image, region):
 
     if getattr(local, "_outline_ink", False):
         region._outline_ink = True
-    if region.block_type != 'sfx' and (not region.document):
+    if getattr(local, "_colour_ink", False):
+        region._colour_ink = True
+    if region.block_type != 'sfx' and (not region.document) and not getattr(local, "_colour_ink", False):
         (count, labels, stats, _) = cv2.connectedComponentsWithStats((ink > 0).astype(np.uint8))
         candidates = [s[3] for s in stats[1:] if s[4] >= 6 and s[3] > 3 and (s[2] < crop.width * 0.4) and (s[3] < crop.height * 0.7)]
         if len(candidates) >= 5:
@@ -388,7 +431,10 @@ def _supported_speech_rows(ink):
     significant = [i for i in range(1, count) if stats[i, 4] >= 8 and stats[i, 3] >= 5]
     if len(significant) < 8:
         return ink
-    typical = float(np.percentile([stats[i, 3] for i in significant], 60))
+    # После увеличения страницы мелкие точки текстуры становятся отдельными
+    # компонентами. Их число не должно задавать высоту букв и отрезать T/!.
+    substantial = [i for i in significant if stats[i, 4] >= max(8, max(stats[j, 4] for j in significant) * .05)]
+    typical = float(np.percentile([stats[i, 3] for i in substantial], 60))
     angle, _ = text_angle(ink)
     rad = math.radians(angle)
     normal = np.sin(rad) * centers[:, 0] + np.cos(rad) * centers[:, 1]
@@ -447,6 +493,35 @@ def text_angle(ink):
         refined.append((float(np.dot(projection, projection)), float(candidate)))
     angle = round(max(refined)[1], 2)
     return (float(angle), {'raw_angle': angle, 'gain': round(gain, 3), 'reason': 'проекция строк'})
+
+
+def speech_angle(ink):
+    """Измерить строки речи по сопоставимым буквам, без лучей и соседних SFX.
+
+    Подтверждение служит только оценке угла: маска очистки остаётся полной.
+    Крупная соседняя надпись не должна перевешивать несколько строк речи.
+    """
+    count, labels, stats, _ = cv2.connectedComponentsWithStats((ink > 0).astype(np.uint8))
+    candidates = [i for i in range(1, count) if stats[i, 4] >= 8 and stats[i, 3] >= 5
+                  and .1 <= stats[i, 2] / stats[i, 3] <= 2]
+    if len(candidates) < 8:
+        # Обведённые слова могут быть соединены в крупные компоненты.
+        # Если они составляют основную надпись, прежняя проекция надёжнее
+        # отсутствующей статистики отдельных букв.
+        if len(candidates) >= 3 and sum(stats[i, 4] for i in candidates) >= np.count_nonzero(ink) * .6:
+            return text_angle(ink)
+        return 0., {'reason': 'нет подтверждённых букв для угла речи'}
+    typical = float(np.median([stats[i, 3] for i in candidates]))
+    kept = [i for i in candidates if typical * .55 <= stats[i, 3] <= typical * 1.4]
+    if len(kept) < 6:
+        return 0., {'reason': 'нет сопоставимых букв для угла речи'}
+    if len(kept) < 8:
+        # У короткой смешанной строки отсев прописных и пунктуации
+        # оставляет штрихи, чья собственная диагональ не равна базовой линии.
+        return text_angle(ink)
+    angle, evidence = text_angle(np.isin(labels, kept).astype(np.uint8) * 255)
+    evidence['glyph_count'] = len(kept)
+    return angle, evidence
 
 def inferred_balloon_area(image, region, ink, box, white_components=None):
     """Консервативное поле строк по оболочке букв, если детектор не привязал облачко."""

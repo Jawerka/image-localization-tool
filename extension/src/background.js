@@ -10,6 +10,9 @@ const SAVE_TITLE = "Сохранить перевод";
 const DEFAULT_SERVER = "http://127.0.0.1:8765";
 const MAX_CONCURRENT = 2;
 const POLL_MS = 600;
+const REQUEST_TIMEOUT_MS = 60000;
+const JOB_TIMEOUT_MS = 2 * 60 * 60 * 1000;
+let refererTail = Promise.resolve();
 
 const TYPE_TRANSLATE_URL = "translate-url";
 const TYPE_TRANSLATE_ALL = "translate-all";
@@ -403,41 +406,75 @@ function apiUrl(serverUrl, path) {
 async function readJson(response) {
   try {
     return await response.json();
-  } catch (_) {
-    return null;
+  } catch (error) {
+    if (error?.name === "SyntaxError") return null;
+    throw error;
   }
 }
 
-async function fetchApi(url, options) {
-  let response;
+// Дедлайн действует до конца тела, включая ответы с HTTP-ошибкой.
+async function boundedFetch(url, options, consume, timeoutMs = REQUEST_TIMEOUT_MS, kind = "API") {
+  const controller = new AbortController();
+  const started = Date.now();
+  let stage = "headers";
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      const error = new Error("истекло время ожидания ответа сервера");
+      error.code = "E_" + kind + "_TIMEOUT";
+      error.stage = stage;
+      reject(error);
+      controller.abort();
+    }, Math.max(1, timeoutMs));
+  });
   try {
-    response = await fetch(url, options);
+    const result = await Promise.race([timeout, (async () => {
+      const response = await fetch(url, { ...options, signal: controller.signal });
+      stage = response.ok ? "body" : "error-body";
+      return consume(response);
+    })()]);
+    writeLog([{lvl:"debug", ev:"request-complete", msg:"запрос завершён",
+      data:{origin:new URL(url).origin, method:options?.method || "GET", stage,
+        elapsedMs:Date.now() - started}}]);
+    return result;
+  } catch (error) {
+    if (!error.code?.startsWith("E_HTTP_")) writeLog([{lvl: "error", ev: "request-error", msg: "запрос не завершён",
+      data: {origin: new URL(url).origin + "/", name:error.name, method: options?.method || "GET", stage,
+        code: error.code || error.name, elapsedMs: Date.now() - started}}]);
+    throw error;
+  } finally { clearTimeout(timer); }
+}
+
+async function fetchApi(url, options, body = "json", timeoutMs = REQUEST_TIMEOUT_MS) {
+  try {
+    return await boundedFetch(url, options, async response => {
+      if (!response.ok) {
+        let message = response.status === 413 ? "изображение превышает допустимый размер сервера" : "ошибка перевода";
+        const data = await readJson(response);
+        if (typeof data?.error === "string" && data.error.trim()) message = data.error;
+        if (response.status === 401) message = "ключ отозван";
+        if (response.status === 429) message = "очередь заполнена";
+        const error = new Error(message);
+        error.code = "E_HTTP_" + response.status;
+        writeLog([{lvl:"error", ev:"api-error", msg:message,
+          data:{path:new URL(url).pathname, method:options?.method || "GET", status:response.status, code:error.code}}]);
+        throw error;
+      }
+      if (body === "blob") {
+        const blob = await response.blob();
+        return {blob, mime:normalizeMime(response.headers?.get?.("content-type") || blob.type || "image/png")};
+      }
+      if (body === "discard") { await response.arrayBuffer(); return null; }
+      return readJson(response);
+    }, timeoutMs);
   } catch (err) {
     if (err?.name === "TypeError" || isNetworkError(err)) {
       const error = new Error("не удалось связаться с сервером");
       error.code = "E_NETWORK";
-      writeLog([{ lvl: "error", ev: "api-error", msg: error.message,
-        data: { path: new URL(url).pathname, method: options?.method || "GET", code: error.code } }]);
       throw error;
     }
     throw err;
   }
-  if (!response) throw new Error("сервер не найден");
-  if (!response.ok) {
-    let message = response.status === 413 ? "изображение превышает допустимый размер сервера" : "ошибка перевода";
-    try {
-      const data = await response.json();
-      if (data && typeof data.error === "string" && data.error.trim()) message = data.error;
-    } catch (_) { /* оставим сообщение по HTTP-статусу */ }
-    if (response.status === 401) message = "ключ отозван";
-    if (response.status === 429) message = "очередь заполнена";
-    const error = new Error(message);
-    error.code = "E_HTTP_" + response.status;
-    writeLog([{ lvl: "error", ev: "api-error", msg: message,
-      data: { path: new URL(url).pathname, method: options?.method || "GET", status: response.status, code: error.code } }]);
-    throw error;
-  }
-  return response;
 }
 
 function delay(ms) {
@@ -501,6 +538,7 @@ async function persistActive() {
       stage: job.stage,
       progress: job.progress,
       remoteId: job.remoteId,
+      deadlineAt: job.deadlineAt,
       tabId: job.tabId || null,
     });
   }
@@ -596,37 +634,32 @@ function downloadError(status) {
 
 async function downloadImage(imageUrl, pageUrl) {
   if (isBlobUrl(imageUrl) || /^data:/i.test(imageUrl)) throw downloadError(0);
-  let response = null;
-  try {
-    response = await fetch(imageUrl, { credentials: "include", cache: "force-cache" });
-  } catch (error) {
-    writeLog([{ lvl: "error", ev: "download-error", msg: "источник изображения не ответил",
-      data: { origin: new URL(imageUrl).origin, name: error.name, cache: "force-cache" } }]);
-    response = null;
-  }
-  if (response && (response.status === 401 || response.status === 403)) {
-    try { await withReferer(imageUrl, pageUrl); } catch (_) {}
-    try {
-      response = await fetch(imageUrl, { credentials: "include", cache: "force-cache" });
-    } catch (error) {
-      writeLog([{ lvl: "error", ev: "download-error", msg: "повторная загрузка с Referer не удалась",
-        data: { origin: new URL(imageUrl).origin, name: error.name, cache: "force-cache" } }]);
-      response = null;
-    }
-    await clearReferer();
-  }
-  if (!response || !response.ok || response.type === "opaque") {
-    writeLog([{ lvl: "error", ev: "download-error", msg: "исходник недоступен в кэше расширения и в сети",
-      data: { origin: new URL(imageUrl).origin, status: response?.status || 0 } }]);
-    throw downloadError(response ? response.status : 0);
-  }
-  try {
+  const attempt = () => boundedFetch(imageUrl, {credentials:"include", cache:"force-cache"}, async response => {
+    if (response.status === 401 || response.status === 403) return {denied:response.status};
+    if (!response.ok || response.type === "opaque") throw downloadError(response.status);
     const blob = await response.blob();
     if (!blob.size) throw downloadError(0);
-    return blob;
+    return {blob};
+  }, REQUEST_TIMEOUT_MS, "DOWNLOAD");
+  try {
+    let result = await attempt();
+    if (result.denied) {
+      // Один владелец правила, включая чтение тела; другой источник ждёт освобождения.
+      const previous = refererTail;
+      let release;
+      refererTail = new Promise(resolve => { release = resolve; });
+      await previous;
+      try {
+        try { await withReferer(imageUrl, pageUrl); } catch (_) {}
+        result = await attempt();
+      } finally { await clearReferer(); release(); }
+    }
+    if (!result.blob) throw downloadError(result.denied);
+    return result.blob;
   } catch (error) {
-    writeLog([{ lvl: "error", ev: "download-error", msg: "не удалось прочитать тело изображения",
-      data: { origin: new URL(imageUrl).origin, name: error.name } }]);
+    if (error.code?.endsWith("_TIMEOUT")) throw error;
+    writeLog([{lvl:"error", ev:"download-error", msg:"исходник недоступен",
+      data:{origin:new URL(imageUrl).origin, name:error.name, status:0}}]);
     throw downloadError(0);
   }
 }
@@ -683,8 +716,7 @@ function checkUploadSize(size, limit, imageBytes) {
 }
 
 async function postTranslate(serverUrl, token, imageBlob, job) {
-  const healthResponse = await fetchApi(apiUrl(serverUrl, "/v1/health"), { cache: "no-store" });
-  const health = await readJson(healthResponse);
+  const health = await fetchApi(apiUrl(serverUrl, "/v1/health"), { cache: "no-store" });
   const advertised = health?.max_body_bytes;
   const limit = Number.isSafeInteger(advertised) && advertised > 0 ? advertised : 20 * 1024 * 1024;
   checkUploadSize(imageBlob.size, limit, imageBlob.size);
@@ -692,16 +724,18 @@ async function postTranslate(serverUrl, token, imageBlob, job) {
   form.append("file", imageBlob, fileNameFromUrl(job.imageUrl));
   form.append("target_lang", job.targetLang);
   if (job.fresh) form.append("fresh", "1");
-  // Проверяем и отправляем одни и те же байты вместе с multipart-заголовками.
-  const body = await new Response(form).blob();
-  checkUploadSize(body.size, limit, imageBlob.size);
-  const response = await fetchApi(apiUrl(serverUrl, "/v1/translate"), {
+  // Лимит считаем по тем же multipart-байтам. На POST отдаём FormData:
+  // FormData позволяет браузеру согласовать boundary и поле file; общий отказ Blob не доказан.
+  const sized = await new Response(form).blob();
+  checkUploadSize(sized.size, limit, imageBlob.size);
+  const headers = authHeaders(token);
+  if (job.targetLang) headers["X-Target-Lang"] = String(job.targetLang);
+  const data = await fetchApi(apiUrl(serverUrl, "/v1/translate"), {
     method: "POST",
-    headers: authHeaders(token),
-    body,
+    headers,
+    body: form,
     cache: "no-store",
   });
-  const data = await readJson(response);
   if (!data || data.job_id == null || data.job_id === "") throw new Error("ошибка перевода");
   return String(data.job_id);
 }
@@ -726,13 +760,32 @@ function applyServerJob(job, data) {
 
 async function pollJob(serverUrl, token, job) {
   const url = apiUrl(serverUrl, "/v1/jobs/" + encodeURIComponent(job.remoteId));
+  if (!Number.isFinite(job.deadlineAt)) {
+    job.deadlineAt = Date.now() + JOB_TIMEOUT_MS;
+    await persistActive();
+  }
   for (;;) {
-    const response = await fetchApi(url, {
-      method: "GET",
-      headers: authHeaders(token),
-      cache: "no-store",
-    });
-    const data = await readJson(response);
+    const remaining = job.deadlineAt - Date.now();
+    if (remaining <= 0) {
+      const error = new Error("истёк срок ожидания перевода с учётом очереди");
+      error.code = "E_JOB_TIMEOUT";
+      throw error;
+    }
+    let data;
+    try {
+      data = await fetchApi(url, {
+        method: "GET",
+        headers: authHeaders(token),
+        cache: "no-store",
+      }, "json", Math.min(REQUEST_TIMEOUT_MS, remaining));
+    } catch (error) {
+      if (Date.now() >= job.deadlineAt) {
+        const expired = new Error("истёк срок ожидания перевода с учётом очереди");
+        expired.code = "E_JOB_TIMEOUT";
+        throw expired;
+      }
+      throw error;
+    }
     applyServerJob(job, data);
     if (data && data.status === "done") {
       if (typeof data.stage === "string") job.stage = data.stage;
@@ -743,31 +796,22 @@ async function pollJob(serverUrl, token, job) {
     if (!data || (data.status !== "queued" && data.status !== "running")) {
       throw new Error("ошибка перевода");
     }
-    await delay(POLL_MS);
+    await delay(Math.min(POLL_MS, Math.max(0, job.deadlineAt - Date.now())));
   }
 }
 
 async function fetchResult(serverUrl, token, remoteId) {
-  const response = await fetchApi(apiUrl(serverUrl, "/v1/jobs/" + encodeURIComponent(remoteId) + "/result"), {
-    method: "GET",
-    headers: authHeaders(token),
-    cache: "no-store",
-  });
-  const blob = await response.blob();
-  const header = response.headers && response.headers.get ? response.headers.get("content-type") : "";
-  return { blob: blob, mime: normalizeMime(header || blob.type || "image/png") };
+  return fetchApi(apiUrl(serverUrl, "/v1/jobs/" + encodeURIComponent(remoteId) + "/result"), {
+    method:"GET", headers:authHeaders(token), cache:"no-store",
+  }, "blob");
 }
 
 async function deleteRemote(serverUrl, token, remoteId) {
   try {
-    await fetch(apiUrl(serverUrl, "/v1/jobs/" + encodeURIComponent(remoteId)), {
-      method: "DELETE",
-      headers: authHeaders(token),
-      cache: "no-store",
-    });
-  } catch (_) {
-    // Удаление не отменяет уже скачанный результат.
-  }
+    await fetchApi(apiUrl(serverUrl, "/v1/jobs/" + encodeURIComponent(remoteId)), {
+      method:"DELETE", headers:authHeaders(token), cache:"no-store",
+    }, "discard");
+  } catch (_) { /* Удаление не отменяет уже скачанный результат. */ }
 }
 
 async function executeJob(job) {
@@ -819,6 +863,7 @@ async function executeJob(job) {
     return;
   }
   job.remoteId = remoteId;
+  job.deadlineAt = Date.now() + JOB_TIMEOUT_MS;
   void persistActive();
   try {
     await pollJob(settings.serverUrl, settings.token, job);
@@ -1359,19 +1404,23 @@ async function resumeStoredJobs() {
     return;
   }
   const list = data && Array.isArray(data.iltJobs) ? data.iltJobs : [];
+  const restored = [];
   for (let i = 0; i < list.length; i += 1) {
     const meta = list[i];
     if (!meta?.remoteId || jobs.has(meta.key)) continue;
     const job = makeJob(meta.key, meta.pageUrl, meta.imageUrl);
     job.targetLang = meta.targetLang || "ru";
     job.remoteId = meta.remoteId;
+    job.deadlineAt = Number.isFinite(meta.deadlineAt) ? meta.deadlineAt : Date.now() + JOB_TIMEOUT_MS;
     job.status = "running";
     job.langsReady = true;
     job.tabId = meta.tabId;
     jobs.set(job.key, job);
     activeKeys.push(job.key);
-    void resumeRemote(job);
+    restored.push(job);
   }
+  if (restored.length) await persistActive();
+  for (const job of restored) void resumeRemote(job);
 }
 
 async function resumeRemote(job) {

@@ -195,10 +195,12 @@ def _scale_regions(regions: list[TextRegion], factor: float) -> None:
                 meta["source_bbox"] = list(_scale_box(meta["source_bbox"], factor))
             if meta.get("contour"):
                 meta["contour"] = _scale_points(meta["contour"], factor)
+            if meta.get("protected_text"):
+                meta["protected_text"] = [_scale_points(points, factor) for points in meta["protected_text"]]
             if meta.get("source_lines"):
                 meta["source_lines"] = [[round(float(v)*factor, 6) for v in row]
                                         for row in meta["source_lines"]]
-            for key in ("outline_px", "mask_pad_px"):
+            for key in ("outline_px", "mask_pad_px", "caption_padding"):
                 if key in meta:
                     meta[key] = round(float(meta[key]) * factor, 6)
 
@@ -483,7 +485,9 @@ class PagePipeline:
                 discovery_started = time.perf_counter()
                 try:
                     client = self._shared_client or self._client()
-                    extras = discover_missing_text(work, regions, client, self.config.vlm_max_side)
+                    extras = discover_missing_text(
+                        work, regions, client, self.config.vlm_max_side, warnings=warnings,
+                    )
                     regions.extend(extras)
                     if extras:
                         from src.components.text_regions import assign_reading_order
@@ -568,7 +572,8 @@ class PagePipeline:
         bubble_inset = int(getattr(self.config, "bubble_mask_inset_px", 2) or 0)
         letter_grow = max(0, int(getattr(self.config, "letter_mask_grow_px", 1) or 0))
         ordinary = [r for r in other_regions if not adaptive or not r.auto_layout or
-                    (r.auto_layout.get("kind") == "bubble" and r.bubble_bbox is not None)]
+                    ((r.auto_layout.get("kind") == "bubble" or r.auto_layout.get("mask_kind") == "bubble")
+                     and r.bubble_bbox is not None)]
         legacy_sfx = [r for r in sfx_regions if not adaptive or not r.auto_layout]
         mask_other = segment_regions(
             work, ordinary, bubble_inset_px=bubble_inset, letter_grow_px=letter_grow,
@@ -590,6 +595,10 @@ class PagePipeline:
             mask_sfx = clip_outlined_mask(mask_sfx, sfx_regions, seg)
         mask = np.maximum(mask_other, mask_sfx)
         self._merge_captured_sfx(work, sfx_regions, inks)
+        if self.config.ocr_backend == "vlm" and self.ocr_name in ("", "vlm"):
+            from src.components.neighbor_text import protect_neighbor_text
+
+            mask = protect_neighbor_text(work, drawable, mask, warnings=warnings)
         mask = apply_strokes(mask, strokes or [], work)
         # Плашки с просвечивающим рисунком и подтверждённая обводка требуют
         # восстановления изображения, даже если узкое кольцо локально ровное.
@@ -605,7 +614,8 @@ class PagePipeline:
                 continue
             picture = (region.bubble_bbox is not None and preserves_picture(work_rgb[ya:yb, xa:xb]))
             if picture or getattr(region, '_retouch_preserve_background', False):
-                pad = 34 if (region.auto_layout or {}).get('kind') == 'free' else 16
+                geometry = region.auto_layout or {}
+                pad = 34 if geometry.get('kind') == 'free' and geometry.get('mask_kind') != 'bubble' else 16
                 preserve[max(0, ya-pad):min(work.height, yb+pad), max(0, xa-pad):min(work.width, xb+pad)] = 255
         self._step_timings["segment"] = time.perf_counter() - started
         if debug:

@@ -37,6 +37,9 @@ def outlined_glyphs(crop: np.ndarray, *, reject_cut_cores: bool = False) -> np.n
     # Низ буквы на чёрном фоне не имеет белой обводки и сливается с заливкой.
     # Добираем только несколько соседних тёмных пикселей, не всю заливку.
     best = _absorb_dark_edge(gray, best, steps=3)
+    # Толстый белый stroke на тёмном поле дальше sandwich-лимита 6 px.
+    if float(np.median(gray)) < 140:
+        best = _absorb_light_halo(gray, best, steps=12)
     return _drop_edge_components(best)
 
 
@@ -182,6 +185,19 @@ def _sandwich(core: np.ndarray, halo: np.ndarray, limit: int) -> np.ndarray | No
     if int(np.count_nonzero(body)) < 12:
         return None
     return body
+
+
+def _absorb_light_halo(gray: np.ndarray, mask: np.ndarray, steps: int) -> np.ndarray:
+    """Добрать белую обводку вокруг уже найденных ядер, не заливая бумагу."""
+    reached = mask > 0
+    light = gray >= 215
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    for _step in range(steps):
+        ring = (cv2.dilate(reached.astype(np.uint8), kernel) > 0) & light & ~reached
+        if not np.any(ring):
+            break
+        reached = reached | ring
+    return reached.astype(np.uint8) * 255
 
 
 def _absorb_dark_edge(gray: np.ndarray, mask: np.ndarray, steps: int) -> np.ndarray:

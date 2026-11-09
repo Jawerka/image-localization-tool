@@ -21,7 +21,7 @@ function background(withPanel = true, granted = true) {
     downloads: { download: async options => { events.push(["download", options]); return 1; } },
   };
   if (withPanel) chrome.sidePanel = { open: async options => { events.push(["panel", options]); } };
-  const context = vm.createContext({ chrome, queueMicrotask, setTimeout, URL });
+  const context = vm.createContext({ chrome, queueMicrotask, setTimeout, clearTimeout, AbortController, URL });
   vm.runInContext(readFileSync(new URL("../../extension/src/background.js", import.meta.url), "utf8"), context);
   return { context, events, state };
 }
@@ -130,7 +130,7 @@ test("Сохранить перевод качает файл с языком в
 
 
 function uploadContext(health = { max_body_bytes: 64 * 1024 * 1024 }) {
-  const { context } = background();
+  const { context, state } = background();
   const calls = [];
   Object.assign(context, {
     Blob, FormData, Response,
@@ -139,7 +139,7 @@ function uploadContext(health = { max_body_bytes: 64 * 1024 * 1024 }) {
       return Response.json(url.endsWith('/v1/health') ? health : { job_id: 'large-job' });
     },
   });
-  return { context, calls };
+  return { context, calls, state };
 }
 
 const uploadCall = `postTranslate('http://127.0.0.1:8765', 'secret', uploadImage,
@@ -151,10 +151,11 @@ test('Оригинал 29 865 297 байт проходит новый лими�
   assert.equal(await vm.runInContext(uploadCall, context), 'large-job');
   assert.equal(calls.length, 2);
   const posted = calls[1].options.body;
-  assert.ok(posted instanceof Blob);
-  assert.match(posted.type, /^multipart\/form-data;\s*boundary=/);
-  assert.ok(posted.size > context.uploadImage.size);
-  const form = await new Response(posted).formData();
+  assert.ok(posted instanceof FormData);
+  assert.equal(calls[1].options.headers["X-Target-Lang"], "ru");
+  assert.equal(calls[1].options.headers["Content-Type"], undefined);
+  const form = posted instanceof FormData ? posted : await new Response(posted).formData();
+  assert.ok(form.get("file").size > 0);
   assert.equal(form.get('file').size, context.uploadImage.size);
   assert.equal(form.get('file').type, 'image/png');
   assert.equal(form.get('target_lang'), 'ru');
@@ -186,7 +187,7 @@ test('Точный лимит multipart принимается, один лиш�
   const probe = uploadContext();
   probe.context.uploadImage = new Blob(['image'], {type:'image/png'});
   await vm.runInContext(uploadCall, probe.context);
-  const bodySize = probe.calls[1].options.body.size;
+  const bodySize = (await new Response(probe.calls[1].options.body).blob()).size;
   for (const [limit, allowed] of [[bodySize, true], [bodySize - 1, false]]) {
     const { context, calls } = uploadContext({max_body_bytes:limit});
     context.uploadImage = probe.context.uploadImage;
@@ -298,4 +299,116 @@ test('Байты HTTP-оригинала со страницы сохраняю�
     assert.equal(await context.cachedSourceJob.blob.text(), fresh ? 'fresh-translation' : 'existing-translation');
     assert.equal(calls.length, fresh ? 2 : 0);
   }
+});
+
+
+test('Дедлайн охватывает заголовки, успешное и ошибочное тело', async () => {
+  for (const phase of ['headers', 'body', 'error-body']) {
+    const {context} = uploadContext();
+    context.fetch = phase === 'headers' ? () => new Promise(() => {}) : async () => ({
+      ok: phase === 'body', status: phase === 'body' ? 200 : 500,
+      json: () => new Promise(() => {}),
+    });
+    await assert.rejects(vm.runInContext(`fetchApi('http://localhost/v1/health', {}, 'json', 15)`, context),
+      e => e.code === 'E_API_TIMEOUT' && e.stage === phase);
+  }
+});
+
+test('Истёкший срок задания не начинает GET или новый POST', async () => {
+  const {context, calls} = uploadContext();
+  await assert.rejects(vm.runInContext(`pollJob('http://localhost', 'secret', {remoteId:'old', deadlineAt:Date.now()-1})`, context), e => e.code === 'E_JOB_TIMEOUT');
+  assert.equal(calls.length, 0);
+});
+
+test('Неопределённый POST не повторяется', async () => {
+  const {context, calls} = uploadContext();
+  context.fetch = async (url, options) => {
+    calls.push({url, options});
+    if (options?.method === 'POST') throw new TypeError('Failed to fetch');
+    return Response.json({});
+  };
+  context.uploadImage = new Blob(['image'], {type:'image/png'});
+  await assert.rejects(vm.runInContext(uploadCall, context), e => e.code === 'E_NETWORK');
+  assert.equal(calls.filter(x => x.options?.method === 'POST').length, 1);
+});
+
+
+test('Referer fallback владеет правилом до конца тела', async () => {
+  const {context} = uploadContext();
+  let rule = null;
+  const seen = [];
+  context.chrome.declarativeNetRequest = {updateSessionRules: async change => {
+    if (change.removeRuleIds) rule = null;
+    if (change.addRules) rule = change.addRules[0];
+  }};
+  const attempts = new Map();
+  context.fetch = async url => {
+    const n = attempts.get(url) || 0;
+    attempts.set(url, n + 1);
+    if (!n) return {ok:false,status:403};
+    await new Promise(resolve => setTimeout(resolve, 5));
+    seen.push({url, filter:rule?.condition.urlFilter});
+    return {ok:true,status:200,blob:async () => {
+      await new Promise(resolve => setTimeout(resolve, 5));
+      assert.equal(rule.condition.urlFilter, url);
+      return new Blob(['image']);
+    }};
+  };
+  await vm.runInContext(`Promise.all([
+    downloadImage('https://a.example/a.png', 'https://page-a.example/'),
+    downloadImage('https://b.example/b.png', 'https://page-b.example/')])`, context);
+  assert.equal(seen.length, 2);
+  for (const row of seen) assert.equal(row.filter, row.url);
+  assert.equal(rule, null);
+});
+
+test('Срок задания сохраняется и не меняется при повторном polling', async () => {
+  const {context, state} = uploadContext();
+  context.fetch = async () => Response.json({status:'done'});
+  await vm.runInContext(`(async()=>{
+    const job = makeJob('deadline', 'https://site.example/', 'https://img.example/a.png');
+    job.remoteId='remote'; job.status='running'; jobs.set(job.key, job);
+    await pollJob('http://localhost', 'secret', job);
+    globalThis.deadline = job.deadlineAt;
+    await pollJob('http://localhost', 'secret', job);
+    globalThis.sameDeadline = job.deadlineAt === deadline;
+  })()`, context);
+  assert.equal(context.sameDeadline, true);
+  assert.equal(state.iltJobs[0].deadlineAt, context.deadline);
+});
+
+
+test('Дедлайн blob охватывает чтение результата', async () => {
+  const {context} = uploadContext();
+  context.fetch = async () => ({ok:true, blob:() => new Promise(() => {})});
+  await assert.rejects(vm.runInContext(`fetchApi('http://localhost/result', {}, 'blob', 15)`, context),
+    e => e.code === 'E_API_TIMEOUT' && e.stage === 'body');
+});
+
+test('Ошибка тела fallback освобождает DNR правило', async () => {
+  const {context} = uploadContext();
+  let rule = null, attempts = 0;
+  context.chrome.declarativeNetRequest = {updateSessionRules: async change => {
+    rule = change.addRules?.[0] || null;
+  }};
+  context.fetch = async () => ++attempts === 1 ? {ok:false,status:403} : {
+    ok:true, blob:async () => {throw new Error('body failed');}
+  };
+  await assert.rejects(vm.runInContext(`downloadImage('https://a.example/a.png','https://site.example/')`, context));
+  assert.equal(rule, null);
+});
+
+
+test('Обрыв JSON тела не превращается в успешный null', async () => {
+  const {context} = uploadContext();
+  context.fetch = async () => ({ok:true,json:async () => {throw new TypeError('connection reset');}});
+  await assert.rejects(vm.runInContext(`fetchApi('http://localhost/job')`, context), e => e.code === 'E_NETWORK');
+  assert.equal(vm.runInContext(`logMemory.some(x=>x.ev==='request-complete')`, context), false);
+});
+
+test('Истечение общего срока внутри тела отличимо от сетевого таймаута', async () => {
+  const {context} = uploadContext();
+  context.fetch = async () => ({ok:true,json:() => new Promise(() => {})});
+  await assert.rejects(vm.runInContext(`pollJob('http://localhost', 'secret', {remoteId:'slow',deadlineAt:Date.now()+20})`, context),
+    e => e.code === 'E_JOB_TIMEOUT');
 });

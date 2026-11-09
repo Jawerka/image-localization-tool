@@ -125,6 +125,24 @@ test("сайт вернул оригинал — перевод ставится
   assert.ok(events.some(event => event.type === "fallback"));
 });
 
+test("picture с source не подменяется — вызывающий рисует overlay", async () => {
+  const { swap } = loadSwap();
+  const picture = new FakeNode("PICTURE");
+  const source = new FakeNode("SOURCE");
+  const img = makeImg();
+  source.setAttribute("type", "image/webp");
+  source.setAttribute("srcset", "http://127.0.0.1/pic.webp");
+  picture.children = [source, img];
+  source.parentElement = picture;
+  img.parentElement = picture;
+  const applied = await swap.apply(img, new Blob(["png"]));
+  assert.equal(applied.ok, false);
+  assert.match(applied.error, /picture/);
+  assert.equal(img.src, "http://127.0.0.1/pic.png");
+  assert.equal(source.getAttribute("type"), "image/webp");
+  assert.equal(swap.isSwapped(img), false);
+});
+
 test("новый URL не откатывается поверх сайта и шлёт new-image", async () => {
   const { swap, events } = loadSwap();
   const img = makeImg();

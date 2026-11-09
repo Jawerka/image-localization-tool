@@ -86,6 +86,30 @@ def test_short_vertical_and_manual_geometry_stay_untouched():
     assert manual.to_dict() == before
 
 
+def test_inferred_balloon_keeps_word_outside_contour():
+    """Чернила в кропе inferred-облачка не вырезаются узкой оболочкой."""
+    rgb = np.full((180, 280, 3), (40, 40, 45), np.uint8)
+    cv2.ellipse(rgb, (90, 80), (70, 45), 0, 0, 360, (250, 250, 250), -1)
+    cv2.ellipse(rgb, (90, 80), (70, 45), 0, 0, 360, (10, 10, 10), 2)
+    cv2.putText(rgb, "ASK", (55, 88), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (10, 10, 10), 2)
+    cv2.putText(rgb, "WHEW", (175, 88), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (250, 250, 250), 2)
+    image = Image.fromarray(rgb)
+    region = TextRegion(
+        1, (20, 30, 230, 100), text="ASK WHEW", translation="А",
+        block_type="dialogue", class_name="text_bubble",
+        auto_layout=dict(
+            version=1, kind="bubble", source_bbox=[20, 30, 230, 100],
+            ink_bbox=[20, 30, 230, 100], outline_px=3, mask_pad_px=8,
+            contour=[[22, 36], [158, 36], [158, 124], [22, 124]],
+        ),
+    )
+    other = np.zeros(rgb.shape[:2], np.uint8)
+    other, _free = adaptive_masks(image, [region], other, np.zeros_like(other))
+    whew = np.zeros(rgb.shape[:2], np.uint8)
+    cv2.putText(whew, "WHEW", (175, 88), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2)
+    assert np.mean(other[whew > 0] > 0) >= 0.45
+
+
 def test_cleanup_has_full_margin_and_protects_neighbour():
     image = Image.new('RGB', (160, 100), 'white')
     paint = ImageDraw.Draw(image)
@@ -368,3 +392,191 @@ def test_clean_upscale_does_not_invalidate_existing_auto_snapshot():
     pipeline = PagePipeline(Config(layout_long_side=2000), inpainter=IdentityPainter())
     pipeline.clean(image, [region])
     assert _frozen_layout(region) is not None
+
+
+def _paint_caption(canvas, text, xy, angle, fill, stroke):
+    font = ImageFont.truetype(str(FONT), 34)
+    layer = Image.new('RGBA', canvas.size, (0, 0, 0, 0))
+    ImageDraw.Draw(layer).text(xy, text, font=font, fill=fill, stroke_width=3, stroke_fill=stroke)
+    cx, cy = xy[0] + 90, xy[1] + 18
+    return Image.alpha_composite(canvas, layer.rotate(angle, resample=Image.BICUBIC, center=(cx, cy)))
+
+
+def test_texture_captions_need_steep_angle_for_free_style():
+    from src.components.font_catalog import assign_stylized_fonts
+
+    canvas = Image.new('RGBA', (520, 280), (38, 32, 28, 255))
+    noise = np.random.default_rng(3).integers(0, 28, (280, 520, 3), dtype=np.uint8)
+    base = np.asarray(canvas.convert('RGB'))
+    canvas = Image.fromarray(np.clip(base.astype(np.int16) + noise, 0, 255).astype(np.uint8)).convert('RGBA')
+    canvas = _paint_caption(canvas, 'P-PRINCESS', (40, 50), 2.6, (255, 220, 40, 255), (20, 12, 0, 255))
+    canvas = _paint_caption(canvas, 'OH WHAT', (40, 150), 22.0, (255, 220, 40, 255), (20, 12, 0, 255))
+    image = canvas.convert('RGB')
+    mild = TextRegion(1, (30, 30, 240, 80), text='P-PRINCESS', translation='П-ПРИНЦЕССА',
+                      block_type='dialogue', class_name='text_bubble')
+    steep = TextRegion(2, (30, 130, 220, 80), text='OH WHAT', translation='Ой, что это?',
+                       block_type='dialogue', class_name='text_bubble')
+    mild._retouch_preserve_background = True
+    steep._retouch_preserve_background = True
+    prepare_regions(image, [mild, steep])
+    assert mild.auto_layout['kind'] == 'bubble'
+    assert steep.auto_layout['kind'] == 'free'
+    assign_stylized_fonts([mild, steep])
+    assert mild.style.font_id == 'Heroika-Regular'
+    assert steep.style.font_id
+
+
+def test_shallow_balloon_angle_snaps_to_upright():
+    image = Image.new('RGB', (420, 280), (40, 40, 45))
+    paint = ImageDraw.Draw(image)
+    paint.ellipse((30, 30, 390, 250), fill=(250, 250, 250), outline=(10, 10, 10), width=3)
+    layer = Image.new('RGBA', image.size, (0, 0, 0, 0))
+    ImageDraw.Draw(layer).text((90, 110), 'HELLO THERE FRIEND', font=ImageFont.truetype(str(FONT), 28), fill=(10, 10, 10, 255))
+    image = Image.alpha_composite(image.convert('RGBA'), layer.rotate(2.6, resample=Image.BICUBIC, center=(210, 140))).convert('RGB')
+    region = TextRegion(1, (80, 90, 260, 80), text='HELLO THERE FRIEND', translation='Привет друг',
+                        bubble_bbox=(25, 25, 370, 230), block_type='dialogue', class_name='text_bubble')
+    prepare_regions(image, [region])
+    assert region.auto_layout['kind'] == 'bubble'
+    assert region.style.rotation == 0
+    assert region.auto_layout['angle'] == 0
+
+
+def test_outlined_free_mask_gains_two_pixels_without_growing_balloon():
+    rgb = np.full((140, 260, 3), (30, 30, 35), np.uint8)
+    cv2.putText(rgb, 'BAM', (30, 90), cv2.FONT_HERSHEY_SIMPLEX, 1.6, (255, 255, 255), 10)
+    cv2.putText(rgb, 'BAM', (30, 90), cv2.FONT_HERSHEY_SIMPLEX, 1.6, (20, 20, 20), 3)
+    cv2.ellipse(rgb, (190, 70), (50, 35), 0, 0, 360, (250, 250, 250), -1)
+    cv2.putText(rgb, 'Hi', (170, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (10, 10, 10), 2)
+    image = Image.fromarray(rgb)
+    sound = TextRegion(1, (20, 40, 110, 70), block_type='sfx', text='BAM', translation='БАМ')
+    speech = TextRegion(2, (155, 45, 70, 50), text='Hi', translation='Привет',
+                        bubble_bbox=(138, 32, 105, 78), block_type='dialogue')
+    sound._outline_ink = True
+    prepare_regions(image, [sound, speech])
+    assert sound.auto_layout['kind'] == 'free'
+    assert speech.auto_layout['kind'] == 'bubble'
+    assert sound.auto_layout['mask_pad_px'] == speech.auto_layout['mask_pad_px'] + 2
+    empty = np.zeros((140, 260), np.uint8)
+    other_with, free_with = adaptive_masks(image, [sound, speech], empty, empty.copy())
+    sound.auto_layout['mask_pad_px'] -= 2
+    other_without, free_without = adaptive_masks(image, [sound, speech], empty, empty.copy())
+    extra = (free_with > 0) & (free_without == 0)
+    assert np.count_nonzero(extra) > 0
+    dist = cv2.distanceTransform((free_without == 0).astype(np.uint8), cv2.DIST_L2, 5)
+    assert float(np.median(dist[extra])) >= 1.0
+    assert np.array_equal(other_with, other_without)
+
+
+@pytest.mark.parametrize('angle', [-25, 0, 25])
+def test_speech_angle_confirms_real_rows(angle):
+    """Настоящий наклон строк сохраняется после проверки компонентов."""
+    from src.components.adaptive_text import speech_angle
+    layer = Image.new('L', (500, 220))
+    draw = ImageDraw.Draw(layer)
+    font = ImageFont.truetype(str(FONT), 30)
+    for y in (25, 85, 145):
+        draw.text((30, y), 'Several words in a line', font=font, fill=255)
+    result, _ = speech_angle(np.array(layer.rotate(angle, expand=True)))
+    assert abs(result-angle) <= 2
+
+
+def test_speech_angle_ignores_larger_slanted_neighbor():
+    """Крупный звук рядом не задаёт угол горизонтальной реплики."""
+    from src.components.adaptive_text import speech_angle
+    layer = Image.new('L', (500, 240))
+    draw = ImageDraw.Draw(layer)
+    font = ImageFont.truetype(str(FONT), 24)
+    for y, text in zip((20, 52, 84, 116), ('N-No, I must not!', 'What am I', 'thinking about', 'right now?!')):
+        draw.text((240, y), text, font=font, fill=255)
+    neighbor = Image.new('L', (200, 70))
+    ImageDraw.Draw(neighbor).text((0, 0), 'SHAKE', font=ImageFont.truetype(str(FONT), 48), fill=255)
+    neighbor = neighbor.rotate(26, expand=True)
+    layer.paste(neighbor, (0, 80), neighbor)
+    angle, _ = speech_angle(np.array(layer))
+    assert abs(angle) < 3
+
+
+def test_short_slanted_speech_with_tall_capitals_keeps_rotation():
+    """Семь сопоставимых букв достаточны, даже если прописные выше строки."""
+    from src.components.adaptive_text import speech_angle
+    layer = Image.new('L', (500, 180))
+    draw = ImageDraw.Draw(layer)
+    for i in range(7):
+        draw.rectangle((30+i*45, 80, 43+i*45, 109), fill=255)
+    for i in range(3):
+        draw.rectangle((350+i*45, 50, 363+i*45, 109), fill=255)
+    angle, _ = speech_angle(np.array(layer.rotate(12, expand=True)))
+    assert abs(angle-12) < 2
+
+
+def test_coloured_caption_keeps_two_slanted_rows_and_balloon_mask():
+    """Цветная карточка использует строки букв, сохраняя прежний путь очистки."""
+    from src.config import Config
+    from src.page_pipeline import PagePipeline
+
+    class IdentityPainter:
+        def inpaint(self, image, mask):
+            return image
+
+    canvas = Image.new('RGBA', (640, 260), (65, 60, 75, 255))
+    layer = Image.new('RGBA', canvas.size)
+    draw = ImageDraw.Draw(layer)
+    font = ImageFont.truetype(str(FONT), 32)
+    for y, text in [(65, 'FIRST COLOURED LINE'), (135, 'SECOND COLOURED LINE')]:
+        draw.text((60, y), text, font=font, fill='white', stroke_width=3, stroke_fill=(30, 200, 210))
+    image = Image.alpha_composite(canvas, layer.rotate(-11, resample=Image.BICUBIC)).convert('RGB')
+    region = TextRegion(1, (25, 25, 590, 210), text='FIRST COLOURED LINE SECOND COLOURED LINE',
+                        translation='Первая цветная строка Вторая цветная строка',
+                        block_type='dialogue', bubble_bbox=(10, 10, 620, 240))
+    pipeline = PagePipeline(Config(layout_long_side=0, ocr_backend='rapid'), inpainter=IdentityPainter())
+    mask, _ = pipeline.clean(image, [region])
+    assert np.count_nonzero(mask) > 100
+    assert region.auto_layout['kind'] == 'free'
+    assert region.auto_layout['mask_kind'] == 'bubble'
+    assert len(region.auto_layout['source_lines']) == 2
+    assert abs(region.style.rotation + 11) < 2
+    assert TextRegion.from_dict(region.to_dict()).auto_layout == region.auto_layout
+
+
+def test_unbound_slanted_speech_cleans_each_large_word():
+    """Оболочка строк не обрезает отдельные крупные буквы наклонной речи."""
+    from src.components.adaptive_text import source_ink
+    size = (780, 360)
+    image = Image.new('RGB', size, 'white')
+    ImageDraw.Draw(image).ellipse((10, 5, 770, 350), outline='black', width=3)
+    font = ImageFont.truetype(str(FONT), 60)
+    words = []
+    for text, xy in [('LOOK', (100, 70)), ('WHAT', (365, 70)), ('I HAVE', (100, 155)), ('FOR YOU!', (365, 155))]:
+        layer = Image.new('L', size)
+        ImageDraw.Draw(layer).text(xy, text, font=font, fill=255, stroke_width=1)
+        layer = layer.rotate(9, resample=Image.BICUBIC, center=(390, 180))
+        words.append(np.asarray(layer) > 220)
+        image.paste('black', mask=layer)
+    region = TextRegion(1, (60, 20, 640, 270), text='LOOK WHAT I HAVE FOR YOU!',
+                        translation='СМОТРИ, ЧТО У МЕНЯ ДЛЯ ТЕБЯ!',
+                        block_type='dialogue', class_name='text_bubble')
+    prepare_regions(image, [region])
+    _, ink, (a, b, c, d) = source_ink(image, region)
+    empty = np.zeros((size[1], size[0]), np.uint8)
+    ordinary, free = adaptive_masks(image, [region], empty, empty.copy())
+    for word in words:
+        assert np.mean(ink[word[b:d, a:c]] > 0) >= .99
+        assert np.mean(np.maximum(ordinary, free)[word] > 0) >= .99
+
+
+def test_speech_row_height_ignores_many_small_texture_components():
+    """Много мелких пятен не обрезают крайние буквы подтверждённых строк."""
+    from src.components.adaptive_text import _supported_speech_rows
+    layer = Image.new('L', (650, 260))
+    draw = ImageDraw.Draw(layer)
+    font = ImageFont.truetype(str(FONT), 54)
+    draw.text((190, 60), 'LOOK WHAT', font=font, fill=255)
+    draw.text((190, 150), 'FOR YOU!', font=font, fill=255)
+    layer = layer.rotate(9, resample=Image.BICUBIC, center=(325, 130))
+    letters = np.asarray(layer) > 220
+    ink = np.array(layer)
+    for y in range(0, 55, 8):
+        for x in range(0, 170, 8):
+            ink[y:y+5, x:x+3] = 255
+    filtered = _supported_speech_rows(ink)
+    assert np.mean(filtered[letters] > 0) >= .99

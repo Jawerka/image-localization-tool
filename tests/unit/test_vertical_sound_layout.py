@@ -100,7 +100,7 @@ def test_vertical_balloon_respects_taper_and_outline():
 
 def test_fallback_core_is_bounded_and_retained_when_source_exceeds_balloon():
     from PIL import ImageDraw
-    from src.components.adaptive_text import prepare_regions,geometry_area
+    from src.components.adaptive_text import geometry_area
     image=Image.new('RGB',(260,280),(80,80,80))
     paint=ImageDraw.Draw(image)
     paint.rectangle((30,20,130,260),fill='white')

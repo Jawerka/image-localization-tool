@@ -72,6 +72,25 @@ def balloon_body(mask, region):
     return result
 
 
+def bbox_ellipse_layout_area(region, fallback):
+    """Вписанный в ``bubble_bbox`` эллипс только для вёрстки, не для ретуши."""
+    if region.bubble_bbox is None:
+        return fallback
+    bx, by, bw, bh = (int(v) for v in region.bubble_bbox)
+    if bw < 4 or bh < 4:
+        return fallback
+    result = np.zeros_like(fallback)
+    cx = bx + bw / 2.0
+    cy = by + bh / 2.0
+    axes = (max(1, bw // 2), max(1, bh // 2))
+    cv2.ellipse(result, (int(round(cx)), int(round(cy))), axes, 0, 0, 360, 255, -1)
+    if not covers_source(result, region):
+        return fallback
+    if covers_source(fallback, region) and np.count_nonzero(result) <= np.count_nonzero(fallback) * 1.08:
+        return fallback
+    return result
+
+
 def colour_layout_area(image, region, fallback):
     """Уточнить цветной полупрозрачный баллон без изменения маски ретуши."""
     from src.components.bubble_contour import balloon_seed
@@ -123,7 +142,8 @@ def _region_centroid(region):
 def _neighbour_hit_mask(shape, other):
     """AABB раскладки соседа: облачко, иначе текстовый бокс (inferred)."""
     hit = np.zeros(shape[:2], np.uint8)
-    box = other.bubble_bbox or other.bbox
+    geometry = other.auto_layout or {}
+    box = geometry.get('ink_bbox', other.bbox) if geometry.get('readable_caption') else other.bubble_bbox or other.bbox
     x, y, w, h = (int(v) for v in box)
     y0, y1 = max(0, y), min(hit.shape[0], y + h)
     x0, x1 = max(0, x), min(hit.shape[1], x + w)
@@ -156,13 +176,16 @@ def separate_neighbour_bubbles(mask, region, regions):
         return mask
     result = mask.copy()
     x, y, w, h = region.bbox
-    own_box = region.bubble_bbox
+    own_box = ((region.auto_layout or {}).get('ink_bbox')
+               if (region.auto_layout or {}).get('readable_caption') else region.bubble_bbox)
     for other in regions:
         if other.id == region.id or other.document or other.block_type == "sfx" or other.skip or not other.translation.strip():
             continue
-        if own_box is not None and other.bubble_bbox is not None:
+        other_box = ((other.auto_layout or {}).get('ink_bbox')
+                     if (other.auto_layout or {}).get('readable_caption') else other.bubble_bbox)
+        if own_box is not None and other_box is not None:
             bx, by, bw, bh = own_box
-            ox, oy, ow, oh = other.bubble_bbox
+            ox, oy, ow, oh = other_box
             if min(bx + bw, ox + ow) > max(bx, ox) and min(by + bh, oy + oh) > max(by, oy):
                 tx, ty, tw, th = other.bbox
                 # Разделяем только подтверждённый зазор, не режем пересекающийся исходный текст.

@@ -13,6 +13,21 @@ from src.components.typesetter import (
 from src.models import TextRegion
 
 
+def test_caption_neighbors_use_measured_fields_instead_of_shared_balloon_box():
+    """Ошибочная общая рамка карточек не режет свободное поле соседней реплики."""
+    from src.components.bubble_layout import separate_neighbour_bubbles
+    first = TextRegion(1, (40, 40, 200, 40), translation='Первая реплика',
+                       bubble_bbox=(0, 0, 400, 300),
+                       auto_layout=dict(version=1, kind='free', readable_caption=True, ink_bbox=[30, 20, 220, 110]))
+    second = TextRegion(2, (40, 150, 200, 40), translation='Вторая реплика',
+                        bubble_bbox=(0, 0, 400, 300),
+                        auto_layout=dict(version=1, kind='free', readable_caption=True, ink_bbox=[30, 140, 220, 80]))
+    mask = np.zeros((300, 400), np.uint8)
+    mask[20:130, 30:250] = 255
+    result = separate_neighbour_bubbles(mask, first, [first, second])
+    assert np.array_equal(result, mask)
+
+
 def test_translucent_colour_layout_crosses_background_panel():
     from src.components.bubble_layout import colour_layout_area
 
@@ -202,3 +217,52 @@ def test_separated_tails_do_not_form_a_wide_line():
     spans = shape_row_spans(mask)
     assert spans[5] == (10, 89)
     assert spans[15][1] - spans[15][0] == 2
+
+
+def test_translucent_window_oval_centers_translation_in_ellipse():
+    from src.components.adaptive_text import prepare_regions
+    from src.components.bubble_layout import (
+        bbox_ellipse_layout_area, colour_layout_area, covers_source, light_layout_area,
+    )
+    from src.components.typesetter import Typesetter, interior_mask
+    from src.models import TextStyle
+
+    height, width = 220, 320
+    xs = np.linspace(175, 245, width, dtype=np.float32)
+    ys = np.linspace(165, 235, height, dtype=np.float32)
+    glow = (xs[None, :] + ys[:, None]) / 2
+    image = np.stack([glow, glow * 0.97, glow * 0.88], axis=-1)
+    image = np.clip(image + (np.indices((height, width))[0] % 9)[:, :, None] * 6, 0, 255).astype(np.uint8)
+    oval = np.zeros((height, width), np.uint8)
+    center, axes = (160, 110), (95, 58)
+    cv2.ellipse(oval, center, axes, 0, 0, 360, 255, -1)
+    cyan = np.array([88, 205, 215], np.float32)
+    blended = image.astype(np.float32)
+    blended[oval > 0] = 0.2 * cyan + 0.8 * blended[oval > 0]
+    image = blended.astype(np.uint8)
+    cv2.putText(image, 'HELLO', (112, 118), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (15, 15, 15), 2)
+    region = TextRegion(
+        1, (108, 90, 105, 40), text='HELLO', translation='Привет всем вокруг',
+        bubble_bbox=(62, 50, 196, 120), block_type='dialogue',
+        style=TextStyle(stroke_mode='none'),
+    )
+    letter_box = np.zeros((height, width), np.uint8)
+    x, y, w, h = region.bbox
+    letter_box[y:y + h, x:x + w] = 255
+    assert np.array_equal(colour_layout_area(image, region, letter_box), letter_box)
+    assert np.array_equal(light_layout_area(image, region, letter_box), letter_box)
+    oval_area = bbox_ellipse_layout_area(region, letter_box)
+    assert covers_source(oval_area, region)
+    assert np.count_nonzero(oval_area) > np.count_nonzero(letter_box) * 1.5
+    page = Image.fromarray(image)
+    prepare_regions(page, [region])
+    area = interior_mask(image, region)
+    assert np.mean(area[oval > 0] > 0) > 0.85
+    result, overflow = Typesetter(min_font_size=10, max_font_size=42).render(page, [region])
+    assert not overflow
+    ink = np.asarray(result).min(axis=2) < 80
+    ys, xs = np.where(ink)
+    assert len(xs)
+    assert abs(float(xs.mean()) - center[0]) <= 18
+    assert abs(float(ys.mean()) - center[1]) <= 16
+    assert region.style.rotation == 0

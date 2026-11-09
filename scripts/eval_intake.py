@@ -32,7 +32,7 @@ def is_companion_mask(path: Path) -> bool:
 
 
 def list_intake_pages(root: Path) -> list[Path]:
-    """Исходники в корне и sound-ref без эталонов, html и миниатюр-дублей."""
+    """Исходники в корне и sound-ref без эталонов и html; разные имена не объединяются."""
     root = Path(root)
     if not root.is_dir():
         return []
@@ -46,17 +46,8 @@ def list_intake_pages(root: Path) -> list[Path]:
         if is_companion_mask(path):
             continue
         found.append(path)
-    by_key: dict[tuple[Path, str], list[Path]] = {}
-    for path in found:
-        by_key.setdefault((path.parent, path.stem), []).append(path)
-    pages: list[Path] = []
-    for files in by_key.values():
-        if len(files) == 1:
-            pages.append(files[0])
-            continue
-        pngs = [item for item in files if item.suffix.lower() == ".png"]
-        pages.append(max(pngs or files, key=lambda item: item.stat().st_size))
-    pages.sort(key=lambda path: natural_sort_key(path.relative_to(root).as_posix()))
+    # Имя исходника, включая расширение, является независимой единицей приёмки.
+    pages = sorted(found, key=lambda path: natural_sort_key(path.relative_to(root).as_posix()))
     return pages
 
 
@@ -69,10 +60,7 @@ def annotation_index(root: Path) -> dict[Path, tuple[Path, Path | None]]:
 
 
 def _folder_name(path: Path, root: Path) -> str:
-    relative = path.relative_to(root)
-    if relative.parent == Path("."):
-        return path.stem
-    return str(relative.with_suffix("")).replace("\\", "/")
+    return path.relative_to(root).as_posix()
 
 
 def _min_font(regions) -> int | None:
@@ -133,7 +121,7 @@ def _write_html(out: Path, pages: list[dict]) -> None:
     toc = []
     articles = []
     for page in pages:
-        stem = page["stem"]
+        stem = page.get("file") or page["folder"]
         folder = page["folder"]
         eval_row = page.get("eval") or {}
         recall = eval_row.get("ink_recall")
@@ -321,6 +309,7 @@ def process_page(
         "sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
         "has_mask": annotation is not None,
         "status": "pending",
+        "execution_status": "success",
         "engines": {"ocr": result.ocr_engine, "translator": result.translator_engine},
         "ocr_engine": result.ocr_engine,
         "translator_engine": result.translator_engine,
@@ -394,6 +383,7 @@ def main() -> int:
                 "sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
                 "has_mask": source.resolve() in annotations,
                 "status": "pending",
+                "execution_status": "failed",
                 "error": str(exc),
                 "eval": None,
                 "notes": "прогон не завершился",
@@ -414,6 +404,8 @@ def main() -> int:
                     f"  {note['ocr_engine']}/{note['translator_engine']} без эталона {note['seconds']}s",
                     flush=True,
                 )
+        # Решение человека остаётся pending независимо от результата выполнения.
+        note["execution_status"] = "failed" if "error" in note else "success"
         report.append(note)
         (out / "visual-notes.json").write_text(
             json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -426,6 +418,7 @@ def main() -> int:
             "has_mask": page.get("has_mask"),
             "added": date.today().isoformat(),
             "status": "pending",
+            "execution_status": page["execution_status"],
             "engines": page.get("engines") or {},
         }
         for page in report
@@ -435,8 +428,16 @@ def main() -> int:
     )
     (out / "eval.json").write_text(json.dumps(eval_rows, ensure_ascii=False, indent=2), encoding="utf-8")
     _write_html(out, report)
-    print(f"Готово: {out / 'index.html'}", flush=True)
-    return 0
+    failed = sum("error" in page for page in report)
+    exit_code = 0 if not failed else (2 if failed == len(report) else 1)
+    summary = {"total": len(report), "succeeded": len(report) - failed,
+               "failed": failed, "exit_code": exit_code,
+               "status": "success" if not failed else ("failed" if exit_code == 2 else "partial")}
+    (out / "summary.json").write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    print(f"Готово: {out / 'index.html'}; ошибок: {failed}; код: {exit_code}", flush=True)
+    return exit_code
 
 
 if __name__ == "__main__":
