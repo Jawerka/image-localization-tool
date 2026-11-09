@@ -13,7 +13,6 @@
   let hoverTarget = null;
   let hoverCandidate = null;
   let hoverTimer = 0;
-  let hideTimer = 0;
   let hoverPoint = { x: 0, y: 0 };
   let pointerDown = false;
   let selecting = false;
@@ -154,35 +153,13 @@
   }
 
   function resultAt(x, y) {
-    const stack = document.elementsFromPoint(x, y);
-    const ui = document.querySelector("[data-ilt-hover]");
-    for (let i = 0; i < stack.length; i += 1) {
-      const node = stack[i];
-      if (ui && (node === ui || ui.contains(node))) continue;
-      if (hoverUi()?.has?.(node)) return node;
-    }
-    return null;
+    const node = hoverUi()?.pageTargetAt?.(x, y);
+    return node && hoverUi()?.has?.(node) ? node : null;
   }
 
   function imageAt(x, y) {
-    const stack = document.elementsFromPoint(x, y);
-    const ui = document.querySelector('[data-ilt-hover]');
-    for (let i = 0; i < stack.length; i += 1) {
-      const node = stack[i];
-      if (ui && (node === ui || ui.contains(node))) continue;
-      if (node instanceof HTMLImageElement) return node;
-    }
-    return null;
-  }
-
-  function scheduleHide() {
-    if (hideTimer) clearTimeout(hideTimer);
-    hideTimer = setTimeout(() => {
-      hideTimer = 0;
-      if (hoverUi()?.pointerOnButton?.()) return;
-      hoverTarget = null;
-      hoverUi()?.hidePreview?.();
-    }, 300);
+    const node = hoverUi()?.pageTargetAt?.(x, y);
+    return node instanceof HTMLImageElement ? node : null;
   }
 
   function processHoverPointer() {
@@ -197,10 +174,12 @@
       hoverCandidate = null;
       if (hoverTimer) clearTimeout(hoverTimer);
       hoverTimer = 0;
-      if (hoverTarget) scheduleHide();
+      if (hoverTarget) {
+        hoverTarget = null;
+        hoverUi()?.hidePreview?.();
+      }
       return;
     }
-    if (hideTimer) { clearTimeout(hideTimer); hideTimer = 0; }
     if (img === hoverTarget || img === hoverCandidate) {
       if (known) hoverUi()?.preview?.(img);
       return;
@@ -210,6 +189,10 @@
     hoverTimer = setTimeout(() => {
       hoverTimer = 0;
       if (!hoverAllowed || blockedGesture() || hoverCandidate !== img || !img.isConnected) return;
+      if ((imageAt(hoverPoint.x, hoverPoint.y) || resultAt(hoverPoint.x, hoverPoint.y)) !== img) {
+        hoverCandidate = null;
+        return;
+      }
       if (!hoverUi()?.has?.(img) && !eligibleImage(img)) return;
       hoverTarget = img;
       hoverUi()?.preview?.(img);
@@ -217,9 +200,11 @@
   }
 
   let hoverPointerFrame = 0;
+  let hoverPointerSeen = false;
 
   function onHoverMove(event) {
     if (!event.isTrusted) return;
+    hoverPointerSeen = true;
     hoverPoint = { x: event.clientX, y: event.clientY };
     if (hoverPointerFrame) return;
     hoverPointerFrame = requestAnimationFrame(() => {
@@ -328,11 +313,23 @@
         try { ext.runtime.sendMessage({ type: "context-target", hasTranslation: saved?.ok === true }); } catch (_) {}
       }, true);
       window.addEventListener("pointermove", onHoverMove, true);
+      // Popup может открыться и закрыться без движения курсора.
+      setInterval(() => {
+        if (hoverAllowed && !selecting && hoverPointerSeen) processHoverPointer();
+      }, 100);
       window.addEventListener("pointerdown", onHoverDown, true);
       window.addEventListener("pointerup", onHoverUp, true);
-      window.addEventListener("blur", () => hoverUi()?.hidePreview?.());
-      window.addEventListener("pagehide", () => hoverUi()?.hidePreview?.());
-      document.addEventListener("mouseleave", () => hoverUi()?.hidePreview?.());
+      const leavePage = () => {
+        hoverPointerSeen = false;
+        hoverCandidate = null;
+        hoverTarget = null;
+        if (hoverTimer) clearTimeout(hoverTimer);
+        hoverTimer = 0;
+        hoverUi()?.hidePreview?.();
+      };
+      window.addEventListener("blur", leavePage);
+      window.addEventListener("pagehide", leavePage);
+      document.addEventListener("mouseleave", leavePage);
       if (ext.storage?.onChanged) {
         ext.storage.onChanged.addListener((changes, area) => {
           if (area === "local" && (changes.hoverDisabledSites || changes.buttonEnabled || changes.hoverDelayMs || changes.hoverMinLong)) readHoverAllowed();

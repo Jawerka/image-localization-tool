@@ -1811,6 +1811,14 @@ class Typesetter:
                     )
                     if shrunk and shrunk_font is not None:
                         placed, chosen_font = shrunk, shrunk_font
+            if (raster_fit is not None and raster_fit.get('caption') and frozen is None
+                    and override == 0 and not region.manual and not region.edited):
+                from src.components.slanted_layout import constrain_caption_fit
+                raster_fit = constrain_caption_fit(
+                    raster_fit, region.auto_layout, region.style.rotation,
+                    free_outline, self.min_font_size, _LAYER_SCALE,
+                )
+                chosen_font = _load_font(font_path, raster_fit['font_size'])
             before_alpha = np.array(overlay)[..., 3].copy()
             size = int(getattr(chosen_font, "size", self.min_font_size))
             region.style.font_size = size

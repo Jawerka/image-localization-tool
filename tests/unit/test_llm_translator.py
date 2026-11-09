@@ -213,3 +213,89 @@ def test_locked_translation_not_overwritten_by_llm():
     LlmTranslator(client).translate(Image.new("RGB", (8, 8)), regions, "en", "ru")
     assert regions[0].translation == "Ручной"
     assert regions[1].translation == "Новый"
+
+
+def test_proofreading_changes_only_requested_automatic_translations():
+    client = _ScriptedClient([{'items': [
+        {'id': 1, 'translation': 'Она пришла домой.'},
+        {'id': 2, 'translation': 'Нельзя менять'},
+        {'id': 3, 'translation': 'Нельзя менять'},
+        {'id': 99, 'translation': 'Лишний'},
+    ]}])
+    regions = [
+        TextRegion(1, (0, 0, 40, 20), text='She came home.', translation='Она пришёл домой.', block_type='dialogue'),
+        TextRegion(2, (0, 30, 40, 20), text='Hello', translation='Ручной перевод', block_type='dialogue', translation_locked=True),
+        TextRegion(3, (0, 60, 40, 20), text='End', translation='Конец', block_type='narration'),
+    ]
+    LlmTranslator(client).proofread(regions, 'ru', region_ids={1, 2})
+    assert [r.translation for r in regions] == ['Она пришла домой.', 'Ручной перевод', 'Конец']
+
+
+def test_proofreading_partial_or_foreign_response_keeps_good_draft():
+    client = _ScriptedClient([{'items': [
+        {'id': 1, 'translation': ''}, {'id': 2, 'translation': 'A completely foreign sentence remains here.'},
+    ]}])
+    regions = [TextRegion(i, (0, i*20, 40, 20), text='Hello', translation='Привет', block_type='dialogue') for i in (1, 2, 3)]
+    LlmTranslator(client).proofread(regions, 'ru')
+    assert all(r.translation == 'Привет' for r in regions)
+
+
+def test_pipeline_proofreading_failure_does_not_trigger_argos_fallback():
+    from src.config import Config
+    from src.page_pipeline import PagePipeline
+
+    class Client:
+        def chat_json(self, **kwargs):
+            if kwargs['schema_name'] == 'translation_proofread':
+                raise RuntimeError('Недоступна вычитка')
+            return {'items': [{'id': 1, 'translation': 'Привет', 'speaker': '', 'speaker_gender': 'unknown'}]}
+
+    regions = [TextRegion(1, (0, 0, 40, 20), text='Hello', block_type='dialogue')]
+    translator = LlmTranslator(Client())
+    pipeline = PagePipeline(Config(), translator=translator)
+    warnings = []
+    result = pipeline._translate(Image.new('RGB', (80, 80)), regions, 'en', 'ru', warnings)
+    assert pipeline.translator is translator
+    assert result[0].translation == 'Привет'
+    assert any('Вычитка' in warning for warning in warnings)
+
+
+def test_proofreading_reviews_each_block_independently_with_shared_context():
+    client = _ScriptedClient([
+        {'items': [{'id': 1, 'translation': 'Она пришла домой.'}]},
+        {'items': [{'id': 2, 'translation': 'Сегодня холодно.'}]},
+    ])
+    regions = [
+        TextRegion(1, (0, 0, 40, 20), text='She came home.', translation='Она пришёл домой.', block_type='dialogue'),
+        TextRegion(2, (0, 30, 40, 20), text='It is cold today.', translation='Сегодня холодные.', block_type='dialogue'),
+    ]
+    LlmTranslator(client).proofread(regions, 'ru')
+    assert client.calls == 2
+    assert [r.translation for r in regions] == ['Она пришла домой.', 'Сегодня холодно.']
+
+
+def test_cancel_during_proofreading_stops_requests_without_argos():
+    import pytest
+    from src.config import Config
+    from src.errors import PipelineCancelled
+    from src.page_pipeline import PagePipeline
+
+    class Client:
+        cancelled = False
+        calls = 0
+        def chat_json(self, **kwargs):
+            self.calls += 1
+            if kwargs['schema_name'] == 'translation_proofread':
+                self.cancelled = True
+            return {'items': [{'id': 1, 'translation': 'Привет'}, {'id': 2, 'translation': 'Конец'}]}
+
+    client = Client()
+    translator = LlmTranslator(client)
+    pipeline = PagePipeline(Config(), translator=translator)
+    regions = [TextRegion(i, (0, i*20, 40, 20), text=text, block_type='dialogue')
+               for i, text in [(1, 'Hello'), (2, 'End')]]
+    with pytest.raises(PipelineCancelled):
+        pipeline._translate(Image.new('RGB', (80, 80)), regions, 'en', 'ru', [],
+                            cancel_check=lambda: client.cancelled)
+    assert pipeline.translator is translator
+    assert client.calls == 2

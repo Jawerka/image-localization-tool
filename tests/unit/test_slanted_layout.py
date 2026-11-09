@@ -180,3 +180,22 @@ def test_frozen_source_rows_apply_enlarged_raster():
     assert result.size == (layer.width*2, layer.height*2)
     assert actual == enlarged
     assert np.count_nonzero(np.asarray(result.getchannel('A')) > 128) > 3 * np.count_nonzero(np.asarray(layer.getchannel('A')) > 128)
+
+
+@pytest.mark.parametrize('angle', [0, 15, -12])
+def test_caption_scale_keeps_outline_inside_its_field(angle):
+    """Общее увеличение не выталкивает уже подобранную карточку за её поле."""
+    image = Image.new('RGB', (700, 300), (90, 65, 55))
+    region = TextRegion(1, (100, 90, 450, 80), translation='ДЛИННАЯ РЕПЛИКА КОТОРУЮ НУЖНО ПОЛНОСТЬЮ ПРОЧИТАТЬ',
+        block_type='dialogue', style=TextStyle(font_id='Heroika-Regular', rotation=angle),
+        auto_layout=dict(version=1, kind='free', readable_caption=True,
+            source_bbox=[100, 90, 450, 80], ink_bbox=[100, 90, 450, 80],
+            source_lines=[[105, 95, 440, 30], [120, 135, 410, 30]], outline_px=3))
+    setter = Typesetter(min_font_size=10, font_scale=1.1)
+    result, overflow = setter.render(image, [region])
+    assert not overflow
+    changed = np.any(np.asarray(result) != np.asarray(image), axis=2)
+    ys, xs = np.where(changed)
+    assert xs.min() >= 100 and xs.max() < 550
+    assert ys.min() >= 90 and ys.max() < 170
+    assert setter._last_layouts[1]['raster_fit']['text'].replace('\n', ' ') == region.translation

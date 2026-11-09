@@ -13,6 +13,17 @@ from src.components.retouch_ink import boundary_ink, confirmed_light_ink, smooth
 from src.components.text_segmenter import _outlined_text_mask, segment_regions
 
 
+def _unexplained_light_ink(crop):
+    """Белая обводка тёмных букв не является самостоятельным светлым текстом."""
+    confirmed, inverse = confirmed_light_ink(crop)
+    outlined = _outlined_text_mask(crop)
+    if confirmed is not None and outlined is not None:
+        white = (np.min(crop, axis=2) >= 210) & (np.ptp(crop, axis=2) < 45)
+        if np.count_nonzero(white & (outlined == 0)) <= np.count_nonzero(white)*.05:
+            return None, False
+    return confirmed, inverse
+
+
 def is_balloon(region):
     """Роль речи важна и при отсутствии привязанного бокса облачка."""
     return (not region.document and region.block_type != 'sfx' and
@@ -245,7 +256,7 @@ def adaptive_masks(image, regions, ordinary, free, grow_px=0):
         boundary = None
         if meta.get('kind') == 'free' or region.bubble_bbox is None:
             crop = np.asarray(image.crop((a, b, c, d)))
-            confirmed, inverse_outline = confirmed_light_ink(crop)
+            confirmed, inverse_outline = _unexplained_light_ink(crop)
             if confirmed is not None and inverse_outline:
                 ink = np.maximum(ink, smooth_line_mask(crop, confirmed))
                 # Расширение не пересчитывает остальные строки и их отступ:
@@ -410,7 +421,7 @@ def source_ink(image, region):
         outlined = _outlined_text_mask(np.asarray(crop))
         if outlined is not None:
             ink = np.maximum(ink, outlined)
-        confirmed, _ = confirmed_light_ink(np.asarray(crop))
+        confirmed, _ = _unexplained_light_ink(np.asarray(crop))
         if confirmed is not None:
             ink = np.maximum(ink, confirmed)
             region._retouch_preserve_background = True

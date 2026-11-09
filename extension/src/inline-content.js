@@ -857,7 +857,9 @@
   }
 
   function pointerOnButton() {
+    const target = pageTargetAt(pointer.x, pointer.y);
     for (const record of records.values()) {
+      if (target !== record.node && !record.node.contains(target)) continue;
       const visible = !record.button.hidden && !record.button.classList.contains("off");
       const overButton = visible && nearBox(record.button, 0);
       const overPanel = record.panelOpen && nearBox(record.panel, PANEL_ZONE);
@@ -879,12 +881,14 @@
   }
 
   function underPointer() {
-    const stack = document.elementsFromPoint(pointer.x, pointer.y);
-    for (let i = 0; i < stack.length; i += 1) {
-      const node = stack[i];
-      if (node instanceof HTMLImageElement) return node;
-    }
-    return null;
+    const node = pageTargetAt(pointer.x, pointer.y);
+    return node instanceof HTMLImageElement ? node : null;
+  }
+
+  // Пропускаем только собственные поверхности, а не перекрывающие слои сайта.
+  function pageTargetAt(x, y) {
+    return document.elementsFromPoint(x, y).find(node =>
+      !node.closest?.('[data-ilt-hover]')) || null;
   }
 
   function setCompare(on) {
@@ -968,6 +972,7 @@
     hidePreview: hidePreview,
     pointerOnButton: pointerOnButton,
     underPointer: underPointer,
+    pageTargetAt: pageTargetAt,
     setCompare: setCompare,
     count: count,
     showOriginals: showOriginals,

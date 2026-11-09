@@ -302,3 +302,36 @@ def test_two_shade_outline_on_dark_texture_covers_shadow_glyphs():
     assert np.mean(found[expected_right > 0] > 0) >= .85
     assert not np.any(found[140:178, 40:140])
     assert np.mean(found[:, :8] > 0) < .05
+
+
+def test_faded_light_letters_include_dark_shell_without_border_art():
+    """Полупрозрачные ядра подтверждаются без белого порога и рамки рисунка."""
+    rgb, expected = caption((50, 55, 60), outline=True)
+    background = np.full_like(rgb, (50, 55, 60))
+    rgb = np.round(rgb.astype(float)*.55 + background*.45).astype(np.uint8)
+    cv2.line(rgb, (0, 8), (319, 8), (160, 160, 160), 2)
+    found, outlined = confirmed_light_ink(rgb)
+    assert found is not None and outlined
+    assert np.mean(found[expected > 0] > 0) >= .98
+    assert not np.any(found[:12])
+
+
+def test_dark_texture_without_letter_cores_is_not_faded_text():
+    rgb = np.full((135, 320, 3), (65, 55, 50), np.uint8)
+    for x in range(0, 320, 35):
+        cv2.line(rgb, (x, 0), (x+30, 134), (160, 150, 140), 3)
+    found, _ = confirmed_light_ink(rgb)
+    assert found is None
+
+
+def test_small_outlined_speech_cleans_the_whole_dark_edge():
+    """Мелкая реплика сохраняет запас под обводку независимо от оценки кегля."""
+    rgb = np.full((65, 210, 3), (85, 100, 65), np.uint8)
+    expected = np.zeros(rgb.shape[:2], np.uint8)
+    cv2.putText(rgb, 'HEHE', (15, 40), cv2.FONT_HERSHEY_SIMPLEX, .65, (20, 25, 15), 7)
+    cv2.putText(expected, 'HEHE', (15, 40), cv2.FONT_HERSHEY_SIMPLEX, .65, 255, 7)
+    cv2.putText(rgb, 'HEHE', (15, 40), cv2.FONT_HERSHEY_SIMPLEX, .65, (255, 255, 255), 2)
+    region = TextRegion(1, (8, 15, 100, 35), text='HEHE', translation='Хехе',
+                        block_type='dialogue', bubble_bbox=(8, 15, 100, 35))
+    mask = segment_region(rgb, region)
+    assert np.mean(mask[expected > 0] > 0) >= .99

@@ -388,6 +388,44 @@ def test_manual_selection_only_top_frame(safe_extension):
     page.locator("[data-ilt-selector]").wait_for(state="detached")
 
 
+@pytest.mark.parametrize("moment", ["before", "pending", "visible", "button"])
+def test_hover_popup_occludes_image(safe_extension, moment):
+    context, _, base, _ = safe_extension
+    page = context.new_page()
+    page.goto(base + "/page.html")
+    page.wait_for_function("document.querySelector('#pic').complete")
+    page.wait_for_timeout(300)
+    if moment != "before":
+        page.locator("#pic").hover()
+        if moment in ("visible", "button"):
+            page.locator("[data-ilt-hover] button.face").wait_for(state="visible")
+        if moment == "button":
+            page.locator("[data-ilt-hover] button.face").hover()
+    page.evaluate("""() => {
+      const cover=document.createElement('div'); cover.id='popup';
+      cover.style.cssText='position:absolute;inset:0;background:#ddd;z-index:100';
+      document.querySelector('#contain').append(cover);
+    }""")
+    if moment == "before":
+        page.locator("#popup").hover()
+    page.wait_for_timeout(600)
+    assert page.locator("[data-ilt-hover]").count() == 0
+    # Убираем popup без движения мыши: наведение восстанавливается.
+    page.locator("#popup").evaluate("e=>e.remove()")
+    page.locator("[data-ilt-hover] button.face").wait_for(state="visible")
+
+
+def test_hover_delay_does_not_outlive_page_pointer(safe_extension):
+    context, _, base, _ = safe_extension
+    page = context.new_page()
+    page.goto(base + "/page.html")
+    page.wait_for_function("document.querySelector('#pic').complete")
+    page.locator("#pic").hover()
+    page.mouse.move(-10, -10)
+    page.wait_for_timeout(600)
+    assert page.locator("[data-ilt-hover]").count() == 0
+
+
 def test_hover_button_inside_image_without_layout_shift(safe_extension):
     context, _, base, _ = safe_extension
     page = context.new_page()
@@ -537,6 +575,10 @@ def test_inline_hover_overlay_keeps_translation(safe_extension):
     page.wait_for_timeout(80)
     assert page.locator("#pic").evaluate("e=>e.currentSrc.startsWith('blob:')")
     assert page.locator("[data-ilt-result]").count() == 1
+    page.wait_for_function("""() => {
+      const face=document.querySelector('[data-ilt-result]').shadowRoot.querySelector('button.face');
+      return getComputedStyle(face).opacity === '0';
+    }""")
 
 
 def test_inline_pushstate_keeps_translation(safe_extension):

@@ -25,6 +25,7 @@ def confirmed_light_ink(crop: np.ndarray) -> tuple[np.ndarray | None, bool]:
     if float(np.mean(white)) > .5:
         return (coloured, True) if coloured is not None else (None, False)
     dark_panel = float(np.percentile(gray, 50)) < 120 and float(np.percentile(gray, 70)) < 170
+    faded = _faded_light_ink(crop, gray) if dark_panel else None
     if not dark_panel:
         enclosed = _inverse_outline(gray, white)
         if enclosed is not None:
@@ -60,15 +61,38 @@ def confirmed_light_ink(crop: np.ndarray) -> tuple[np.ndarray | None, bool]:
             # по тёмным пикселям допускается только для подтверждённой оболочки.
             if np.mean(surround < 100) >= .60:
                 outlined_seeds[y:y+h, x:x+w][body] = 255
+        else:
+            # На тёмной панели одной абсолютной темноты недостаточно:
+            # обводка должна быть темнее самого фона за узким кольцом.
+            ya, xa = max(0, y-6), max(0, x-6)
+            yb, xb = min(height, y+h+6), min(width, x+w+6)
+            local = (labels[ya:yb, xa:xb] == index).astype(np.uint8)
+            near = cv2.dilate(local, np.ones((5, 5), np.uint8)) > 0
+            far = cv2.dilate(local, np.ones((13, 13), np.uint8)) > 0
+            ring = near & (local == 0)
+            context = far & ~near
+            patch = gray[ya:yb, xa:xb]
+            if np.any(context) and np.any(ring):
+                if np.mean(patch[ring] < float(np.median(patch[context]))-12) >= .30:
+                    outlined_seeds[y:y+h, x:x+w][body] = 255
         seeds[y:y+h, x:x+w][body] = 255
         accepted += 1
         sizes.append(min(w, h))
     if accepted < 2 or np.mean(seeds > 0) > .35:
-        return (coloured, True) if coloured is not None else (None, False)
-    if dark_panel or not np.any(outlined_seeds):
+        extra = faded if coloured is None else coloured if faded is None else np.maximum(faded, coloured)
+        return (extra, True) if extra is not None else (None, False)
+    if not np.any(outlined_seeds):
+        if faded is not None:
+            seeds = np.maximum(seeds, faded)
+            return (np.maximum(seeds, coloured) if coloured is not None else seeds), True
         return (np.maximum(seeds, coloured), True) if coloured is not None else (seeds, False)
     # От белого ядра до внешней границы тёмной обводки. Фон и другие
     # несвязанные чёрные объекты не входят в геодезическое расширение.
+    if dark_panel:
+        # Общая оболочка подтверждена контрастными буквами строки.
+        # На соседней букве фон может совпасть с оттенком края; она должна
+        # получить тот же ограниченный запас, а не оставить контур для LaMa.
+        outlined_seeds = seeds
     reached = outlined_seeds > 0
     dark = gray < 135
     steps = min(10, max(3, round(float(np.median(sizes)) * .65)))
@@ -77,7 +101,48 @@ def confirmed_light_ink(crop: np.ndarray) -> tuple[np.ndarray | None, bool]:
         expanded = (cv2.dilate(reached.astype(np.uint8), kernel) > 0) & dark
         reached |= expanded
     result = np.maximum(seeds, reached.astype(np.uint8) * 255)
+    if faded is not None:
+        result = np.maximum(result, faded)
     return np.maximum(result, coloured) if coloured is not None else result, True
+
+
+def _faded_light_ink(crop: np.ndarray, gray: np.ndarray) -> np.ndarray | None:
+    """Приглушённые светлые буквы подтверждаются локальным контрастом ядра.
+
+    Дополнение предназначено только для тёмных регионов без белых букв.
+    Несколько отдельных ядер должны иметь тёмное окружение; рост оболочки
+    ограничен толщиной штриха, чтобы не уйти по связанному рисунку.
+    """
+    if np.percentile(gray, 99) >= 205:
+        return None
+    size = max(9, min(31, round(min(gray.shape)*.12))) | 1
+    opened = cv2.morphologyEx(gray, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size)))
+    peaks = ((gray.astype(np.int16)-opened >= 16)
+             & (gray >= max(100, float(np.percentile(gray, 95))-25))
+             & (np.ptp(crop, axis=2) < 55))
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(peaks.astype(np.uint8))
+    seeds = np.zeros_like(gray)
+    widths = []
+    for idx in range(1, count):
+        x, y, w, h, area = (int(v) for v in stats[idx])
+        if area < 6 or min(w, h) < 2 or w > gray.shape[1]*.4 or h > gray.shape[0]*.8:
+            continue
+        if x == 0 or y == 0 or x+w == gray.shape[1] or y+h == gray.shape[0]:
+            continue
+        xa, ya = max(0, x-2), max(0, y-2)
+        xb, yb = min(gray.shape[1], x+w+2), min(gray.shape[0], y+h+2)
+        body = (labels[ya:yb, xa:xb] == idx).astype(np.uint8)
+        ring = (cv2.dilate(body, np.ones((5, 5), np.uint8)) > 0) & (body == 0)
+        patch = gray[ya:yb, xa:xb]
+        core = float(np.median(patch[body > 0]))
+        if not np.any(ring) or np.mean(patch[ring] < core-22) < .55:
+            continue
+        seeds[ya:yb, xa:xb][body > 0] = 255
+        widths.append(min(w, h))
+    if len(widths) < 5 or not .008 < np.mean(seeds > 0) < .30:
+        return None
+    radius = max(2, min(8, round(float(np.median(widths))*.45)))
+    return cv2.dilate(seeds, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2*radius+1, 2*radius+1)))
 
 
 def _letter_like_cores(cores: np.ndarray) -> int:

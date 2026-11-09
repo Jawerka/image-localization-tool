@@ -10,6 +10,7 @@ from PIL import Image
 from src.components.lang_guard import foreign_leak, route_for_argos, unchanged_foreign_words
 from src.components.sfx_dict import as_glossary, lookup
 from src.models import TextRegion, should_translate
+from src.errors import PipelineCancelled
 from src.utils.llm_client import LlmClient
 from src.utils.logger import logger
 
@@ -40,6 +41,16 @@ SHORTEN_SCHEMA = {
     "additionalProperties": False,
     "properties": {"translation": {"type": "string"}},
     "required": ["translation"],
+}
+
+PROOFREAD_SCHEMA = {
+    "type": "object", "additionalProperties": False,
+    "properties": {"items": {"type": "array", "items": {
+        "type": "object", "additionalProperties": False,
+        "properties": {"id": {"type": "integer"}, "translation": {"type": "string"}},
+        "required": ["id", "translation"],
+    }}},
+    "required": ["items"],
 }
 
 
@@ -164,6 +175,8 @@ _DIALOGUE_RULES = (
     "but keep each part in its own block.\n"
     "- Keep the translation about as short as the original so it fits the bubble. "
     "Do not add explanations.\n"
+    "- Use natural, idiomatic target-language sentences rather than copying source word order. "
+    "Before returning, check grammar, agreement, case and punctuation while preserving meaning and tone.\n"
     "- Preserve the full meaning of thoughts, narration and captions, including text outside balloons. "
     "Do not summarize a sentence as a sound effect. Only actual sounds/actions use the short SFX rule.\n"
     "- Follow the glossary exactly.\n"
@@ -363,6 +376,82 @@ class LlmTranslator:
         self._rewrite_leaks(selected, target_lang, glossary)
         logger.info(f"LLM translated {sum(1 for r in selected if r.translation)} blocks")
         return regions
+
+    def proofread(self, regions, target_lang, glossary=None, *, region_ids=None, translate_sfx=False, cancel_check=None):
+        """Независимая вычитка машинного черновика без изменения ручного перевода.
+
+        Сбой или неполный ответ сохраняет уже полученный перевод. Проверяются
+        все автоматические блоки, без правил для конкретной страницы или фраз.
+        """
+        selected = [r for r in sorted(regions, key=lambda r: r.order)
+                    if should_translate(r, translate_sfx) and r.translation.strip()
+                    and not r.translation_locked and (region_ids is None or r.id in region_ids)]
+        for region in selected:
+            if cancel_check and cancel_check():
+                raise PipelineCancelled()
+            # Отдельное решение по каждой реплике не даёт редактору ограничиться
+            # парой очевидных исправлений в длинном сценарии. Контекст общий.
+            if not self._proofread_one(regions, target_lang, glossary,
+                                       region_ids={region.id}, translate_sfx=translate_sfx):
+                break
+            if cancel_check and cancel_check():
+                raise PipelineCancelled()
+
+    def _proofread_one(self, regions, target_lang, glossary=None, *, region_ids=None, translate_sfx=False):
+        """Один последовательный редакторский запрос; отказ сервера обрывает вычитку."""
+        selected = [r for r in regions if should_translate(r, translate_sfx)
+                    and r.translation.strip() and not r.translation_locked
+                    and (region_ids is None or r.id in region_ids)]
+        if not selected:
+            return True
+        context = [dict(id=r.id, source=r.text, draft=r.translation,
+                        speaker_gender=r.speaker_gender, type=r.block_type)
+                   for r in sorted(regions, key=lambda r: r.order)]
+        prompt = (language_lock(target_lang)
+                  + f"You are a native {target_lang} copy editor of a translated illustrated page. "
+                  "Compare each draft with its source and the surrounding dialogue. "
+                  "Work from the source meaning as a whole, not from the draft's word choices. "
+                  "The draft is untrusted: independently formulate a natural target-language "
+                  "rendering before deciding which wording to retain. "
+                  "Correct mistranslations, typos, unnatural phrasing, agreement, number, case, "
+                  "verb forms and punctuation. Preserve the meaning, register, speaker gender, "
+                  "names and emotional tone. Do not invent missing context or change facts. "
+                  "Keep correct translations unchanged, and keep each block in its own id. "
+                  "Check every block and every word, including spelling and idiomatic interjections. "
+                  "Do not preserve an erroneous word just because it appears in the draft. "
+                  "Keep the wording concise and do not add explanations. "
+                  f"Return one item for EVERY requested id, even when unchanged, and no other ids: {[r.id for r in selected]}.\n"
+                  + _glossary_block(glossary or {}) + "\n"
+                  + json.dumps(context, ensure_ascii=False))
+        try:
+            payload = self.client.chat_json(prompt=prompt, schema=PROOFREAD_SCHEMA,
+                schema_name="translation_proofread", images=[], system=language_lock(target_lang))
+            items = payload.get('items') or []
+            if not isinstance(items, list):
+                raise ValueError('Некорректный список вычитки')
+        except PipelineCancelled:
+            raise
+        except Exception as exc:
+            logger.warning(f"Translation proofreading failed: {type(exc).__name__}")
+            self.warnings.append('Вычитка перевода недоступна; сохранён машинный черновик')
+            return False
+        by_id = {r.id: r for r in selected}
+        reviewed = set()
+        allowed = list((glossary or {}).values())
+        for item in items:
+            if not isinstance(item, dict) or not isinstance(item.get('translation'), str):
+                continue
+            ident = item.get('id')
+            if isinstance(ident, bool) or not isinstance(ident, int) or ident not in by_id:
+                continue
+            revised = item['translation'].strip()
+            if revised and not foreign_leak(revised, target_lang, allowed):
+                by_id[ident].translation = revised
+                reviewed.add(ident)
+        if reviewed != set(by_id):
+            self.warnings.append('Вычитка неполная; для пропущенных регионов сохранён машинный черновик')
+        logger.info(f"LLM proofread {len(reviewed)} blocks")
+        return True
 
     def _apply_items(self, regions: list[TextRegion], items: list) -> None:
         by_id = {region.id: region for region in regions}

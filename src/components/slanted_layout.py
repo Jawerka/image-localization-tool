@@ -193,3 +193,30 @@ def _caption_raster(text, font_path, style, geometry, rows, scale, frozen=None):
                center=list(center), spacing=0, line_gap=20, font_size=max(1, round(144*factor)),
                writing_mode='horizontal', caption=True)
     return layer, fit
+
+
+def constrain_caption_fit(fit, geometry, rotation, stroke_width, min_font_size, scale=2):
+    """Ограничить автоматическое увеличение карточки её исходным внешним полем.
+
+    После подбора строк общий масштаб шрифта может снова вытолкнуть растр.
+    Уменьшаем весь растр вместе, сохраняя слова, пропорции и нижний порог.
+    """
+    ix, iy, iw, ih = geometry['ink_bbox']
+    bx, by, bw, bh = geometry['source_bbox']
+    center = fit.get('center', [ix+iw/2, iy+ih/2])
+    matrix = cv2.getRotationMatrix2D((bx+bw/2, by+bh/2), float(rotation), 1.)
+    cx, cy = matrix @ np.array([*center, 1.])
+    cosine, sine = abs(matrix[0, 0]), abs(matrix[0, 1])
+    width, height = fit['width']/scale, fit['height']/scale
+    reserve = math.ceil(stroke_width) + 2
+    room_x = max(1., min(cx-ix, ix+iw-cx)-reserve)
+    room_y = max(1., min(cy-iy, iy+ih-cy)-reserve)
+    factor = min(1., 2*room_x/max(1., cosine*width+sine*height),
+                 2*room_y/max(1., sine*width+cosine*height))
+    factor = max(factor, min(1., min_font_size/max(1, fit['font_size'])))
+    result = dict(fit)
+    if factor < 1:
+        for key in ('width', 'height'):
+            result[key] = max(1, math.floor(fit[key]*factor))
+        result['font_size'] = max(min_font_size, math.floor(fit['font_size']*factor))
+    return result

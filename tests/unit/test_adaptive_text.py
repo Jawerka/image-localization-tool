@@ -580,3 +580,15 @@ def test_speech_row_height_ignores_many_small_texture_components():
             ink[y:y+5, x:x+3] = 255
     filtered = _supported_speech_rows(ink)
     assert np.mean(filtered[letters] > 0) >= .99
+
+
+def test_white_outline_is_not_reintroduced_as_light_letter_core():
+    """Повторный анализ геометрии не расширяет белую оболочку как тёмную."""
+    from src.components.adaptive_text import _unexplained_light_ink
+    image = Image.new('RGB', (400, 180), (40, 65, 60))
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.truetype(str(FONT), 36)
+    draw.text((30, 30), 'HELLO WORLD', font=font, fill='black', stroke_width=4, stroke_fill='white')
+    draw.text((30, 95), 'ANOTHER LINE', font=font, fill='black', stroke_width=4, stroke_fill='white')
+    found, inverse = _unexplained_light_ink(np.asarray(image))
+    assert found is None and not inverse

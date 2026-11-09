@@ -502,7 +502,7 @@ class PagePipeline:
             report(45, "Перевод", "translate")
             started = time.perf_counter()
             self.typesetter.lang = target_lang
-            regions = self._translate(work, regions, source_lang, target_lang, warnings)
+            regions = self._translate(work, regions, source_lang, target_lang, warnings, cancel_check=cancel_check)
             untranslated = [r.id for r in regions if should_translate(r, _sfx_on(self.config)) and not r.translation.strip()]
             if untranslated:
                 warnings.append(f"Не переведены регионы: {untranslated}")
@@ -884,7 +884,12 @@ class PagePipeline:
                 glossary=glossary,
                 translate_sfx=_sfx_on(self.config),
             )
+            if isinstance(self.translator, LlmTranslator):
+                self.translator.proofread(regions, target_lang, glossary, region_ids=ids,
+                                          translate_sfx=_sfx_on(self.config), cancel_check=cancel_check)
             warnings.extend(getattr(self.translator, "warnings", []) or [])
+        except PipelineCancelled:
+            raise
         except Exception as exc:
             _check_cancel(cancel_check)
             logger.warning(f"Translator failed, Argos fallback: {exc}")
@@ -1147,7 +1152,7 @@ class PagePipeline:
                             intra_op_threads=self.config.ort_intra_op_threads)
         self.ocr_name = "rapid"
 
-    def _translate(self, image, regions, source_lang, target_lang, warnings: list[str]):
+    def _translate(self, image, regions, source_lang, target_lang, warnings: list[str], *, cancel_check=None):
         glossary = load_glossary(self.config.glossary_path)
         self._prepare_translator(warnings)
         try:
@@ -1159,8 +1164,13 @@ class PagePipeline:
                 glossary=glossary,
                 translate_sfx=_sfx_on(self.config),
             )
+            if isinstance(self.translator, LlmTranslator):
+                self.translator.proofread(translated, target_lang, glossary,
+                                          translate_sfx=_sfx_on(self.config), cancel_check=cancel_check)
             warnings.extend(getattr(self.translator, "warnings", []) or [])
             return translated
+        except PipelineCancelled:
+            raise
         except Exception as exc:
             logger.warning(f"Translator failed, Argos fallback: {exc}")
             warnings.append(f"Перевод переключён на Argos: {exc}")
