@@ -33,7 +33,13 @@ class FlutterWindow : public Win32Window {
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> channel_;
   std::unique_ptr<FlutterWindow> quick_window_;
+  std::unique_ptr<FlutterWindow> editor_window_;
   flutter::EncodableValue api_ready_;
+  flutter::EncodableValue editor_launch_;
+  bool editor_ready_ = false;
+  bool first_frame_shown_ = false;
+  int initial_show_ = SW_SHOWNORMAL;
+  bool initial_restore_maximized_ = false;
   bool initially_visible_;
   bool quick_;
   static FlutterWindow* root_;

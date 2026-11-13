@@ -43,23 +43,69 @@ MockClient _client({
   Map<String, dynamic>? bootstrap,
   int status = 200,
   bool events = true,
-}) =>
-    MockClient((request) async {
-      if (request.url.path == '/api/bootstrap') {
-        if (status != 200) {
-          return http.Response('{"error": "Не авторизован"}', status,
-              headers: _jsonUtf8);
-        }
-        return http.Response(jsonEncode(bootstrap ?? {}), 200,
-            headers: _jsonUtf8);
-      }
-      if (request.url.path == '/api/events' && events) {
-        return http.Response('', 200);
-      }
-      return http.Response('{}', 404, headers: _jsonUtf8);
-    });
+}) => MockClient((request) async {
+  if (request.url.path == '/api/bootstrap') {
+    if (status != 200) {
+      return http.Response(
+        '{"error": "Не авторизован"}',
+        status,
+        headers: _jsonUtf8,
+      );
+    }
+    return http.Response(jsonEncode(bootstrap ?? {}), 200, headers: _jsonUtf8);
+  }
+  if (request.url.path == '/api/events' && events) {
+    return http.Response('', 200);
+  }
+  return http.Response('{}', 404, headers: _jsonUtf8);
+});
 
 void main() {
+  test(
+    'quick старт не запрашивает bootstrap, модели или события редактора',
+    () async {
+      final calls = <String>[];
+      final state = ShellState(
+        sidecar: _FakeSidecar(),
+        apiFactory: (ready) => IltApi(
+          ready: ready,
+          client: MockClient((request) async {
+            calls.add(request.url.path);
+            return http.Response('{}', 200, headers: _jsonUtf8);
+          }),
+        ),
+      );
+      addTearDown(state.dispose);
+      await state.start(editor: false);
+      expect(state.status, HostStatus.ready);
+      expect(state.api, isNotNull);
+      expect(calls, isEmpty);
+      expect(state.bootstrap, isNull);
+      await Future.wait([state.prepareEditor(), state.prepareEditor()]);
+      expect(calls.where((path) => path == '/api/bootstrap'), hasLength(1));
+      expect(state.bootstrap, isNotNull);
+    },
+  );
+
+  test('retry quick не включает подготовку редактора', () async {
+    final calls = <String>[];
+    final state = ShellState(
+      sidecar: _FakeSidecar(),
+      apiFactory: (ready) => IltApi(
+        ready: ready,
+        client: MockClient((request) async {
+          calls.add(request.url.path);
+          return http.Response('{}', 200, headers: _jsonUtf8);
+        }),
+      ),
+    );
+    addTearDown(state.dispose);
+    await state.start(editor: false);
+    await state.retry();
+    expect(state.status, HostStatus.ready);
+    expect(calls, isEmpty);
+  });
+
   test('start читает bootstrap и переходит в ready', () async {
     final sidecar = _FakeSidecar();
     final state = ShellState(
@@ -97,8 +143,7 @@ void main() {
           if (request.url.path == '/api/events') {
             return http.Response('', 200);
           }
-          if (request.method == 'PUT' &&
-              request.url.path == '/api/settings') {
+          if (request.method == 'PUT' && request.url.path == '/api/settings') {
             if (!putStarted.isCompleted) putStarted.complete();
             await release.future;
             return http.Response(

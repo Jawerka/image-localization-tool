@@ -58,7 +58,7 @@ bool CopyImage(HWND owner, const flutter::EncodableValue* arguments) {
 FlutterWindow::FlutterWindow(const flutter::DartProject& project,
                              bool initially_visible, bool quick)
     : project_(project), initially_visible_(initially_visible), quick_(quick) {
-  if (!quick_) root_ = this;
+  if (!root_) root_ = this;
 }
 
 FlutterWindow::~FlutterWindow() {
@@ -90,7 +90,29 @@ bool FlutterWindow::OnCreate() {
       &flutter::StandardMethodCodec::GetInstance());
   channel_->SetMethodCallHandler([this](const auto& call, auto result) {
     const auto& method = call.method_name();
-    if (method == "copyImage") {
+    bool activate = true;
+    const auto* options = call.arguments() ? std::get_if<flutter::EncodableMap>(call.arguments()) : nullptr;
+    if (options) {
+      auto requested = options->find(flutter::EncodableValue("activate"));
+      if (requested != options->end()) {
+        if (const auto* flag = std::get_if<bool>(&requested->second)) activate = *flag;
+      }
+    }
+    if (method == "getWindowHandle") {
+      result->Success(flutter::EncodableValue(static_cast<int64_t>(reinterpret_cast<intptr_t>(GetHandle()))));
+    } else if (method == "setInitialShowState" && options) {
+      auto command = options->find(flutter::EncodableValue("command"));
+      auto restore = options->find(flutter::EncodableValue("restoreMaximized"));
+      if (command != options->end()) {
+        if (const auto* value = std::get_if<int32_t>(&command->second)) {
+          if (*value == SW_SHOWNORMAL || *value == SW_SHOWMINIMIZED || *value == SW_SHOWMAXIMIZED) initial_show_ = *value;
+        }
+      }
+      if (restore != options->end()) {
+        if (const auto* value = std::get_if<bool>(&restore->second)) initial_restore_maximized_ = *value;
+      }
+      result->Success();
+    } else if (method == "copyImage") {
       if (CopyImage(GetHandle(), call.arguments())) {
         result->Success();
       } else {
@@ -98,6 +120,11 @@ bool FlutterWindow::OnCreate() {
       }
     } else if (method == "showQuick") {
       if (call.arguments()) root_->api_ready_ = *call.arguments();
+      if (root_->quick_) {
+        if (activate) root_->Activate();
+        result->Success();
+        return;
+      }
       if (!root_->quick_window_) {
         flutter::DartProject project(L"data");
         project.set_dart_entrypoint_arguments({"--quick-view"});
@@ -109,27 +136,50 @@ bool FlutterWindow::OnCreate() {
           return;
         }
       }
-      root_->quick_window_->Activate();
+      if (activate) root_->quick_window_->Activate();
       result->Success();
     } else if (method == "getApi") {
       result->Success(root_->api_ready_);
     } else if (method == "showEditor") {
-      root_->channel_->InvokeMethod("activateEditor", call.arguments()
-          ? std::make_unique<flutter::EncodableValue>(*call.arguments()) : nullptr);
-      root_->Activate();
+      FlutterWindow* editor = root_;
+      if (root_->quick_) {
+        if (call.arguments()) root_->editor_launch_ = *call.arguments();
+        if (!root_->editor_window_) {
+          flutter::DartProject project(L"data");
+          project.set_dart_entrypoint_arguments({"--editor-view"});
+          root_->editor_window_ = std::make_unique<FlutterWindow>(project, true, false);
+          if (!root_->editor_window_->Create(L"Image Localization Tool",
+              Win32Window::Point(10, 10), Win32Window::Size(1280, 720))) {
+            root_->editor_window_.reset();
+            result->Error("window", "Не удалось открыть редактор");
+            return;
+          }
+        }
+        editor = root_->editor_window_.get();
+      }
+      if (!root_->quick_ || root_->editor_ready_) {
+        editor->channel_->InvokeMethod("activateEditor", call.arguments()
+            ? std::make_unique<flutter::EncodableValue>(*call.arguments()) : nullptr);
+      }
+      if (activate) editor->Activate();
       result->Success();
+    } else if (method == "getEditorLaunch") {
+      root_->editor_ready_ = true;
+      result->Success(root_->editor_launch_);
+      root_->editor_launch_ = flutter::EncodableValue();
     } else if (method == "hide") {
       ShowWindow(GetHandle(), SW_HIDE);
       result->Success();
     } else if (method == "visibleEditor") {
-      result->Success(flutter::EncodableValue(IsWindowVisible(root_->GetHandle()) != FALSE));
+      auto* editor = root_->quick_ ? root_->editor_window_.get() : root_;
+      result->Success(flutter::EncodableValue(editor && IsWindowVisible(editor->GetHandle()) != FALSE));
     } else if (method == "visibleQuick") {
-      result->Success(flutter::EncodableValue(root_->quick_window_ &&
-          IsWindowVisible(root_->quick_window_->GetHandle())));
+      auto* quick = root_->quick_ ? root_ : root_->quick_window_.get();
+      result->Success(flutter::EncodableValue(quick && IsWindowVisible(quick->GetHandle())));
     } else if (method == "quit") {
       root_->channel_->InvokeMethod("quitRequested", nullptr);
       result->Success();
-    } else if (method == "exit" && !quick_) {
+    } else if (method == "exit" && this == root_) {
       result->Success();
       PostQuitMessage(0);
     } else {
@@ -138,7 +188,18 @@ bool FlutterWindow::OnCreate() {
   });
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
-    if (initially_visible_) this->Show();
+    first_frame_shown_ = true;
+    if (initially_visible_) {
+      WINDOWPLACEMENT placement{};
+      placement.length = sizeof(placement);
+      if (GetWindowPlacement(GetHandle(), &placement)) {
+        placement.showCmd = initial_show_;
+        placement.flags = initial_restore_maximized_ ? WPF_RESTORETOMAXIMIZED : 0;
+        SetWindowPlacement(GetHandle(), &placement);
+      } else {
+        ShowWindow(GetHandle(), initial_show_);
+      }
+    }
   });
 
   // Flutter can complete the first frame before the "show window" callback is
@@ -152,6 +213,7 @@ bool FlutterWindow::OnCreate() {
 void FlutterWindow::OnDestroy() {
   // Дочерний engine закрывается до корневого.
   quick_window_.reset();
+  editor_window_.reset();
   channel_.reset();
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
@@ -161,8 +223,10 @@ void FlutterWindow::OnDestroy() {
 }
 
 void FlutterWindow::Activate() {
+  if (!first_frame_shown_) return;
   ShowWindow(GetHandle(), IsIconic(GetHandle()) ? SW_RESTORE : SW_SHOW);
   SetForegroundWindow(GetHandle());
+  if (channel_) channel_->InvokeMethod("windowActivated", nullptr);
 }
 
 LRESULT

@@ -29,6 +29,7 @@ class QuickController extends ChangeNotifier {
   QuickController(this.api);
 
   final IltApi api;
+  final viewTransform = TransformationController();
   List<Map<String, dynamic>> items = [];
   String selected = '';
   bool busy = false;
@@ -138,6 +139,7 @@ class QuickController extends ChangeNotifier {
     }
     final nextSelected = '${payload['selected_id'] ?? ''}';
     if (nextSelected != selected) {
+      viewTransform.value = Matrix4.identity();
       original = false;
       error = '';
     }
@@ -238,6 +240,7 @@ class QuickController extends ChangeNotifier {
     _disposed = true;
     _timer?.cancel();
     api.close();
+    viewTransform.dispose();
     super.dispose();
   }
 }
@@ -530,6 +533,7 @@ class QuickSurface extends StatelessWidget {
                 QuickImageView(
                   key: ValueKey(controller.selected),
                   pixels: controller.pixels!,
+                  transformationController: controller.viewTransform,
                 ),
               if (item == null)
                 const Center(child: Text('Отправьте изображение из FastStone')),

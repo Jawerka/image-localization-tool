@@ -56,6 +56,8 @@ class ShellState extends ChangeNotifier {
   Completer<ui.AppExitResponse>? _exit;
   bool _exitWaiting = false;
   bool _hasApiKey = false;
+  bool _editorRequested = true;
+  Future<void>? _editorStartup;
 
   HostStatus get status => _status;
   ApiReady? get ready => _ready;
@@ -207,8 +209,10 @@ class ShellState extends ChangeNotifier {
   }
 
   /// Запуск: поднять сайдкар, прочитать bootstrap, подписаться на события.
-  Future<void> start() async {
+  Future<void> start({bool editor = true}) async {
     final run = ++_run;
+    _editorRequested = editor;
+    _editorStartup = null;
     _status = HostStatus.starting;
     _errorMessage = null;
     _authError = false;
@@ -220,18 +224,11 @@ class ShellState extends ChangeNotifier {
     try {
       final ready = await _sidecar.start();
       final api = _apiFactory(ready);
-      final bootstrap = await api.getJson('/api/bootstrap');
       _ready = ready;
       _api = api;
-      _bootstrap = bootstrap;
-      _hasApiKey = bootstrap['has_api_key'] == true;
       _status = HostStatus.ready;
-      workspace.bind(api);
-      workspace.applyBootstrap(bootstrap);
-      secondary.bind(api);
-      unawaited(workspace.refreshJobs());
-      _listenEvents(api);
       _watchExit(run);
+      if (editor) await prepareEditor();
     } on ApiAuthException catch (error) {
       _authError = true;
       _fail('Ошибка авторизации: $error');
@@ -243,6 +240,28 @@ class ShellState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Quick не проверяет локальные модели и GPU; редактор готовится по требованию.
+  Future<void> prepareEditor() {
+    _editorRequested = true;
+    return _editorStartup ??= _prepareEditor();
+  }
+
+  Future<void> _prepareEditor() async {
+    final api = _api;
+    if (api == null) throw StateError('Сайдкар недоступен');
+    final run = _run;
+    final bootstrap = await api.getJson('/api/bootstrap');
+    if (run != _run) return;
+    _bootstrap = bootstrap;
+    _hasApiKey = bootstrap['has_api_key'] == true;
+    workspace.bind(api);
+    workspace.applyBootstrap(bootstrap);
+    secondary.bind(api);
+    unawaited(workspace.refreshJobs());
+    _listenEvents(api);
+    notifyListeners();
+  }
+
   /// Перезапуск после ошибки: остановить сайдкар и начать заново.
   Future<void> retry() async {
     _run += 1;
@@ -250,7 +269,7 @@ class ShellState extends ChangeNotifier {
     _api?.close();
     _api = null;
     _sidecar.stop();
-    await start();
+    await start(editor: _editorRequested);
   }
 
   /// Перезапуск по требованию (например, после смены настроек сети).
@@ -261,19 +280,24 @@ class ShellState extends ChangeNotifier {
   void _watchExit(int run) {
     final exit = _sidecar.processExitCode;
     if (exit == null) return;
-    unawaited(exit.then((code) {
-      if (_run != run || _status != HostStatus.ready) return;
-      unawaited(_stopEvents());
-      _fail('Сайдкар завершился неожиданно (код $code)');
-      notifyListeners();
-    }));
+    unawaited(
+      exit.then((code) {
+        if (_run != run || _status != HostStatus.ready) return;
+        unawaited(_stopEvents());
+        _fail('Сайдкар завершился неожиданно (код $code)');
+        notifyListeners();
+      }),
+    );
   }
 
   void _listenEvents(IltApi api) {
-    _events = EventStream(connect: api.openEvents, onConnected: () async {
-      await secondary.refreshPreparation();
-      await secondary.refreshRuntime();
-    });
+    _events = EventStream(
+      connect: api.openEvents,
+      onConnected: () async {
+        await secondary.refreshPreparation();
+        await secondary.refreshRuntime();
+      },
+    );
     _eventsSub = _events!.frames().listen(
       (frame) {
         _lastEvent = frame.event;
@@ -281,8 +305,7 @@ class ShellState extends ChangeNotifier {
         // Сервер шлёт конверт `{"type": ..., "payload": {...}}`; в состояние
         // передаём только payload, иначе поля вроде page_id не находятся.
         final raw = frame.data['payload'];
-        final payload =
-            raw is Map ? raw.cast<String, dynamic>() : frame.data;
+        final payload = raw is Map ? raw.cast<String, dynamic>() : frame.data;
         workspace.applyEvent(frame.event, payload);
         switch (frame.event) {
           case 'model.progress':

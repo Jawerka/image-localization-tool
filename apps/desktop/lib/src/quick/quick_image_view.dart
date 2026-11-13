@@ -5,21 +5,30 @@ import 'package:flutter/material.dart';
 
 /// Масштаб под указателем и перетаскивание рукой без панели инструментов.
 class QuickImageView extends StatefulWidget {
-  const QuickImageView({super.key, required this.pixels});
+  const QuickImageView({
+    super.key,
+    required this.pixels,
+    this.onFirstFrame,
+    this.transformationController,
+  });
 
   final Uint8List pixels;
+  final VoidCallback? onFirstFrame;
+  final TransformationController? transformationController;
 
   @override
   State<QuickImageView> createState() => _QuickImageViewState();
 }
 
 class _QuickImageViewState extends State<QuickImageView> {
-  final _transform = TransformationController();
+  late final _transform =
+      widget.transformationController ?? TransformationController();
   bool _dragging = false;
+  bool _reported = false;
 
   @override
   void dispose() {
-    _transform.dispose();
+    if (widget.transformationController == null) _transform.dispose();
     super.dispose();
   }
 
@@ -45,6 +54,16 @@ class _QuickImageViewState extends State<QuickImageView> {
               widget.pixels,
               fit: BoxFit.contain,
               gaplessPlayback: true,
+              errorBuilder: (_, _, _) => const SizedBox.shrink(),
+              frameBuilder: (context, child, frame, synchronous) {
+                if (frame != null && !_reported) {
+                  _reported = true;
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (mounted) widget.onFirstFrame?.call();
+                  });
+                }
+                return child;
+              },
             ),
           ),
         ),

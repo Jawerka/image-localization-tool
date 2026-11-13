@@ -11,6 +11,46 @@ import 'package:ilt_desktop/src/quick/window_bridge.dart';
 import 'package:ilt_desktop/src/sidecar/handshake.dart';
 
 void main() {
+  testWidgets('DPI дисплея и размер текста учитываются независимо', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1.5;
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.platformDispatcher.textScaleFactorTestValue = 2;
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+      tester.platformDispatcher.clearTextScaleFactorTestValue();
+    });
+    final controller =
+        QuickController(
+            IltApi(
+              ready: const ApiReady(port: 1234, token: 'test'),
+              client: MockClient((_) async => http.Response('{}', 200)),
+            ),
+          )
+          ..selected = 'one'
+          ..items = [
+            {'id': 'one', 'status': 'queued', 'queue_position': 1},
+          ];
+    await tester.pumpWidget(
+      QuickApp(controller: controller, onOpenEditor: (_) async {}),
+    );
+    final badge = tester.element(find.text('В очереди 1'));
+    expect(MediaQuery.devicePixelRatioOf(badge), 1.5);
+    expect(MediaQuery.textScalerOf(badge).scale(14), 28);
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byType(QuickSurface)),
+      buttons: 2,
+    );
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(find.text('Сервер…'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+  });
+
   testWidgets('Копировать из ПКМ копирует перевод даже при показе оригинала', (
     tester,
   ) async {

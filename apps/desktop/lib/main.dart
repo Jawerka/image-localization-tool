@@ -1,26 +1,28 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
 import 'src/app.dart';
-import 'src/api/ilt_api.dart';
 import 'src/quick/quick_app.dart';
+import 'src/quick/quick_startup.dart';
 import 'src/quick/window_bridge.dart';
-import 'src/sidecar/handshake.dart';
 import 'src/sidecar/sidecar_controller.dart';
 import 'src/sidecar/single_instance.dart';
 import 'src/sidecar/window_state.dart';
 import 'src/state/shell_state.dart';
 import 'src/ui/platform.dart' as platform;
 
-/// Корневой engine владеет IPC и сайдкаром; второе окно — только клиент API.
+/// Первое окно владеет IPC и сайдкаром; второе создаётся только по необходимости.
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   if (args.contains('--quick-view')) {
     await _quickView();
+    return;
+  }
+  if (args.contains('--editor-view')) {
+    await _editorView();
     return;
   }
   final attach = const String.fromEnvironment('ILT_ATTACH') == '1';
@@ -29,7 +31,13 @@ Future<void> main(List<String> args) async {
   if (!attach && await single.forwardIfRunning(args)) exit(0);
   final state = ShellState(sidecar: SidecarController(attach: attach));
   state.secondary.onOpenFolder = platform.openFolder;
-  final host = _Host(state, single, quick: launch.mode == 'quick');
+  final geometry = await WindowState.open(quick: launch.mode == 'quick');
+  final host = _Host(
+    state,
+    single,
+    quick: launch.mode == 'quick',
+    window: geometry,
+  );
   host.bind();
   if (!attach) {
     try {
@@ -46,8 +54,16 @@ Future<void> main(List<String> args) async {
   runApp(
     ValueListenableBuilder<bool>(
       valueListenable: host.editor,
-      builder: (context, shown, child) =>
-          shown ? IltApp(state: state) : const SizedBox.shrink(),
+      builder: (context, shown, child) => host.primaryQuick
+          ? QuickStartup(
+              onReady: (controller) => host.quickController = controller,
+              onOpenEditor: (payload) async {
+                await hostWindows.invokeMethod<void>('showEditor', payload);
+              },
+            )
+          : shown
+          ? IltApp(state: state)
+          : const SizedBox.shrink(),
     ),
   );
   unawaited(host.start(launch));
@@ -55,14 +71,17 @@ Future<void> main(List<String> args) async {
 
 /// Координатор сохраняет запросы второго запуска до готовности handshake.
 class _Host {
-  _Host(this.state, this.single, {required bool quick})
-    : editor = ValueNotifier(!quick) {
-    if (!quick) _restoreWindow();
+  _Host(this.state, this.single, {required bool quick, required this.window})
+    : primaryQuick = quick,
+      editor = ValueNotifier(!quick) {
+    _geometryStarted = true;
   }
   final ShellState state;
   final SingleInstance single;
   final ValueNotifier<bool> editor;
-  final window = WindowState();
+  final bool primaryQuick;
+  QuickController? quickController;
+  final WindowState window;
   final started = Completer<void>();
   Future<void> _launches = Future.value();
   bool _geometryStarted = false;
@@ -79,7 +98,10 @@ class _Host {
   void bind() {
     hostWindows.setMethodCallHandler((call) async {
       switch (call.method) {
+        case 'windowActivated':
+          window.start();
         case 'activateEditor':
+          await state.prepareEditor();
           _restoreWindow();
           editor.value = true;
           if (call.arguments is Map) {
@@ -92,30 +114,56 @@ class _Host {
                 );
                 state.workspace.applyCollection(collection);
               });
-            } else {
+            } else if (payload.containsKey('project')) {
               state.workspace.applyCollection(payload);
             }
           }
         case 'closeRequested':
-          await closeEditor();
+          if (primaryQuick) {
+            await closeQuick();
+          } else {
+            await closeEditor();
+          }
         case 'quitRequested':
           // Скрытое окно не должно оборвать ещё работающий общий worker.
           final jobs = await state.api?.getJson('/api/jobs');
-          if (jobs?['unfinished'] != true) await _exit();
+          final quick = await state.api?.getJson('/api/quick/session');
+          if (jobs?['unfinished'] != true && quick?['busy'] != true) {
+            await _exit();
+          }
       }
     });
     AppLifecycleListener(
       onExitRequested: () async {
-        await closeEditor();
+        if (primaryQuick) {
+          await closeQuick();
+        } else {
+          await closeEditor();
+        }
         return ui.AppExitResponse.cancel;
       },
     );
   }
 
   Future<void> start(LaunchRequest initial) async {
-    await state.start();
+    final starting = state.start(editor: initial.mode != 'quick');
     try {
-      await _handleLaunch(initial);
+      if (initial.mode == 'quick') {
+        await hostWindows.invokeMethod<void>('showQuick', {
+          'paths': initial.paths,
+          'activate': false,
+        });
+      }
+      await starting;
+      if (initial.mode == 'quick' && state.api == null) {
+        await hostWindows.invokeMethod<void>('showQuick', {
+          'paths': initial.paths,
+          'activate': false,
+          'error': state.errorMessage ?? 'Сайдкар недоступен',
+        });
+      } else {
+        await _handleLaunch(initial, activate: false);
+      }
     } catch (_) {
       await hostWindows.invokeMethod<void>('showEditor');
     } finally {
@@ -135,7 +183,10 @@ class _Host {
     return _launches;
   }
 
-  Future<void> _handleLaunch(LaunchRequest request) async {
+  Future<void> _handleLaunch(
+    LaunchRequest request, {
+    bool activate = true,
+  }) async {
     final api = state.api;
     if (api == null) {
       await hostWindows.invokeMethod<void>('showEditor');
@@ -149,14 +200,35 @@ class _Host {
       await hostWindows.invokeMethod<void>('showQuick', {
         'port': ready.port,
         'token': ready.token,
+        'activate': activate,
       });
     } else {
+      if (!primaryQuick) await state.prepareEditor();
+      Map<String, dynamic>? collection;
       if (request.paths.isNotEmpty) {
-        state.workspace.applyCollection(
-          await api.postJson('/api/drop', {'paths': request.paths}),
-        );
+        collection = await api.postJson('/api/drop', {'paths': request.paths});
+        if (!primaryQuick) state.workspace.applyCollection(collection);
       }
-      await hostWindows.invokeMethod<void>('showEditor');
+      await hostWindows.invokeMethod<void>('showEditor', {
+        ...?collection,
+        'activate': activate,
+      });
+    }
+  }
+
+  Future<void> closeQuick() async {
+    if (_closing) return;
+    _closing = true;
+    try {
+      final session = await state.api?.getJson('/api/quick/session');
+      window.saveNow();
+      await hostWindows.invokeMethod<void>('hide');
+      if (session?['busy'] != true &&
+          await hostWindows.invokeMethod<bool>('visibleEditor') != true) {
+        await _exit();
+      }
+    } finally {
+      _closing = false;
     }
   }
 
@@ -180,6 +252,7 @@ class _Host {
 
   Future<void> _exit() async {
     if (_geometryStarted) window.saveNow();
+    window.dispose();
     await single.dispose();
     state.dispose();
     await hostWindows.invokeMethod<void>('exit');
@@ -187,30 +260,21 @@ class _Host {
 }
 
 Future<void> _quickView() async {
-  final data = await hostWindows.invokeMapMethod<String, dynamic>('getApi');
-  final ready = data == null ? null : ApiReady.tryParse(jsonEncode(data));
-  if (ready == null) {
-    hostWindows.setMethodCallHandler((call) async {
-      if (call.method == 'closeRequested') {
-        await hostWindows.invokeMethod<void>('quit');
-      }
-    });
-    runApp(
-      const MaterialApp(
-        home: Scaffold(body: Center(child: Text('Сайдкар недоступен'))),
-      ),
-    );
-    return;
-  }
-  final controller = QuickController(IltApi(ready: ready));
+  final geometry = await WindowState.open(quick: true);
+  QuickController? controller;
   var closing = false;
   hostWindows.setMethodCallHandler((call) async {
+    if (call.method == 'windowActivated') {
+      geometry.start();
+      return;
+    }
     if (call.method != 'closeRequested' || closing) return;
     closing = true;
     try {
-      final session = await controller.api.getJson('/api/quick/session');
+      final session = await controller?.api.getJson('/api/quick/session');
+      geometry.saveNow();
       await hostWindows.invokeMethod<void>('hide');
-      if (session['busy'] != true &&
+      if (session?['busy'] != true &&
           await hostWindows.invokeMethod<bool>('visibleEditor') != true) {
         await hostWindows.invokeMethod<void>('quit');
       }
@@ -219,12 +283,76 @@ Future<void> _quickView() async {
     }
   });
   runApp(
-    QuickApp(
-      controller: controller,
+    QuickStartup(
+      onReady: (value) => controller = value,
       onOpenEditor: (payload) async {
         await hostWindows.invokeMethod<void>('showEditor', payload);
       },
     ),
   );
-  controller.start();
+}
+
+/// Редактор создаёт только интерфейс и подключается к сайдкару владельца.
+Future<void> _editorView() async {
+  final state = ShellState(sidecar: SidecarController(attach: true));
+  state.secondary.onOpenFolder = platform.openFolder;
+  final window = await WindowState.open(quick: false);
+  final started = Completer<void>();
+  var closing = false;
+  Future<void> apply(Object? raw) async {
+    if (raw is! Map) return;
+    final payload = raw.cast<String, dynamic>();
+    if (payload['quick_item_id'] is String) {
+      await state.workspace.viewer.guardOrRun(() async {
+        final collection = await state.api!.postJson('/api/quick/editor', {
+          'id': payload['quick_item_id'],
+        });
+        state.workspace.applyCollection(collection);
+      });
+    } else if (payload.containsKey('project')) {
+      state.workspace.applyCollection(payload);
+    }
+  }
+
+  Future<void> close() async {
+    if (closing) return;
+    closing = true;
+    try {
+      if (await state.confirmExit() != ui.AppExitResponse.exit) return;
+      window.saveNow();
+      await hostWindows.invokeMethod<void>('hide');
+      final quick = await state.api?.getJson('/api/quick/session');
+      if (quick?['busy'] != true &&
+          await hostWindows.invokeMethod<bool>('visibleQuick') != true) {
+        await hostWindows.invokeMethod<void>('quit');
+      }
+    } finally {
+      closing = false;
+    }
+  }
+
+  hostWindows.setMethodCallHandler((call) async {
+    if (call.method == 'windowActivated') {
+      window.start();
+    } else if (call.method == 'closeRequested') {
+      await close();
+    } else if (call.method == 'activateEditor') {
+      await started.future;
+      window.start();
+      await apply(call.arguments);
+    }
+  });
+  AppLifecycleListener(
+    onExitRequested: () async {
+      await close();
+      return ui.AppExitResponse.cancel;
+    },
+  );
+  runApp(IltApp(state: state));
+  await state.start();
+  try {
+    await apply(await hostWindows.invokeMethod<Object?>('getEditorLaunch'));
+  } finally {
+    started.complete();
+  }
 }

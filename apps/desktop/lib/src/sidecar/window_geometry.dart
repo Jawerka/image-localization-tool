@@ -9,6 +9,7 @@ class WindowGeometry {
     required this.work,
     required this.normal,
     required this.maximized,
+    this.minimized = false,
   });
 
   final String monitor;
@@ -16,6 +17,7 @@ class WindowGeometry {
   final Rect work;
   final Rect normal;
   final bool maximized;
+  final bool minimized;
 
   Map<String, Object?> toJson() => {
     'version': 1,
@@ -24,6 +26,7 @@ class WindowGeometry {
     'work': _rectJson(work),
     'normal': _rectJson(normal),
     'maximized': maximized,
+    'minimized': minimized,
   };
 
   static WindowGeometry? fromJson(Object? value) {
@@ -43,6 +46,7 @@ class WindowGeometry {
       work: work,
       normal: normal,
       maximized: value['maximized'] == true,
+      minimized: value['minimized'] == true,
     );
   }
 }
@@ -54,20 +58,27 @@ class ScreenInfo {
     required this.work,
     required this.dpi,
     required this.primary,
+    this.bounds,
   });
 
   final String name;
   final Rect work;
   final int dpi;
   final bool primary;
+  final Rect? bounds;
 }
 
 /// Куда поставить окно и разворачивать ли его.
 class ResolvedPlacement {
-  const ResolvedPlacement({required this.rect, required this.maximized});
+  const ResolvedPlacement({
+    required this.rect,
+    required this.maximized,
+    this.minimized = false,
+  });
 
   final Rect rect;
   final bool maximized;
+  final bool minimized;
 }
 
 /// Восстановить нормальную геометрию на текущем наборе мониторов.
@@ -99,7 +110,11 @@ ResolvedPlacement resolvePlacement(
   }
   if (target == null && screens.isNotEmpty) target = screens.first;
   if (target == null) {
-    return ResolvedPlacement(rect: saved.normal, maximized: saved.maximized);
+    return ResolvedPlacement(
+      rect: saved.normal,
+      maximized: saved.maximized,
+      minimized: saved.minimized,
+    );
   }
 
   final savedScale = saved.dpi / 96;
@@ -153,6 +168,7 @@ ResolvedPlacement resolvePlacement(
   return ResolvedPlacement(
     rect: Rect.fromLTWH(left, top, width, height),
     maximized: saved.maximized,
+    minimized: saved.minimized,
   );
 }
 

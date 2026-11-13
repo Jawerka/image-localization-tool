@@ -2,28 +2,60 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
-import 'dart:ui';
 
 import 'package:ffi/ffi.dart' as ffi;
 import 'package:win32/win32.dart';
+import 'package:flutter/services.dart';
 
 import 'data_root.dart';
 import 'window_focus.dart';
 import 'window_geometry.dart';
 
-/// Позиция и размер главного окна: `data/window.json`.
+/// Положение, размер и состояние окон: отдельные записи quick и редактора в data/.
 ///
 /// Геометрия хранится в физических screen-координатах. Нормальное положение
 /// снимается через `GetWindowPlacement` (workspace-координаты переводятся
 /// в screen), позиция обычного окна — через `GetWindowRect`.
 class WindowState {
-  WindowState();
+  WindowState({this.recordName = 'window.json', this.windowHandle});
+
+  final String recordName;
+  final int? windowHandle;
+  bool _nativeInitialShow = false;
+  bool _minimizeOnStart = false;
+
+  /// Точный HWND текущего engine; окна редактора и quick не путают геометрию.
+  static Future<WindowState> open({required bool quick}) async {
+    const channel = MethodChannel('ilt/windows');
+    final handle = await channel.invokeMethod<int>('getWindowHandle');
+    final state = WindowState(
+      recordName: quick ? 'quick-window.json' : 'window.json',
+      windowHandle: handle,
+    );
+    state.restore();
+    final command = state._minimizeOnStart
+        ? SW_SHOWMINIMIZED
+        : state._maximizeOnStart
+        ? SW_SHOWMAXIMIZED
+        : SW_SHOWNORMAL;
+    await channel.invokeMethod<void>('setInitialShowState', {
+      'command': command,
+      'restoreMaximized': state._maximizeOnStart,
+    });
+    state._nativeInitialShow = true;
+    state.start();
+    return state;
+  }
+
+  HWND? _window() => windowHandle == null
+      ? findMainWindow()
+      : HWND(Pointer.fromAddress(windowHandle!));
 
   static const _pollInterval = Duration(milliseconds: 750);
   static const _maxWaitForShow = Duration(seconds: 10);
 
   late final String _recordPath =
-      '${resolveDataRoot(repoRoot: findRepoRoot())}/window.json';
+      '${resolveDataRoot(repoRoot: findRepoRoot())}/$recordName';
 
   Timer? _poll;
   String? _lastSaved;
@@ -33,12 +65,23 @@ class WindowState {
   void restore() {
     if (!Platform.isWindows) return;
     final saved = _read();
-    final hwnd = findMainWindow();
+    final hwnd = _window();
     if (saved == null || hwnd == null) return;
     final screens = _screens();
     if (screens.isEmpty) return;
     final placement = resolvePlacement(saved, screens);
     final rect = placement.rect;
+    // Сначала сменить монитор: WM_DPICHANGED применит его DPI. Затем задаём
+    // уже рассчитанный размер, чтобы Windows не масштабировала его дважды.
+    SetWindowPos(
+      hwnd,
+      null,
+      rect.left.round(),
+      rect.top.round(),
+      0,
+      0,
+      SET_WINDOW_POS_FLAGS(SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSIZE),
+    );
     SetWindowPos(
       hwnd,
       null,
@@ -49,12 +92,13 @@ class WindowState {
       SET_WINDOW_POS_FLAGS(SWP_NOZORDER | SWP_NOACTIVATE),
     );
     _maximizeOnStart = placement.maximized;
+    _minimizeOnStart = placement.minimized;
   }
 
   /// Запустить polling и применить maximize после первого кадра.
   void start() {
     if (!Platform.isWindows) return;
-    if (_maximizeOnStart) {
+    if (!_nativeInitialShow && _maximizeOnStart) {
       _maximizeOnStart = false;
       unawaited(_maximizeWhenVisible().whenComplete(_startPolling));
     } else {
@@ -71,14 +115,18 @@ class WindowState {
 
   void save() {
     if (!Platform.isWindows) return;
-    final hwnd = findMainWindow();
-    if (hwnd == null || IsIconic(hwnd)) return;
+    final hwnd = _window();
+    if (hwnd == null || !IsWindow(hwnd) || !IsWindowVisible(hwnd)) return;
     final geometry = _snapshot(hwnd);
     if (geometry == null) return;
     final json = jsonEncode(geometry.toJson());
     if (json == _lastSaved) return;
     try {
-      File(_recordPath).writeAsStringSync(json);
+      final file = File(_recordPath);
+      file.parent.createSync(recursive: true);
+      final temporary = File('$_recordPath.tmp');
+      temporary.writeAsStringSync(json);
+      temporary.renameSync(_recordPath);
       _lastSaved = json;
     } on FileSystemException {
       // Диск недоступен — повторим на следующем тике.
@@ -89,8 +137,13 @@ class WindowState {
     _poll ??= Timer.periodic(_pollInterval, (_) => save());
   }
 
+  void dispose() {
+    _poll?.cancel();
+    _poll = null;
+  }
+
   Future<void> _maximizeWhenVisible() async {
-    final hwnd = findMainWindow();
+    final hwnd = _window();
     if (hwnd == null) return;
     final deadline = DateTime.now().add(_maxWaitForShow);
     while (!IsWindowVisible(hwnd) && DateTime.now().isBefore(deadline)) {
@@ -106,15 +159,14 @@ class WindowState {
       MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST),
     );
     if (monitor == null) return null;
-    ScreenInfo primary = screens.first;
-    for (final screen in screens) {
-      if (screen.primary) {
-        primary = screen;
-        break;
-      }
-    }
-    final maximized = IsZoomed(hwnd);
-    final normal = _normalRect(hwnd, maximized, primary.work);
+    final minimized = IsIconic(hwnd);
+    final maximized = IsZoomed(hwnd) || (minimized && _restoreMaximized(hwnd));
+    final bounds = monitor.bounds ?? monitor.work;
+    final offset = Offset(
+      monitor.work.left - bounds.left,
+      monitor.work.top - bounds.top,
+    );
+    final normal = _normalRect(hwnd, maximized || minimized, offset);
     if (normal == null) return null;
     final dpi = GetDpiForWindow(hwnd);
     return WindowGeometry(
@@ -123,10 +175,18 @@ class WindowState {
       work: monitor.work,
       normal: normal,
       maximized: maximized,
+      minimized: minimized,
     );
   }
 
-  Rect? _normalRect(HWND hwnd, bool maximized, Rect primaryWork) {
+  bool _restoreMaximized(HWND hwnd) => ffi.using((arena) {
+    final placement = arena<WINDOWPLACEMENT>();
+    placement.ref.length = sizeOf<WINDOWPLACEMENT>();
+    return GetWindowPlacement(hwnd, placement).value &&
+        (placement.ref.flags & WPF_RESTORETOMAXIMIZED) != 0;
+  });
+
+  Rect? _normalRect(HWND hwnd, bool maximized, Offset workOffset) {
     if (!maximized) return _windowRect(hwnd);
     return ffi.using((arena) {
       final placement = arena<WINDOWPLACEMENT>();
@@ -134,8 +194,8 @@ class WindowState {
       if (!GetWindowPlacement(hwnd, placement).value) return null;
       final rect = placement.ref.rcNormalPosition;
       return Rect.fromLTWH(
-        (rect.left + primaryWork.left).toDouble(),
-        (rect.top + primaryWork.top).toDouble(),
+        rect.left + workOffset.dx,
+        rect.top + workOffset.dy,
         (rect.right - rect.left).toDouble(),
         (rect.bottom - rect.top).toDouble(),
       );
@@ -202,6 +262,12 @@ class WindowState {
         ),
         dpi: _dpiFor(monitor),
         primary: (data.dwFlags & MONITORINFOF_PRIMARY) != 0,
+        bounds: Rect.fromLTRB(
+          data.rcMonitor.left.toDouble(),
+          data.rcMonitor.top.toDouble(),
+          data.rcMonitor.right.toDouble(),
+          data.rcMonitor.bottom.toDouble(),
+        ),
       );
     });
   }

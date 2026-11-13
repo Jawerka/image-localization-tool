@@ -14,12 +14,14 @@ WindowGeometry _geometry({
   Rect work = _work1,
   Rect normal = const Rect.fromLTWH(100, 80, 960, 600),
   bool maximized = false,
+  bool minimized = false,
 }) => WindowGeometry(
   monitor: monitor,
   dpi: dpi,
   work: work,
   normal: normal,
   maximized: maximized,
+  minimized: minimized,
 );
 
 const _screen1 = ScreenInfo(
@@ -30,6 +32,22 @@ const _screen1 = ScreenInfo(
 );
 
 void main() {
+  test('minimized from maximized survives JSON and DPI change', () {
+    final saved = _geometry(dpi: 120, maximized: true, minimized: true);
+    final restored = WindowGeometry.fromJson(saved.toJson())!;
+    final placement = resolvePlacement(restored, const [
+      ScreenInfo(name: _display1, work: _work1, dpi: 144, primary: true),
+    ]);
+    expect(placement.minimized, isTrue);
+    expect(placement.maximized, isTrue);
+    expect(placement.rect, const Rect.fromLTWH(120, 96, 1152, 720));
+  });
+
+  test('legacy geometry without minimized remains normal', () {
+    final json = _geometry().toJson()..remove('minimized');
+    expect(WindowGeometry.fromJson(json)!.minimized, isFalse);
+  });
+
   test('DPI 125 -> 150 keeps logical size and offsets', () {
     final result = resolvePlacement(_geometry(dpi: 120), const [
       ScreenInfo(name: _display1, work: _work1, dpi: 144, primary: true),
@@ -64,9 +82,7 @@ void main() {
         work: work,
         normal: const Rect.fromLTWH(-2460, 80, 1280, 800),
       ),
-      const [
-        ScreenInfo(name: _display2, work: work, dpi: 96, primary: true),
-      ],
+      const [ScreenInfo(name: _display2, work: work, dpi: 96, primary: true)],
     );
     expect(result.rect, const Rect.fromLTWH(-2460, 80, 1280, 800));
   });

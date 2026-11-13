@@ -2,6 +2,7 @@
 **Branch**: `codex/016-faststone-quick-translate` | **Date**: 2026-11-13 | **Spec**: [spec.md](spec.md)
 
 ## Summary
+Ускорение: первое окно играет роль режима запуска (quick или editor). Второй engine создаётся только для второго типа окна. В режиме quick ранний предпросмотр PNG/JPG/BMP читает исходник непосредственно, пока запускается API. После handshake используется прежний QuickController/QuickApp; матрица масштаба сохраняется. TIFF и неподдерживаемые файлы проходят обычный backend-путь. Сайдкар и IPC остаются у первого окна, дочерний редактор подключается к его API без собственного процесса.
 ПК принимает файлы из FastStone в отдельное Flutter-окно и последовательно отправляет их на http://192.168.88.41:8765. Протокол идентичен extension/src/background.js: health → multipart translate → poll → PNG → DELETE. Локального перевода и локального фолбэка нет. Редактор и quick используют один локальный сайдкар; ProcessWorker ленивый и не получает quick-заданий.
 
 ## Technical Context
@@ -17,7 +18,7 @@ Python 3.10–3.13, Dart/Flutter, C++ Windows runner. Pillow для просмо
 - src/app/remote.py, desktop.py — серверная отмена worker и необязательная диагностика задания без секретов.
 - src/config.py, src/app/settings.py — quick_server_url.
 - apps/desktop/lib/src/quick/ — отдельный виджет, состояние, native channel.
-- apps/desktop/lib/main.dart, src/sidecar/single_instance.dart — IPC mode и coordinator; child engine запускает только API-клиент.
+- apps/desktop/lib/main.dart, src/sidecar/single_instance.dart — IPC mode и coordinator; child engine подключается к существующему API, без запуска сайдкара. Дочерний редактор получает отложенную команду через getEditorLaunch.
 - apps/desktop/windows/runner/ — второе окно одного процесса, show/hide/close, UTF-8 заголовки.
 - tests/unit/test_quick.py, apps/desktop/test/quick_test.dart, single_instance_test.dart — проверки.
 - docs/APP.md — FastStone, сервер и сопряжение.
