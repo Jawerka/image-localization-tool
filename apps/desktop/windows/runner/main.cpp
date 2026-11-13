@@ -1,6 +1,7 @@
 #include <flutter/dart_project.h>
 #include <flutter/flutter_view_controller.h>
 #include <windows.h>
+#include <algorithm>
 
 #include "flutter_window.h"
 #include "utils.h"
@@ -22,15 +23,17 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   std::vector<std::string> command_line_arguments =
       GetCommandLineArguments();
 
+  const bool quick = std::find(command_line_arguments.begin(),
+      command_line_arguments.end(), "--quick") != command_line_arguments.end();
   project.set_dart_entrypoint_arguments(std::move(command_line_arguments));
 
-  FlutterWindow window(project);
+  FlutterWindow window(project, !quick);
   Win32Window::Point origin(10, 10);
   Win32Window::Size size(1280, 720);
   if (!window.Create(L"Image Localization Tool", origin, size)) {
     return EXIT_FAILURE;
   }
-  window.SetQuitOnClose(true);
+  window.SetQuitOnClose(false);
 
   ::MSG msg;
   while (::GetMessage(&msg, nullptr, 0, 0)) {
@@ -38,6 +41,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     ::DispatchMessage(&msg);
   }
 
+  // Контроллеры и плагины обоих окон используют COM при завершении.
+  window.Destroy();
   ::CoUninitialize();
   return EXIT_SUCCESS;
 }

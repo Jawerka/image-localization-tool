@@ -38,7 +38,7 @@ from http.client import HTTPConnection
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote, urlparse, urlsplit, urlunsplit, parse_qs
 
 from PIL import Image
 
@@ -248,6 +248,8 @@ class RemoteJob:
         self.progress = 0
         self.label = ""
         self.error = ""
+        self.cancelled = threading.Event()
+        self.diagnostics: dict = {}
         self.result: bytes | None = None
         self.started_at: float | None = None
         self.finished_at: float | None = None
@@ -412,12 +414,45 @@ class RemoteQueue:
             except Exception:
                 logger.exception("Ошибка задания %s не записана на страницу", job_id)
 
-    def view(self, job_id: str, device_id: str) -> dict | None:
+    def note_diagnostics(self, job_id: str, *, settings: dict | None = None, warnings: list | None = None) -> None:
+        """Снимок только параметров пайплайна; токены устройств и ключи не выдаются."""
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                return
+            if settings is not None:
+                keys = ("source_lang", "target_lang", "ocr_backend", "translator_backend", "inpainter_backend",
+                        "device", "llm_model", "llm_thinking", "reading_order", "translate_sfx", "sfx_mode",
+                        "adaptive_text", "discover_missing_text", "auto_stylized_fonts", "detector_mode",
+                        "detector_conf", "ctd_conf", "text_scale", "text_margin", "text_stroke_ratio",
+                        "layout_long_side", "min_font_size", "max_font_size")
+                snapshot = {key: settings[key] for key in keys if key in settings}
+                url = urlsplit(str(settings.get("llm_base_url") or ""))
+                snapshot["llm_base_url"] = urlunsplit((url.scheme, url.netloc.rsplit("@", 1)[-1], url.path, "", ""))
+                job.diagnostics["settings"] = snapshot
+            if warnings is not None:
+                job.diagnostics["warnings"] = [str(value) for value in warnings]
+            from src.app.settings import get_api_key
+
+            secret = get_api_key()
+
+            def clean(value):
+                if isinstance(value, dict):
+                    return {key: clean(raw) for key, raw in value.items()}
+                if isinstance(value, list):
+                    return [clean(raw) for raw in value]
+                if isinstance(value, str) and secret:
+                    return value.replace(secret, "[скрыто]")
+                return value
+
+            job.diagnostics = clean(job.diagnostics)
+
+    def view(self, job_id: str, device_id: str, *, diagnostics: bool = False) -> dict | None:
         with self._lock:
             job = self._owned(job_id, device_id)
             if job is None:
                 return None
-            return {
+            view = {
                 "id": job.id,
                 "status": job.status,
                 "stage": job.stage,
@@ -428,6 +463,9 @@ class RemoteQueue:
                 "elapsed_ms": self._elapsed_ms(job),
                 "eta_ms": self._eta_ms(job),
             }
+            if diagnostics:
+                view["diagnostics"] = dict(job.diagnostics)
+            return view
 
     def result_bytes(self, job_id: str, device_id: str) -> tuple[str, bytes | None]:
         """``missing`` / ``wait`` / ``ready`` и PNG, если он уже есть."""
@@ -444,6 +482,8 @@ class RemoteQueue:
             job = self._owned(job_id, device_id)
             if job is None:
                 return False
+            if job.status not in _TERMINAL:
+                job.cancelled.set()
             self._jobs.pop(job_id, None)
             self._order = [item for item in self._order if item != job_id]
             return True
@@ -758,9 +798,11 @@ class RemoteServer:
         self._attach_inbox(job)
         if cached is not None:
             self.queue.remember(job)
+            self.queue.note_diagnostics(job.id, settings={**self.settings.to_dict(), "source_lang": source, "target_lang": target})
             return job
         try:
             self.queue.submit(job)
+            self.queue.note_diagnostics(job.id, settings={**self.settings.to_dict(), "source_lang": source, "target_lang": target})
         except QueueFull:
             job.status = "error"
             job.stage = "error"
@@ -999,7 +1041,8 @@ def _make_handler() -> type[BaseHTTPRequestHandler]:
             return 202
 
         def _job(self, remote: RemoteServer, device: Device, job_id: str) -> int:
-            view = remote.queue.view(job_id, device.id)
+            diagnostics = parse_qs(urlparse(self.path).query).get("diagnostics") == ["1"]
+            view = remote.queue.view(job_id, device.id, diagnostics=diagnostics)
             if view is None:
                 raise _HttpError(404, "Задание не найдено")
             self._send_json(view, 200)

@@ -5,7 +5,7 @@
 принимает только эту cookie. ``POST /api/session`` — тот же обмен по токену
 из тела, без cookie.
 
-Пути к файлам из JSON не читаются, кроме ``POST /api/drop`` и ``POST /api/import``.
+Пути к файлам из JSON читаются только локальными drop/import и quick-маршрутами.
 Папку экспорта задаёт диалог, а не поле ``dest``.
 """
 
@@ -220,6 +220,9 @@ class AppState:
         self._component_gate = threading.RLock()
         self._render_cache = None
         self._render_cache_limit = None
+        from src.app.quick import QuickSession
+
+        self.quick = QuickSession(self)
 
     def preparation_manager(self):
         """Полный снимок доступен после SSE-reconnect и перезапуска приложения."""
@@ -287,6 +290,7 @@ class AppState:
 
     def close(self) -> None:
         """Остановить раздачу и разбудить висящие SSE."""
+        self.quick.close()
         with self._sub_lock:
             if self._closed:
                 return
@@ -615,6 +619,8 @@ def _api(state: AppState, method: str, path: str, body: dict, query: dict | None
 
 
 def _api_impl(state: AppState, method: str, path: str, body: dict, query: dict | None = None) -> _Result:
+    if path.startswith("/api/quick/"):
+        return state.quick.route(method, path, body)
     if path == "/api/bootstrap":
         _need_method(method, "GET")
         return _Result(_bootstrap(state))

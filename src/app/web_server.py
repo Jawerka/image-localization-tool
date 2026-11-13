@@ -52,7 +52,7 @@ def guard_api(method: str, path: str, body: dict) -> None:
     """Удалённый клиент не выбирает пути на сервере и не меняет образ."""
     from src.app.server import _HttpError
 
-    if path.startswith("/api/dialog/") or path in _BLOCKED:
+    if path.startswith(("/api/dialog/", "/api/quick/")) or path in _BLOCKED:
         raise _HttpError(403, "В браузере используйте загрузку и скачивание файлов")
     if path == "/api/settings" and method == "PUT":
         if any(body.get(key) for key in _PATH_SETTINGS) or body.get("remote_enabled"):

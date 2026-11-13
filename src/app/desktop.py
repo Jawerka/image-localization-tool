@@ -930,7 +930,11 @@ class DesktopApp:
                 settings["source_lang"] = source
             if target:
                 settings["target_lang"] = target
-            self.state.queue.submit(
+            if job.cancelled.is_set():
+                raise RuntimeError("Удалённое задание отменено")
+            if self.remote_api is not None:
+                self.remote_api.queue.note_diagnostics(job.id, settings=settings)
+            submitted = self.state.queue.submit(
                 "translate_page",
                 project_id,
                 page_id=page_id,
@@ -943,7 +947,10 @@ class DesktopApp:
                     "source_path": self._remote_source_path(project_id, page_id),
                 },
             )
-            slot["event"].wait()
+            while not slot["event"].wait(.1):
+                if job.cancelled.is_set():
+                    self.state.queue.cancel(submitted.id)
+                    raise RuntimeError("Удалённое задание отменено")
         finally:
             with self._remote_lock:
                 self._remote_slots.pop(job.id, None)
@@ -995,6 +1002,10 @@ class DesktopApp:
                 png = self._read_result_png(project_id, page_id)
                 if not png:
                     raise RuntimeError("Пустой результат")
+                warnings = self.state.store.page_status(project_id, page_id).get("warnings") or []
+                if not self.state.store.read_document(project_id, page_id).regions:
+                    warnings = [*warnings, "Текст не найден"]
+                server.queue.note_diagnostics(remote_id, warnings=warnings)
                 server.complete(remote_id, png)
                 if slot is not None:
                     slot["png"] = png

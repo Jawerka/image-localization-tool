@@ -1,0 +1,8 @@
+# Data model
+
+QuickSession: process lifetime; ordered items, selected_id; ProjectStore(data/quick) только для локальных результатов, project_id. Mutations guarded by RLock. HTTP worker thread обслуживает одно отправленное quick-задание одновременно; локальный JobQueue не используется.
+QuickItem: id, source_path absolute, page_id, job_id локальной попытки, remote_id, status, progress 0..100, stage/label, warnings, error, server_version, optional server_settings, target_lang, has_result, queue_position.
+States: queued -> running -> done/error/cancelled; ожидающий серверный слот также queued. Invalid file или отсутствие сопряжения -> error без отправки. Duplicate selects existing. Retry explicit -> queued и fresh=1. Поздние callbacks отменённой попытки проверяют job_id и не меняют новую.
+ServerConnection: quick_server_url в Config/AppSettings; Bearer только в data/quick-server-token.txt. Session отдаёт url/paired, не token. Смена адреса без кода сбрасывает старое сопряжение; смена подключения во время работы запрещена.
+BugReport: unique timestamp directory; report.json, note.txt, original или ссылка на source_path, result.png, task.log при наличии. Note: nonempty after trim, max 4000 characters. Локальные source/target/server и необязательные серверные параметры; если старый сервер их не отдаёт, server_settings_available=false. Секреты и credentials/query URL очищаются до JSON-сериализации.
+RemoteJob: DELETE активной задачи выставляет cancel Event, DesktopApp передаёт отмену соответствующему заданию общего серверного worker. diagnostics=1 добавляет только allowlist параметров и предупреждения; стандартный ответ расширению неизменен.

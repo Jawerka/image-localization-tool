@@ -258,6 +258,7 @@ class AppSettings:
     ui_scale: int = 100
     source_lang: str = _PIPELINE.source_lang
     target_lang: str = _PIPELINE.target_lang
+    quick_server_url: str = _PIPELINE.quick_server_url
     llm_base_url: str = ""
     llm_model: str = ""
     llm_thinking: bool = False
@@ -315,6 +316,7 @@ class AppSettings:
         target = _raw_text(self.target_lang, "ru")
         self.source_lang = source or "en"
         self.target_lang = target or "ru"
+        self.quick_server_url = _raw_text(self.quick_server_url, _PIPELINE.quick_server_url)
         self.llm_base_url = _raw_text(self.llm_base_url, "")
         self.llm_model = _raw_text(self.llm_model, "")
         self.llm_thinking = _as_bool(self.llm_thinking, False)
@@ -396,6 +398,7 @@ class AppSettings:
             "ui_scale": self.ui_scale,
             "source_lang": self.source_lang,
             "target_lang": self.target_lang,
+            "quick_server_url": self.quick_server_url,
             "llm_base_url": self.llm_base_url,
             "llm_model": self.llm_model,
             "llm_thinking": self.llm_thinking,
@@ -507,6 +510,7 @@ class AppSettings:
         config = Config()
         config.source_lang = self.source_lang
         config.target_lang = self.target_lang
+        config.quick_server_url = self.quick_server_url
         config.llm_model = self.llm_model
         config.llm_thinking = self.llm_thinking
         config.llm_timeout = self.llm_timeout

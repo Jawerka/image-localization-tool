@@ -6,6 +6,19 @@ import 'dart:typed_data';
 import 'data_root.dart';
 import 'window_focus.dart';
 
+/// Аргументы запуска: флаги не должны становиться путями изображения.
+class LaunchRequest {
+  const LaunchRequest({required this.paths, this.mode = 'editor'});
+
+  factory LaunchRequest.fromArgs(List<String> args) => LaunchRequest(
+    paths: args.where((arg) => arg != '--quick').toList(),
+    mode: args.contains('--quick') ? 'quick' : 'editor',
+  );
+
+  final List<String> paths;
+  final String mode;
+}
+
 /// Один экземпляр хоста: свой IPC-сокет и `instance.json` (владелец — хост).
 ///
 /// Сайдкар `instance.json` не пишет. Второй запуск читает запись, шлёт
@@ -13,7 +26,7 @@ import 'window_focus.dart';
 /// пути в сайдкар через `POST /api/drop`.
 class SingleInstance {
   SingleInstance({Map<String, String>? environment, String? executableDir})
-      : this._(environment ?? Platform.environment, executableDir);
+    : this._(environment ?? Platform.environment, executableDir);
 
   SingleInstance._(this._environment, this._executableDir);
 
@@ -24,6 +37,7 @@ class SingleInstance {
 
   /// Отправить пути уже запущенному экземпляру. `true` — мы второй.
   Future<bool> forwardIfRunning(List<String> paths) async {
+    final launch = LaunchRequest.fromArgs(paths);
     final roots = dataRootCandidates(
       environment: _environment,
       executableDir: _executableDir,
@@ -38,7 +52,11 @@ class SingleInstance {
           record.port,
           timeout: const Duration(milliseconds: 500),
         );
-        socket.write(jsonEncode({'paths': paths}));
+        // Право фокуса нужно передать до того, как первый хост получит запрос.
+        allowForegroundTo(record.pid);
+        socket.write(
+          '${jsonEncode({'paths': launch.paths, 'mode': launch.mode})}\n',
+        );
         await socket.flush();
         socket.destroy();
         // Второй запуск в фокусе: передаём право первому вывести окно.
@@ -52,7 +70,10 @@ class SingleInstance {
   }
 
   /// Поднять IPC-сервер и записать `instance.json`.
-  Future<void> acquire({required void Function(List<String>) onPaths}) async {
+  Future<void> acquire({
+    void Function(List<String>)? onPaths,
+    void Function(LaunchRequest)? onLaunch,
+  }) async {
     if (_server != null) return;
     final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
     _server = server;
@@ -63,9 +84,18 @@ class SingleInstance {
     );
     Directory(root).createSync(recursive: true);
     _recordPath = '$root/instance.json';
-    File(_recordPath!)
-        .writeAsStringSync(jsonEncode({'pid': pid, 'port': server.port}));
-    server.listen((socket) => _receive(socket, onPaths));
+    File(
+      _recordPath!,
+    ).writeAsStringSync(jsonEncode({'pid': pid, 'port': server.port}));
+    server.listen(
+      (socket) => _receive(socket, (launch) {
+        if (onLaunch != null) {
+          onLaunch(launch);
+        } else {
+          onPaths?.call(launch.paths);
+        }
+      }),
+    );
   }
 
   /// Убрать запись и закрыть IPC-сокет.
@@ -84,7 +114,7 @@ class SingleInstance {
     }
   }
 
-  void _receive(Socket socket, void Function(List<String>) onPaths) {
+  void _receive(Socket socket, void Function(LaunchRequest) onLaunch) {
     final buffer = BytesBuilder(copy: false);
     var handled = false;
     void handle() {
@@ -99,7 +129,12 @@ class SingleInstance {
               for (final item in decoded['paths'] as List)
                 if (item is String) item,
             ];
-            onPaths(paths);
+            onLaunch(
+              LaunchRequest(
+                paths: paths,
+                mode: decoded['mode'] == 'quick' ? 'quick' : 'editor',
+              ),
+            );
           }
         }
       } catch (_) {
@@ -121,7 +156,9 @@ class SingleInstance {
 
   _InstanceRecord? _readRecord(String root) {
     try {
-      final decoded = jsonDecode(File('$root/instance.json').readAsStringSync());
+      final decoded = jsonDecode(
+        File('$root/instance.json').readAsStringSync(),
+      );
       if (decoded is! Map) return null;
       final port = decoded['port'];
       if (port is! int || port <= 0 || port > 65535) return null;
