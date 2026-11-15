@@ -223,7 +223,7 @@ def test_extension_powershell_dry_run_with_spaces_preserves_target(tmp_path):
         ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
          "-File", str(EXT), "-DryRun", "-Artifact", str(artifact), "-Dest", str(target),
          "-Backup", str(backup), "-Plan", str(plan)],
-        cwd=ROOT, env={**os.environ, "LOCALAPPDATA": ""}, capture_output=True,
+        cwd=ROOT, env={**os.environ, "LOCALAPPDATA": "", "PYTHONIOENCODING": "cp1252"}, capture_output=True,
         timeout=30,
     )
     assert result.returncode == 0, result.stderr.decode(errors="replace")

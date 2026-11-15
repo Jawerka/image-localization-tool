@@ -336,7 +336,8 @@ def main():
         result = apply(args.plan)
     else:
         result = rollback(args.backup)
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    # JSON должен читаться и в перенаправленной консоли Windows с cp1252.
+    print(json.dumps(result, ensure_ascii=True, indent=2))
     return 0
 
 
