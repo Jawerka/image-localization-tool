@@ -225,6 +225,16 @@ python src\main.py chapter\ output\translated --recursive --skip-existing
 python scripts\eval_pipeline.py --images path\to\pages
 ```
 
+Полный или выборочный прогон с тёмной галереей, оценками и JSON выполняется одним сценарием:
+
+```powershell
+python scripts/test_images.py run --config path/to/settings.json --output output/review-run --background
+```
+
+Продолжение, выбор групп, статус и формат отчётов — [docs/TEST_IMAGE_RUNNER.md](docs/TEST_IMAGE_RUNNER.md).
+
+Только выбранные файлы: `--images "path/to/a.png" "path/to/b.png"` или `--list-file paths.txt` (также JSON-массив). Без `--background` стадии и итог обработки выводятся прямо в консоль.
+
 ## Окно приложения
 
 Готовое приложение — Flutter-хост: он запускает замороженный Python-сайдкар. Из исходников те же экраны поднимаются так:

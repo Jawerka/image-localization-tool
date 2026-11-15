@@ -9,7 +9,7 @@ import numpy as np
 from PIL import Image
 
 from src.components.sfx_ink import outline_pad_px
-from src.components.retouch_ink import boundary_ink, confirmed_light_ink, smooth_line_mask
+from src.components.retouch_ink import boundary_ink, confirmed_light_ink, smooth_line_mask, _pastel_letter_halo
 from src.components.text_segmenter import _outlined_text_mask, segment_regions
 
 
@@ -26,6 +26,12 @@ def _unexplained_light_ink(crop):
 
 def is_balloon(region):
     """Роль речи важна и при отсутствии привязанного бокса облачка."""
+    if region.block_type == 'narration' and region.bubble_bbox is not None:
+        _, _, bw, bh = region.bubble_bbox
+        _, _, tw, th = region.bbox
+        if bw*bh <= tw*th*1.25:
+            # Тесная рамка повествования не подтверждает овальное облачко.
+            return False
     return (not region.document and region.block_type != 'sfx' and
             (region.bubble_bbox is not None or region.block_type == 'dialogue' or
              (region.class_name == 'text_bubble' and not region.block_type)))
@@ -40,32 +46,60 @@ def prepare_regions(image, regions, pixel_scale=1.0):
                 style.rotation or style.skew_x or (style.warp or {}).get('kind', 'none') != 'none' or
                 region.text_position is not None or region.block_type in ('title', 'sign', 'noise')):
             continue
+        detached = False
+        if region.bubble_bbox is not None:
+            bx, by, bw, bh = region.bubble_bbox
+            x, y, w, h = region.bbox
+            for other in regions:
+                if other is region or other.skip:
+                    continue
+                ox, oy, ow, oh = other.bbox
+                overlap = max(0, min(x+w, ox+ow)-max(x, ox))*max(0, min(y+h, oy+oh)-max(y, oy))
+                if (bw*bh > w*h*2 and bx <= ox and by <= oy and ox+ow <= bx+bw and oy+oh <= by+bh
+                        and overlap < min(w*h, ow*oh)*.1):
+                    # Большая чужая рамка охватила соседнюю отдельную реплику.
+                    region.bubble_bbox = None
+                    detached = True
+                    break
         crop, ink, box = source_ink(image, region)
         vertical_source = (any('\u3040' <= ch <= '\u9fff' for ch in region.text)
                            and region.bbox[3] > region.bbox[2] * 1.2)
         colour_rows = False
-        if not vertical_source and getattr(region, '_colour_ink', False) and getattr(region, '_retouch_preserve_background', False):
+        colour_fill = colour_stroke = None
+        if (not vertical_source and not getattr(region, '_retouch_tight_ink', False)
+                and getattr(region, '_colour_ink', False) and getattr(region, '_retouch_preserve_background', False)):
             # На цветной карточке контрастная маска ретуши включает фон.
             # Геометрию измеряем по светлым ядрам букв, независимо от неё.
             rgb = np.asarray(crop)
             cores = ((rgb.min(axis=2) > 170) & (np.ptp(rgb, axis=2) < 100)).astype(np.uint8)
             count, labels, stats, _ = cv2.connectedComponentsWithStats(cores)
             kept = [i for i in range(1, count) if stats[i, 4] >= 5 and stats[i, 3] >= max(5, crop.height*.06)
-                    and stats[i, 2] < crop.width * .45 and stats[i, 3] < crop.height * .8]
+                    and stats[i, 2] < crop.width * .45 and stats[i, 3] < crop.height * .8
+                    and stats[i, 4]/max(1, stats[i, 2]*stats[i, 3]) < .7]
             typical = float(np.median([stats[i, 3] for i in kept])) if kept else 0
             kept = [i for i in kept if typical*.4 <= stats[i, 3] <= typical*2.2]
             measured = np.isin(labels, kept).astype(np.uint8) * 255
-            if len(kept) >= 6 and .008 < np.mean(measured > 0) < .4:
+            if (len(kept) >= 6 and .008 < np.mean(measured > 0) < .4
+                    and np.mean(ink[measured > 0] > 0) >= .5):
                 ink = measured
                 colour_rows = True
+                colour_fill = tuple(int(v) for v in np.median(rgb[measured > 0], axis=0))
+                ring = (cv2.dilate(measured, np.ones((5, 5), np.uint8)) > 0) & (measured == 0)
+                darker = ring & (rgb.mean(axis=2) < np.mean(colour_fill)-30)
+                if np.count_nonzero(darker) >= 12:
+                    colour_stroke = tuple(int(v) for v in np.median(rgb[darker], axis=0))
         ys, xs = np.where(ink > 0)
         if not len(xs):
             continue
-        bubble = is_balloon(region)
-        if colour_rows:
+        bubble = is_balloon(region) and not detached
+        pastel_halo = _pastel_letter_halo(np.asarray(crop.convert('RGB'))) is not None
+        contrast_caption = getattr(region, '_retouch_contrast_ink', False)
+        # Способ выделения букв для ретуши не определяет форму и стиль речи.
+        # Локальный контраст нужен и обычным облачкам с градиентной заливкой.
+        if colour_rows or (pastel_halo and sum(ch.isalnum() for ch in region.text) > 6):
             bubble = False
         angle, evidence = speech_angle(ink) if bubble and region.bubble_bbox is not None else text_angle(ink)
-        if (not vertical_source and abs(angle) >= (3 if region.bubble_bbox is None else 8) and
+        if (region.bubble_bbox is None and not vertical_source and abs(angle) >= 3 and
                 getattr(region, '_retouch_preserve_background', False)):
             bubble = False
         if bubble and (sum(ch.isalnum() for ch in region.text) < 4 or
@@ -79,10 +113,22 @@ def prepare_regions(image, regions, pixel_scale=1.0):
         if (getattr(region, "_outline_ink", False) or getattr(region, "_colour_ink", False)
                 or not bubble):
             pad += 2. * pixel_scale
+        if getattr(region, '_retouch_tight_ink', False):
+            pad = 4. * pixel_scale
+        if pastel_halo:
+            pad = max(pad, 16. * pixel_scale)
         geometry = dict(version=1, kind='bubble' if bubble else 'free', angle=angle, evidence=evidence,
                         source_bbox=list(region.bbox),
                         ink_bbox=[a + int(xs.min()), b + int(ys.min()), int(xs.max() - xs.min() + 1), int(ys.max() - ys.min() + 1)],
                         outline_px=3. * pixel_scale, mask_pad_px=pad)
+        geometry['source_outline'] = bool(pastel_halo or getattr(region, '_outline_ink', False) or
+                                          _outlined_text_mask(np.asarray(crop.convert('RGB'))) is not None)
+        if bubble and vertical_source and not style.fill_locked:
+            pixels = np.asarray(crop.convert('RGB'))
+            colored = (ink > 0) & (np.ptp(pixels, axis=2) > 45) & (pixels.min(axis=2) < 170)
+            if np.count_nonzero(colored) >= max(12, np.count_nonzero(ink) * .15):
+                style.fill_rgb = tuple(int(v) for v in np.median(pixels[colored], axis=0))
+                geometry['source_fill'] = list(style.fill_rgb)
         if bubble:
             if region.bubble_bbox is None:
                 if white_components is None:
@@ -118,25 +164,55 @@ def prepare_regions(image, regions, pixel_scale=1.0):
             geometry['allow_vertical'] = region.block_type == 'sfx'
             if region.bubble_bbox is not None:
                 geometry['mask_kind'] = 'bubble'
-            if abs(angle) >= 3 or colour_rows:
+            if abs(angle) >= 3 or colour_rows or pastel_halo or contrast_caption or detached or region.block_type == 'narration':
                 from src.components.slanted_layout import source_lines
                 rows = source_lines(ink, (a, b), region.bbox, angle)
                 if rows:
                     geometry['source_lines'] = rows
-                    if region.block_type == 'dialogue' and (colour_rows or region.bubble_bbox is not None):
+                    if region.block_type in ('dialogue', 'narration'):
                         geometry['readable_caption'] = True
                         margin = float(np.median([row[3] for row in rows])) * .5
+                        if colour_rows:
+                            # Слипшиеся строки не задают запас высотой в пол-абзаца.
+                            margin = min(margin, max(4.*pixel_scale, typical*.2))
                         geometry['caption_padding'] = margin
                         ix, iy, iw, ih = geometry['ink_bbox']
                         geometry['ink_bbox'] = [ix-margin, iy-margin, iw+2*margin, ih+2*margin]
+        if (not bubble and region.block_type == 'sfx' and region.text.strip().startswith('*')
+                and region.text.strip().endswith('*') and region.bbox[2] <= 160*pixel_scale
+                and not style.font_size_override):
+            # Короткая ремарка длиннее английского press: освобождаем небольшой
+            # запас вокруг исходных букв вместо сжатия всего русского слова.
+            ix, iy, iw, ih = geometry['ink_bbox']
+            geometry['ink_bbox'] = [ix-iw*.4, iy-ih*.2, iw*1.8, ih*1.4]
+            geometry['readable_action'] = True
+            geometry.pop('source_lines', None)
+        source_letters = sum(ch.isalnum() for ch in region.text)
+        target_letters = sum(ch.isalnum() for ch in (region.translation or region.text))
+        if (bubble and region.bubble_bbox is None and 1 <= source_letters <= 4
+                and source_letters*1.5 < target_letters <= 10 and not style.font_size_override):
+            points = geometry.get('contour') or []
+            contour_width = np.ptp(np.asarray(points)[:, 0]) if points else 0
+            if contour_width <= region.bbox[2]*1.3:
+                # У непривязанного короткого приветствия оболочка букв не
+                # является настоящим облачком. Русскому слову нужен запас.
+                ix, iy, iw, ih = geometry['ink_bbox']
+                geometry.update(kind='free', readable_caption=True,
+                                source_lines=[[ix, iy, iw, ih]], caption_padding=ih*.2,
+                                ink_bbox=[ix-iw*.4, iy-ih*.2, iw*1.8, ih*1.4])
+                geometry.pop('contour', None)
         if bubble and region.bubble_bbox is not None and abs(angle) < 8:
             angle = 0.
             geometry['angle'] = 0.
         region.auto_layout = geometry
         style.rotation = angle
         if not bubble and style.stroke_mode == 'auto' and not style.fill_locked:
-            style.fill_rgb = (18, 18, 18)
-            style.stroke_rgb = (255, 255, 255)
+            # Подтверждённые светлые ядра сохраняют исходный цвет и обводку.
+            style.fill_rgb = colour_fill or (18, 18, 18)
+            style.stroke_rgb = colour_stroke if colour_rows else (255, 255, 255)
+            if colour_rows:
+                geometry['source_fill'] = list(style.fill_rgb)
+                geometry['source_outline'] = colour_stroke is not None
             style.stroke_width = 3. * pixel_scale
 
 
@@ -254,7 +330,7 @@ def adaptive_masks(image, regions, ordinary, free, grow_px=0):
             continue
         _, ink, (a, b, c, d) = source_ink(image, region)
         boundary = None
-        if meta.get('kind') == 'free' or region.bubble_bbox is None:
+        if (meta.get('kind') == 'free' or region.bubble_bbox is None) and not getattr(region, '_retouch_tight_ink', False):
             crop = np.asarray(image.crop((a, b, c, d)))
             confirmed, inverse_outline = _unexplained_light_ink(crop)
             if confirmed is not None and inverse_outline:
@@ -318,7 +394,15 @@ def adaptive_masks(image, regions, ordinary, free, grow_px=0):
                             view=local[top-ya:bottom-ya,left-xa:right-xa]
                             view[protected[top-pb:bottom-pb,left-pa:right-pa]>0]=0
                         continue
-                local[max(0, y - ya):max(0, min(yb, y + h) - ya), max(0, x - xa):max(0, min(xb, x + w) - xa)] = 0
+                # Пересечение двух переводимых рамок не является чужим рисунком.
+                # Защищаем соседа лишь за пределами исходной рамки этой реплики.
+                protected = np.zeros_like(local, bool)
+                protected[max(0, y-ya):max(0, min(yb, y+h)-ya),
+                          max(0, x-xa):max(0, min(xb, x+w)-xa)] = True
+                rx, ry, rw, rh = region.bbox
+                protected[max(0, ry-ya):max(0, min(yb, ry+rh)-ya),
+                          max(0, rx-xa):max(0, min(xb, rx+rw)-xa)] = False
+                local[protected] = 0
         destination = free if meta.get('kind') == 'free' else ordinary
         # Удалить старую маску лишь в боксе этой надписи; остальные регионы не затирать.
         destination[ya:yb, xa:xb] = np.maximum(destination[ya:yb, xa:xb], local)
@@ -391,6 +475,12 @@ def source_ink(image, region):
         region._outline_ink = True
     if getattr(local, "_colour_ink", False):
         region._colour_ink = True
+    region._retouch_contrast_ink = bool(getattr(local, '_retouch_contrast_ink', False))
+    if region._retouch_contrast_ink:
+        region._retouch_preserve_background = True
+    region._retouch_tight_ink = bool(getattr(local, '_retouch_tight_ink', False))
+    if region._retouch_tight_ink:
+        region._retouch_preserve_background = True
     if region.block_type != 'sfx' and (not region.document) and not getattr(local, "_colour_ink", False):
         (count, labels, stats, _) = cv2.connectedComponentsWithStats((ink > 0).astype(np.uint8))
         candidates = [s[3] for s in stats[1:] if s[4] >= 6 and s[3] > 3 and (s[2] < crop.width * 0.4) and (s[3] < crop.height * 0.7)]

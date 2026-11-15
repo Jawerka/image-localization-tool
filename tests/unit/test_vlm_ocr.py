@@ -268,3 +268,39 @@ def test_crop_verification_failure_keeps_previous_text_and_warns():
     region.text = 'READABLE'
     assert ocr.read_crop(Image.new('RGB', (80, 80)), region) == 'READABLE'
     assert len(ocr.warnings) == 1
+
+
+def test_long_decorative_sentence_gets_semantic_type_without_replacing_text():
+    class Client:
+        def chat_json(self, **kwargs):
+            assert kwargs['schema_name'] == 'text_kind'
+            assert kwargs['images'] == []
+            return {'type': 'dialogue', 'text': 'invented replacement'}
+    region = TextRegion(1, (0, 0, 100, 40), text='WE HAVE WON ANOTHER MATCH AGAIN TODAY', block_type='sfx')
+    ocr = VlmOcr(Client())
+    ocr._review_long_sfx(region)
+    assert region.block_type == 'dialogue'
+    assert region.text == 'WE HAVE WON ANOTHER MATCH AGAIN TODAY'
+
+
+def test_repeated_sound_does_not_need_semantic_request():
+    class Client:
+        def chat_json(self, **kwargs):
+            raise AssertionError('Лишний запрос для повторяющегося звука')
+    region = TextRegion(1, (0, 0, 100, 40), text='BANG BANG BANG BANG BANG BANG', block_type='sfx')
+    ocr = VlmOcr(Client())
+    ocr._review_long_sfx(region)
+    assert region.block_type == 'sfx'
+    assert not ocr.warnings
+
+
+def test_semantic_review_failure_keeps_source_and_type():
+    class Client:
+        def chat_json(self, **kwargs):
+            raise TimeoutError('Сервер недоступен')
+    region = TextRegion(1, (0, 0, 100, 40), text='WE HAVE WON ANOTHER MATCH AGAIN TODAY', block_type='sfx')
+    ocr = VlmOcr(Client())
+    ocr._review_long_sfx(region)
+    assert region.block_type == 'sfx'
+    assert region.text == 'WE HAVE WON ANOTHER MATCH AGAIN TODAY'
+    assert ocr.warnings

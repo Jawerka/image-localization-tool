@@ -32,6 +32,60 @@ def test_rejects_invalid_or_noncontent_boxes():
     assert parse_discovery({'blocks': cases}, (1000, 500), []) == []
 
 
+def test_local_short_candidate_still_requires_vlm_confirmation(monkeypatch):
+    import src.components.text_discovery as discovery
+    seed = dict(text='HI.', type='dialogue', x0=100, y0=100, x1=200, y1=200)
+    class Client:
+        def chat_json(self, *args, **kwargs):
+            return {'blocks': []}
+    monkeypatch.setattr(discovery, '_short_ocr_blocks', lambda image: [seed])
+    monkeypatch.setattr(discovery, 'refine_discovery', lambda *args: None)
+    monkeypatch.setattr(discovery, '_verify_sfx', lambda *args: False)
+    image = Image.new('RGB', (1000, 1000))
+    assert discovery.discover_missing_text(image, [], Client()) == []
+    monkeypatch.setattr(discovery, '_verify_sfx', lambda *args: True)
+    assert [r.text for r in discovery.discover_missing_text(image, [], Client())] == ['HI.']
+
+
+def test_short_ocr_candidates_are_scaled_and_prioritize_tiny_replies(monkeypatch):
+    import src.components.text_discovery as discovery
+    from src.components.rapid_ocr import OcrWord
+    from PIL import ImageDraw
+    image = Image.new('RGB', (500, 250), 'white')
+    ImageDraw.Draw(image).rectangle((10, 10, 200, 200), fill='black')
+    class Ocr:
+        def _words(self, image):
+            return [OcrWord('LONGER WORD', (200, 50, 100, 25), .95),
+                    OcrWord('HI.', (50, 50, 50, 25), .89),
+                    OcrWord('BAD', (100, 100, 30, 20), .3)]
+    monkeypatch.setattr(discovery, '_discovery_ocr', lambda: Ocr())
+    blocks = discovery._short_ocr_blocks(image)
+    assert [b['text'] for b in blocks] == ['HI.', 'LONGER WORD']
+    assert [blocks[0][k] for k in ('x0', 'y0', 'x1', 'y1')] == [100, 200, 200, 300]
+
+
+def test_known_blocks_do_not_exhaust_budget_before_short_missing_reply(monkeypatch):
+    import src.components.text_discovery as discovery
+    known = [TextRegion(i+1, (20+(i%8)*80, 20+(i//8)*80, 40, 30),
+                        text=f'KNOWN {i}', block_type='dialogue') for i in range(23)]
+    blocks = [dict(text=r.text, type='dialogue', x0=r.bbox[0], y0=r.bbox[1],
+                   x1=r.bbox[0]+40, y1=r.bbox[1]+30) for r in known]
+    blocks.append(dict(text='HI.', type='dialogue', x0=800, y0=800, x1=850, y1=830))
+    class Client:
+        def chat_json(self, *args, **kwargs):
+            return {'blocks': blocks}
+    checked = []
+    def verify(image, region, client):
+        checked.append(region.text)
+        return region.text == 'HI.'
+    monkeypatch.setattr(discovery, '_discovery_tiles', lambda *args: [(0, 0, 1000, 1000)]*3)
+    monkeypatch.setattr(discovery, '_verify_sfx', verify)
+    monkeypatch.setattr(discovery, 'refine_discovery', lambda *args: None)
+    extras = discovery.discover_missing_text(Image.new('RGB', (1000, 1000)), known, Client())
+    assert checked == ['HI.']
+    assert [r.text for r in extras] == ['HI.']
+
+
 def test_overlapping_fragment_of_existing_vertical_speech_is_not_new_text():
     """Ошибки чтения между словами не превращают край реплики в новый блок."""
     known = TextRegion(1, (500, 400, 130, 180), text='足りない物は私が朝までになんとかするから', block_type='dialogue')
@@ -365,3 +419,19 @@ def test_sfx_budget_is_shared_between_tiles_and_does_not_starve_later_text(monke
     assert client.tiles == len(_discovery_tiles((1000, 3600), 1800))
     assert client.verifications <= 24
     assert any('бюджет' in item for item in warnings)
+
+
+@pytest.mark.parametrize('reading, accepted', [('2 MINUTES LATER:', True), ('LATER:', False)])
+def test_partial_caption_requires_independent_reading_of_entire_block(reading, accepted):
+    from src.components.text_discovery import _verify_sfx
+    class Client:
+        def chat_json(self, prompt, schema, name, **kwargs):
+            if name == 'read_missing_text':
+                assert 'LATER' not in prompt
+                return {'text': reading}
+            return {'blocks': [dict(text='2 MINUTES LATER:', type='narration',
+                                    x0=200, y0=200, x1=650, y1=650)]}
+    region = TextRegion(1, (100, 100, 100, 100), text='LATER:', block_type='dialogue')
+    assert _verify_sfx(Image.new('RGB', (500, 500)), region, Client()) is accepted
+    assert region.text == ('2 MINUTES LATER:' if accepted else 'LATER:')
+    assert region.block_type == ('narration' if accepted else 'dialogue')

@@ -2506,6 +2506,7 @@ def _preview_typesetter(state: AppState):
         stroke_ratio=float(getattr(settings, "text_stroke_ratio", 0) or 0),
         margin_ratio=float(getattr(settings, "text_margin", 0) or 0),
         font_scale=float(getattr(settings, "text_scale", 1.1)),
+        neutral_text_colors=bool(getattr(settings, "neutral_text_colors", True)),
     )
 
 

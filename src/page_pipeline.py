@@ -312,6 +312,7 @@ class PagePipeline:
             margin_ratio=self.config.text_margin,
             adaptive_text=self.config.adaptive_text,
             font_scale=self.config.text_scale,
+            neutral_text_colors=self.config.neutral_text_colors,
         )
         self.ocr_name = ""
         self.translator_name = ""
@@ -455,6 +456,8 @@ class PagePipeline:
             detections = filter_detections(self._detect(work), work.size)
         direction_hint = self._geometric_order()
         regions = build_regions(detections, reading_order=direction_hint)
+        from src.components.bubble_partition import split_balloon_regions
+        regions = split_balloon_regions(work, regions)
         regions = refine_document_regions(np.array(work), regions, reading_order=direction_hint)
         if mode in ("ctd", "both") and _sfx_on(self.config):
             regions = self._add_ctd_regions(
@@ -623,16 +626,19 @@ class PagePipeline:
 
         report(75, "Очистка текста", "inpaint")
         started = time.perf_counter()
-        if not np.any(mask):
-            cleaned = work
+        from src.components.retouch_ink import fill_flat_dialogue
+
+        prepared_work, pending_mask = fill_flat_dialogue(work, mask, drawable)
+        if not np.any(pending_mask):
+            cleaned = prepared_work
         else:
             reconstruct = (mask_sfx > 0) | (preserve > 0)
-            sfx_part = np.where((mask > 0) & reconstruct, np.uint8(255), np.uint8(0))
-            other_part = np.where((mask > 0) & ~reconstruct, np.uint8(255), np.uint8(0))
+            sfx_part = np.where((pending_mask > 0) & reconstruct, np.uint8(255), np.uint8(0))
+            other_part = np.where((pending_mask > 0) & ~reconstruct, np.uint8(255), np.uint8(0))
             if not np.any(sfx_part):
-                cleaned = self._inpaint(work, mask, warnings)
+                cleaned = self._inpaint(prepared_work, pending_mask, warnings)
             else:
-                cleaned = work
+                cleaned = prepared_work
                 if np.any(other_part):
                     cleaned = self._inpaint(cleaned, other_part, warnings)
                 cleaned = self._inpaint(cleaned, sfx_part, warnings, allow_flat_fill=False)

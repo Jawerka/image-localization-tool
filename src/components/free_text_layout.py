@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import math
-import textwrap
 import cv2
 import numpy as np
 from PIL import Image, ImageFont
@@ -29,9 +28,22 @@ def free_raster(text, font_path, style, geometry, scale=2, frozen=None):
     original_text = text
     if frozen:
         text = frozen['text']
-    elif mode != 'vertical' and '\n' not in text and len(text.split()) > 1 and width / height < 3:
-        limit = max(6, round(math.sqrt(len(text) * max(.4, width / height) * 1.8)))
-        text = '\n'.join(textwrap.wrap(text, width=limit, break_long_words=False, break_on_hyphens=False))
+    elif (mode != 'vertical' and '\n' not in text and 1 < len(text.split()) <= 80
+          and not (style.font_size_override or style.letter_spacing or style.line_spacing)):
+        # Длина в символах не учитывает ширину кириллицы: выбираем перенос
+        # по реальному растру, чтобы длинное слово не уменьшало весь блок.
+        from src.components.slanted_layout import _split_lines
+        best = None
+        for count in range(1, min(8, len(text.split())) + 1):
+            lines = _split_lines(text, [width] * count, font, 0)
+            candidate = '\n'.join(lines)
+            mask = glyph_mask(candidate, font, line_spacing=20)
+            turned = mask.rotate(float(style.rotation), Image.Resampling.BICUBIC, expand=True)
+            tw, th = turned.size
+            score = min(width / max(1, tw), height / max(1, th))
+            if best is None or score > best[0]:
+                best = (score, candidate)
+        text = best[1]
     reference_factor = 144 / max(1, style.font_size_override or style.font_size)
     spacing = float(style.letter_spacing or 0) * reference_factor
     line_gap = max(0, 20 + style.line_spacing * reference_factor)
@@ -62,7 +74,7 @@ def free_raster(text, font_path, style, geometry, scale=2, frozen=None):
     if frozen:
         base_w, base_h = int(frozen['width']), int(frozen['height'])
     else:
-        tw, th = (bounds[2] - bounds[0], bounds[3] - bounds[1]) if bounds else turned.size
+        tw, th = turned.size
         factor = min(width / max(1, tw), height / max(1, th))
         if style.font_size_override > 0:
             factor = style.font_size_override / 144.

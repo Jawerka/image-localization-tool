@@ -6,7 +6,282 @@ import cv2
 import numpy as np
 
 
+def fill_flat_dialogue(image, mask, regions):
+    """Залить буквы цветного облачка по проверенному свободному фону.
+
+    Кольцо снаружи маски может пересекать контур облачка. Проверяем фон
+    внутри текстового поля, а рисунок и градиенты оставляем восстановлению.
+    """
+    from PIL import Image
+
+    rgb = np.asarray(image.convert('RGB'))
+    result = rgb.copy()
+    remaining = mask.copy()
+    for region in regions:
+        if (region.bubble_bbox is None or region.block_type != 'dialogue'
+                or region.manual or region.edited):
+            continue
+        x, y, w, h = region.bbox
+        a, b = max(0, x), max(0, y)
+        c, d = min(image.width, x+w), min(image.height, y+h)
+        crop, hole = rgb[b:d, a:c], remaining[b:d, a:c]
+        if not crop.size or not np.any(hole):
+            continue
+        background = crop[hole == 0]
+        if len(background) < max(30, hole.size * .2):
+            continue
+        colour = np.median(background, axis=0)
+        # Только цветные светлые поля: белые облачка уже имеют свой путь.
+        if colour.min() < 150 or np.ptp(colour) < 20:
+            continue
+        distance = np.max(np.abs(background.astype(float)-colour), axis=1)
+        if np.percentile(distance, 95) > 12:
+            continue
+        # Флаг восстановления бывает и у ложных светлых ядер обычной речи.
+        # Вместо него проверяем, что под маской лишь тёмные буквы и их
+        # сглаживание к тому же фону, а не другая палитра рисунка.
+        pixels = crop[hole > 0].astype(float)
+        factor = np.clip((pixels @ colour) / (colour @ colour), 0, 1)
+        residual = np.max(np.abs(pixels-factor[:, None]*colour), axis=1)
+        if np.percentile(residual, 95) > 24:
+            continue
+        result[b:d, a:c][hole > 0] = np.round(colour).astype(np.uint8)
+        hole[:] = 0
+    return Image.fromarray(result), remaining
+
+
+def coherent_colour_ink(crop: np.ndarray, candidate: np.ndarray | None) -> np.ndarray | None:
+    """Цветная надпись подтверждается общей палитрой нескольких букв.
+
+    Светлая деталь рисунка внутри изогнутого заголовка не входит в эту
+    палитру. Контуры цветных штрихов замыкаются вместе с просветами букв.
+    """
+    if candidate is None:
+        return None
+    hsv = cv2.cvtColor(crop, cv2.COLOR_RGB2HSV)
+    seed = (candidate > 0) & (hsv[..., 1] >= 80)
+    if np.count_nonzero(seed) < 40:
+        return None
+    hue = hsv[..., 0].astype(np.int16)
+    counts = np.bincount(hue[seed]//10, minlength=18)
+    center = int(np.argmax(counts))*10+5
+    delta = np.abs(hue-center)
+    match = np.minimum(delta, 180-delta) <= 18
+    if np.mean(match[seed]) < .6:
+        return None
+    saturation = max(80, float(np.percentile(hsv[..., 1][seed], 15))-25)
+    binary = (match & (hsv[..., 1] >= saturation)).astype(np.uint8)
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(binary)
+    height, width = binary.shape
+    kept = [i for i in range(1, n) if stats[i, 4] >= 8
+            and 3 <= stats[i, 3] <= height*.55 and 2 <= stats[i, 2] <= width*.35
+            and stats[i, 0] > 0 and stats[i, 1] > 0
+            and stats[i, 0]+stats[i, 2] < width and stats[i, 1]+stats[i, 3] < height]
+    if len(kept) < 6:
+        return None
+    ink = np.isin(labels, kept).astype(np.uint8)*255
+    # Небольшой разрыв сглаживания не должен раскрывать контур O/B.
+    ink = cv2.morphologyEx(ink, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
+    contours, _ = cv2.findContours(ink, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    cv2.drawContours(ink, contours, -1, 255, -1)
+    return ink
+
+
+def clipped_dark_ink(rgb: np.ndarray, bbox, *, _thick_only: bool = False, include_punctuation: bool = False):
+    """Добрать целые буквы белого облачка за тесным боксом детектора.
+
+    Контекст нужен лишь для компонент букв; силуэт и рамка не расширяются.
+    """
+    x, y, w, h = bbox
+    pad = max(8, min(128 if _thick_only else 64, round(min(w, h)*.5)))
+    a, b = max(0, x-pad), max(0, y-pad)
+    c, d = min(rgb.shape[1], x+w+pad), min(rgb.shape[0], y+h+pad)
+    crop = rgb[b:d, a:c]
+    if not crop.size or np.mean(np.min(crop, axis=2) >= 240) < .45:
+        return None
+    gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
+    binary = (gray < 160).astype(np.uint8)
+    count, labels, stats, centers = cv2.connectedComponentsWithStats(binary)
+    ids = [i for i in range(1, count) if 5 <= stats[i, 4] < w*h*.2
+           and 2 <= stats[i, 3] <= h*.95 and 1 <= stats[i, 2] <= w*.6
+           and stats[i, 0] > 0 and stats[i, 1] > 0
+           and stats[i, 0]+stats[i, 2] < c-a and stats[i, 1]+stats[i, 3] < d-b
+           and x-pad*.5 <= a+centers[i, 0] <= x+w+pad*.5
+           and y-pad*.5 <= b+centers[i, 1] <= y+h+pad*.5
+           and stats[i, 0]+stats[i, 2]+a > x and stats[i, 0]+a < x+w
+           and stats[i, 1]+stats[i, 3]+b > y and stats[i, 1]+b < y+h]
+    if len(ids) < 3:
+        return None
+    typical = float(np.median([stats[i, 3] for i in ids]))
+    ids = [i for i in ids if stats[i, 3] >= max(3, typical*.35)
+           and .12 <= stats[i, 2]/stats[i, 3] <= 8]
+    if include_punctuation and not _thick_only:
+        margin = max(4, typical*.4)
+        ids.extend(i for i in range(1, count) if i not in ids and 5 <= stats[i, 4] <= typical**2*.25
+                   and 1 <= stats[i, 2] <= typical*.4 and 2 <= stats[i, 3] <= typical*.85
+                   and stats[i, 0] > 0 and stats[i, 1] > 0
+                   and stats[i, 0]+stats[i, 2] < c-a and stats[i, 1]+stats[i, 3] < d-b
+                   and y <= b+stats[i, 1] and b+stats[i, 1]+stats[i, 3] <= y+h
+                   and x-margin <= a+stats[i, 0] and a+stats[i, 0]+stats[i, 2] <= x+w+margin)
+    if len(ids) < 3:
+        return None
+    # Подтверждённая буква может исчезнуть и внутри бокса из-за выбора
+    # контрастной маски. Возвращаем компоненты букв, сохраняя фильтр рамки.
+    ink = np.zeros_like(gray) if _thick_only else np.isin(labels, ids).astype(np.uint8)*255
+    # Буква может касаться тонкой рамки: вся её компонента тогда уходит
+    # на край контекста. Отделяем толстое ядро и возвращаем лишь ближний
+    # к нему тёмный штрих, не проходя вдоль контура облачка.
+    distance = cv2.distanceTransform(binary, cv2.DIST_L2, 5)
+    # Сохраняем прежний добор; более толстое ядро отдельно отделяет букву
+    # от рамки на увеличенных страницах. Оно может пересекать тесный бокс,
+    # даже когда центр буквы остался за его краем.
+    cutoffs = sorted({4.0, max(4.0, typical*.04)}) if _thick_only else [3.0]
+    for cutoff in cutoffs:
+        cores = (distance > cutoff).astype(np.uint8)
+        n_core, core_labels, core_stats, core_centers = cv2.connectedComponentsWithStats(cores)
+        margin = pad*.5 if cutoff > 3 else 0
+        joined = [i for i in range(1, n_core) if core_stats[i, 4] >= 10
+                  and max(4, typical*.35) <= core_stats[i, 3] <= h*.65
+                  and (cutoff == 3 or core_stats[i, 3] <= typical*1.8)
+                  and 2 <= core_stats[i, 2] <= w*.6
+                  and (cutoff == 3 or core_stats[i, 2]/core_stats[i, 3] >= .2)
+                  and core_stats[i, 0] > 0 and core_stats[i, 1] > 0
+                  and core_stats[i, 0]+core_stats[i, 2] < c-a and core_stats[i, 1]+core_stats[i, 3] < d-b
+                  and x-margin <= a+core_centers[i, 0] <= x+w+margin
+                  and y-margin <= b+core_centers[i, 1] <= y+h+margin
+                  and a+core_stats[i, 0]+core_stats[i, 2] > x
+                  and a+core_stats[i, 0] < x+w
+                  and b+core_stats[i, 1]+core_stats[i, 3] > y
+                  and b+core_stats[i, 1] < y+h
+                  and (_thick_only or not np.any(np.isin(labels[core_labels == i], ids)))]
+        if joined:
+            reached = np.isin(core_labels, joined).astype(np.uint8)
+            for _ in range(max(3, int(np.ceil(cutoff)))):
+                reached = cv2.dilate(reached, np.ones((3, 3), np.uint8)) & binary
+            ink = np.maximum(ink, reached*255)
+    if not _thick_only:
+        extra = clipped_dark_ink(rgb, bbox, _thick_only=True)
+        if extra is not None:
+            addition, (aa, bb, cc, dd) = extra
+            addition[b-bb:d-bb, a-aa:c-aa] = np.maximum(
+                addition[b-bb:d-bb, a-aa:c-aa], ink)
+            return addition, (aa, bb, cc, dd)
+    if not np.any(ink):
+        return None
+    return ink, (a, b, c, d)
+
+
+def contrasted_dark_ink(crop: np.ndarray) -> np.ndarray | None:
+    """Тёмные буквы на неоднородной полупрозрачной плашке.
+
+    Локальное замыкание оценивает фон под узким штрихом, а не берёт
+    единый цвет из кольца. На ровной бумаге прежний путь не меняется.
+    """
+    if crop.ndim != 3 or min(crop.shape[:2]) < 16:
+        return None
+    gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
+    height, width = gray.shape
+    median = float(np.median(gray))
+    if not 100 <= median < 225 or np.mean(np.min(crop, axis=2) >= 245) > .5:
+        return None
+    radius = max(3, min(31, round(height * .09)))
+    background = cv2.morphologyEx(gray, cv2.MORPH_CLOSE,
+        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2*radius+1, 2*radius+1)))
+    contrast = background.astype(np.int16) - gray.astype(np.int16)
+    peaks = ((contrast >= 28) & (gray < median-20)).astype(np.uint8)
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(peaks)
+    ids = [i for i in range(1, count) if 8 <= stats[i, 4] <= gray.size*.06
+           and 3 <= stats[i, 3] <= height*.6 and 2 <= stats[i, 2] <= width*.25
+           and stats[i, 0] > 0 and stats[i, 1] > 0
+           and stats[i, 0]+stats[i, 2] < width and stats[i, 1]+stats[i, 3] < height]
+    if len(ids) < 6:
+        return None
+    typical = float(np.percentile([stats[i, 3] for i in ids], 65))
+    ids = [i for i in ids if typical*.35 <= stats[i, 3] <= typical*1.8]
+    ink = np.isin(labels, ids).astype(np.uint8)*255
+    if len(ids) < 6 or not .008 <= np.mean(ink > 0) <= .35:
+        return None
+    clear = cv2.dilate((ink > 0).astype(np.uint8), np.ones((7, 7), np.uint8)) == 0
+    if np.count_nonzero(clear) < 50:
+        return None
+    lo, hi = np.percentile(crop[clear], [10, 90], axis=0)
+    if np.max(hi-lo) < 30:
+        return None
+    return ink
+
+
 def confirmed_light_ink(crop: np.ndarray) -> tuple[np.ndarray | None, bool]:
+    """Сохранить белые буквы и дополнить их подтверждёнными цветными ядрами."""
+    original, inverse = _confirmed_light_ink(crop)
+    halo = _pastel_letter_halo(crop)
+    if halo is not None:
+        original = halo if original is None else np.maximum(original, halo)
+        inverse = True
+    if crop.ndim != 3 or min(crop.shape[:2]) < 8:
+        return original, inverse
+    chroma = np.ptp(crop, axis=2)
+    tinted = (np.min(crop, axis=2) >= 180) & (chroma >= 30) & (chroma < 80)
+    if np.count_nonzero(tinted) < 6:
+        return original, inverse
+    addition, outlined = _confirmed_light_ink(crop, include_tinted=True)
+    if addition is None:
+        return original, inverse
+    return (addition if original is None else np.maximum(original, addition)), inverse or outlined
+
+
+def _pastel_letter_halo(crop: np.ndarray) -> np.ndarray | None:
+    """Широкая пастельная обводка вокруг нескольких светлых букв.
+
+    Тёплые полупрозрачные ядра тоже считаются светлыми. Цветное поле
+    отбрасывается, если оно не образует ограниченную оболочку ядер.
+    """
+    if crop.ndim != 3 or min(crop.shape[:2]) < 16:
+        return None
+    cores = (crop.min(2) >= 150) & (crop.max(2) >= 190) & (np.ptp(crop, axis=2) < 80)
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(cores.astype(np.uint8))
+    height, width = cores.shape
+    ids = [i for i in range(1, n) if stats[i, 4] >= 12 and min(stats[i, 2:4]) >= 3
+           and 8 <= stats[i, 3] < height*.85 and stats[i, 2] < width*.7
+           and stats[i, 4] < cores.size*.15 and stats[i, 0] > 0 and stats[i, 1] > 0
+           and stats[i, 0]+stats[i, 2] < width and stats[i, 1]+stats[i, 3] < height]
+    if len(ids) < 3:
+        return None
+    typical = float(np.percentile(stats[ids, 3], 75))
+    ids = [i for i in ids if stats[i, 3] >= typical*.35]
+    if len(ids) < 3:
+        return None
+    cores = np.isin(labels, ids)
+    ring = (cv2.dilate(cores.astype(np.uint8), np.ones((5, 5), np.uint8)) > 0) & ~cores
+    chroma = np.ptp(crop, axis=2) > 18
+    pixels = crop[ring & chroma]
+    if len(pixels) < max(20, np.count_nonzero(ring)*.6):
+        return None
+    colours, counts = np.unique(pixels.astype(np.int32)//16, axis=0, return_counts=True)
+    if counts.max() < len(pixels)*.25:
+        return None
+    dominant = colours[counts.argmax()]
+    colour = np.median(pixels[np.all(pixels.astype(np.int32)//16 == dominant, axis=1)], axis=0)
+    delta = crop.astype(np.float32)-crop.mean(axis=2, keepdims=True)
+    direction = colour-colour.mean()
+    # Оттенок оболочки сохраняется при просвечивании разного фона.
+    # Более бледное синее поле не должно присоединяться к бирюзовым буквам.
+    projection = np.sum(delta*direction, axis=2)/max(1., float(np.sum(direction**2)))
+    shell = ((np.linalg.norm(crop.astype(np.float32)-colour, axis=2) < 65)
+             & chroma & (projection >= .85))
+    distance = cv2.distanceTransform((~cores).astype(np.uint8), cv2.DIST_L2, 5)
+    local = shell & (distance <= typical*.4)
+    # Если тот же цвет продолжается далеко за буквы, это заливка плашки.
+    near = (distance > typical*.4) & (distance < typical*.7)
+    if np.any(near) and np.mean(shell[near]) > .35:
+        return None
+    if np.count_nonzero(local) < np.count_nonzero(cores)*.4:
+        return None
+    result = (local | cores).astype(np.uint8)*255
+    contours, _ = cv2.findContours(result, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    return cv2.drawContours(result, contours, -1, 255, -1)
+
+
+def _confirmed_light_ink(crop: np.ndarray, *, include_tinted: bool = False) -> tuple[np.ndarray | None, bool]:
     """Светлые штрихи на контрастном фоне либо светлое ядро с обводкой.
 
     Большие светлые поля и рамки отбрасываются. Возвращается маска чернил
@@ -30,7 +305,12 @@ def confirmed_light_ink(crop: np.ndarray) -> tuple[np.ndarray | None, bool]:
         enclosed = _inverse_outline(gray, white)
         if enclosed is not None:
             return np.maximum(enclosed, coloured) if coloured is not None else enclosed, True
-    bright = ((np.min(crop, axis=2) >= (180 if dark_panel else 210)) & neutral).astype(np.uint8)
+    # Светлые сиреневые/голубые ядра подтверждаются тёмным кольцом ниже.
+    # Они дополняют прежний порог, не меняя проверку белого поля/просветов.
+    chroma = np.ptp(crop, axis=2)
+    tinted = include_tinted & (np.min(crop, axis=2) >= 180) & (chroma >= 30) & (chroma < 80)
+    bright = (((np.min(crop, axis=2) >= (180 if dark_panel else 210)) & neutral)
+              | tinted).astype(np.uint8)
     count, labels, stats, _ = cv2.connectedComponentsWithStats(bright)
     seeds = np.zeros_like(gray)
     outlined_seeds = np.zeros_like(gray)
@@ -370,7 +650,7 @@ def smooth_light_mask(crop: np.ndarray, ink: np.ndarray) -> np.ndarray:
 def boundary_ink(image, bbox, bounds):
     """Восстановить только подтверждённые компоненты, обрезанные краем ROI."""
     x, y, w, h = bbox
-    pad = max(5, min(32, round(min(w, h) * .08)))
+    pad = max(8, min(64, round(min(w, h) * .25)))
     a, b, c, d = bounds
     aa, bb, cc, dd = max(0, x-pad), max(0, y-pad), min(image.width, x+w+pad), min(image.height, y+h+pad)
     if (aa, bb, cc, dd) == bounds:
@@ -378,11 +658,17 @@ def boundary_ink(image, bbox, bounds):
     extra, inverse = confirmed_light_ink(np.asarray(image.crop((aa, bb, cc, dd))))
     if extra is None or not inverse:
         return None
-    _, labels = cv2.connectedComponents((extra > 0).astype(np.uint8))
+    _, labels, stats, _ = cv2.connectedComponentsWithStats((extra > 0).astype(np.uint8))
     inside = np.zeros_like(extra, bool)
     inside[b-bb:d-bb, a-aa:c-aa] = True
     crossing = np.intersect1d(np.unique(labels[inside]), np.unique(labels[~inside]))
     crossing = crossing[crossing > 0]
+    # Добор относится к букве/слову у края, а не к большому фрагменту
+    # облачка или рисунка, связавшемуся со светлой обводкой.
+    crossing = [i for i in crossing if stats[i, 4] <= w*h*.2
+                and stats[i, 2] <= w*.75 and stats[i, 3] <= h*.75
+                and stats[i, 0] > 0 and stats[i, 1] > 0
+                and stats[i, 0]+stats[i, 2] < cc-aa and stats[i, 1]+stats[i, 3] < dd-bb]
     if not len(crossing):
         return None
     extra = np.isin(labels, crossing).astype(np.uint8) * 255

@@ -199,3 +199,21 @@ def test_caption_scale_keeps_outline_inside_its_field(angle):
     assert xs.min() >= 100 and xs.max() < 550
     assert ys.min() >= 90 and ys.max() < 170
     assert setter._last_layouts[1]['raster_fit']['text'].replace('\n', ' ') == region.translation
+
+
+def test_caption_fits_field_reduced_by_neighbour():
+    """Запас карточки не разрешает залезать на соседнюю исходную реплику."""
+    image = Image.new('RGB', (600, 420), (90, 65, 55))
+    regions = []
+    for ident, box, ink_box, rows, angle, text in [
+        (1, [80, 40, 300, 80], [60, 20, 340, 120], [[80, 40, 300, 80]], 0, 'ПЕРВАЯ РЕПЛИКА'),
+        (2, [100, 140, 280, 150], [70, 110, 340, 210], [[100, 170, 280, 80]], 20,
+         'НО ТЫ САМА СОСТАВИЛА ЭТО ДЛИННОЕ РАСПИСАНИЕ'),
+    ]:
+        regions.append(TextRegion(ident, tuple(box), translation=text, block_type='dialogue',
+            style=TextStyle(rotation=angle), auto_layout=dict(version=1, kind='free', readable_caption=True,
+                source_bbox=box, ink_bbox=ink_box, source_lines=rows, caption_padding=30, outline_px=3)))
+    setter = Typesetter(min_font_size=10, font_scale=1.1)
+    _, overflow = setter.render(image, regions)
+    assert not overflow
+    assert setter._last_layouts[2]['raster_fit']['text'].replace('\n', ' ') == regions[1].translation

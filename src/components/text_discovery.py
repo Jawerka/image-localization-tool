@@ -102,15 +102,27 @@ def _verify_sfx(image, region, client):
     crop.thumbnail((1200, 1200), Image.Resampling.LANCZOS)
     prompt = ('Locate this exact source text in the crop: ' + json.dumps(region.text, ensure_ascii=False) +
               '. Return its literal text and a tight box around ALL its letters, excluding nearby artwork '
-              'and other words. Coordinates x0,y0,x1,y1 are 0..1000 of this CROP. '
+              'and other words. Exclude signatures, credits, watermarks and artwork. '
+              'Coordinates x0,y0,x1,y1 are 0..1000 of this CROP. '
               'Do not translate or invent missing letters. If it is not visible return blocks=[].')
+    complete_block = region.block_type in ('dialogue', 'narration', 'title')
+    if complete_block:
+        prompt += (' If these words are only part of ONE caption or speech block, return the complete '
+                   'block including its adjacent lines and numbers, with its full tight box. '
+                   'Do not join separate captions or speakers. Use type=narration for time captions.')
     payload = client.chat_json(prompt, SCHEMA, 'verify_missing_text', images=[crop], max_tokens=1024)
     candidates = parse_discovery(payload, (c-a, d-b), [])
     wanted = _source_word(region.text)
-    candidates = [r for r in candidates if _source_word(r.text) == wanted]
+    candidates = [r for r in candidates if _source_word(r.text) == wanted or (
+        complete_block and len(wanted) >= 3 and wanted in _source_word(r.text)
+        and len(_source_word(r.text)) <= max(24, len(wanted)*3)
+        and r.bbox[2]*r.bbox[3] <= w*h*6
+        and r.bbox[2] <= w*3 and r.bbox[3] <= h*3)]
     if len(candidates) != 1:
         return False
     tx, ty, tw, th = candidates[0].bbox
+    verified_text = candidates[0].text
+    expected = _source_word(verified_text)
     # Повтор слова в запросе локализации провоцирует подтверждение даже
     # соседнего рисунка. Читаем только предложенную рамку без ожидаемого текста.
     reading = client.chat_json(
@@ -125,7 +137,7 @@ def _verify_sfx(image, region, client):
     if not isinstance(read_text, str) or not read_text.strip():
         return False
     if wanted:
-        matches = _source_word(read_text) == wanted
+        matches = _source_word(read_text) == expected
     else:
         # Знаки «?!» тоже содержательны, пустой кроп им не равен.
         matches = ''.join(unicodedata.normalize('NFKC', read_text).split()) == ''.join(
@@ -133,7 +145,29 @@ def _verify_sfx(image, region, client):
     if not matches:
         return False
     region.bbox = (tx+a, ty+b, tw, th)
+    if complete_block:
+        region.text = verified_text
+        region.block_type = candidates[0].block_type
     return True
+
+
+def _short_ocr_blocks(image):
+    """Независимые кандидаты коротких реплик; принятие требует проверки VLM."""
+    gray = np.asarray(image.convert('L'))
+    if not gray.size or float(gray.std()) < 5:
+        return []
+    blocks = []
+    for word in _discovery_ocr()._words(image):
+        letters = _source_word(word.text)
+        if word.confidence < .8 or not 2 <= len(letters) <= 16:
+            continue
+        x, y, w, h = word.bbox
+        if w <= 0 or h <= 0:
+            continue
+        blocks.append(dict(text=word.text, type='dialogue', x0=x/image.width*1000,
+                           y0=y/image.height*1000, x1=(x+w)/image.width*1000,
+                           y1=(y+h)/image.height*1000))
+    return sorted(blocks, key=lambda block: len(_source_word(block['text'])))
 
 
 def discover_missing_text(image, regions, client, max_side=1800, warnings=None):
@@ -161,7 +195,8 @@ def discover_missing_text(image, regions, client, max_side=1800, warnings=None):
                  and r.bbox[0]+r.bbox[2] <= c and r.bbox[1]+r.bbox[3] <= d]
         prompt = ('Find readable text MISSING from the existing list in this crop. '
                   'Include sound effects in every writing system, '
-                  'action caption, narration, thought and missed speech. Return literal source text; '
+                  'action caption, narration, thought and missed speech, including tiny one-word '
+                  'greetings and short replies. Return literal source text; '
                   'keep the original writing system. List only text actually visible at each location. '
                   'Exclude artwork, motion lines, signatures, credits, watermarks and social-media controls. '
                   'Do not repeat existing blocks. Each tight box encloses ALL letters and uses explicit '
@@ -177,9 +212,33 @@ def discover_missing_text(image, regions, client, max_side=1800, warnings=None):
                 warnings.append(f'VLM не проверил фрагмент страницы: {type(exc).__name__}')
             continue
         completed_tiles += 1
+        try:
+            short_blocks = []
+            for candidate in _short_ocr_blocks(shown):
+                mapped = dict(candidate)
+                for key, offset, length, full in (('x0', a, c-a, image.width), ('x1', a, c-a, image.width),
+                                                   ('y0', b, d-b, image.height), ('y1', b, d-b, image.height)):
+                    mapped[key] = (offset+candidate[key]/1000*length)/full*1000
+                if parse_discovery({'blocks': [mapped]}, image.size, [*regions, *extras]):
+                    short_blocks.append(candidate)
+                if len(short_blocks) >= max(1, tile_budget//2):
+                    break
+        except Exception as exc:
+            short_blocks = []
+            if warnings is not None:
+                warnings.append(f'Локальные кандидаты коротких надписей не проверены: {type(exc).__name__}')
+        if isinstance(payload, dict) and isinstance(payload.get('blocks'), list):
+            payload = dict(blocks=[*short_blocks, *payload['blocks']])
         for region in parse_discovery(payload, (c-a, d-b), []):
             x, y, w, h = region.bbox
             region.bbox = (x+a, y+b, w, h)
+            # Дубли известных реплик не должны тратить бюджет независимых
+            # проверок, иначе короткая пропущенная надпись остаётся без OCR.
+            mapped = dict(text=region.text, type=region.block_type,
+                          x0=(x+a)/image.width*1000, y0=(y+b)/image.height*1000,
+                          x1=(x+a+w)/image.width*1000, y1=(y+b+h)/image.height*1000)
+            if not parse_discovery({'blocks': [mapped]}, image.size, [*regions, *extras]):
+                continue
             # Общее ограничение защищает от неограниченного числа crop-запросов.
             if len(extras) >= 24:
                 if warnings is not None and not limit_reported:

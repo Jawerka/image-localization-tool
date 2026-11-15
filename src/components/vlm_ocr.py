@@ -244,8 +244,10 @@ class VlmOcr:
         if not regions:
             return "ltr", regions
 
-        bubbles = [region for region in regions if region.bubble_bbox is not None]
-        free = [region for region in regions if region.bubble_bbox is None]
+        partitioned = [region for region in regions if
+                       (region.auto_layout or {}).get('evidence', {}).get('partitioned_balloon')]
+        bubbles = [region for region in regions if region.bubble_bbox is not None and region not in partitioned]
+        free = [region for region in regions if region.bubble_bbox is None] + partitioned
         direction = "ltr"
         if bubbles:
             direction = self._recognize_pass(image, bubbles, reading_order, "баллоны")
@@ -347,6 +349,11 @@ class VlmOcr:
     def read_crop(self, image: Image.Image, region: TextRegion) -> str:
         """Прочитать текст кропа и записать его в регион."""
         width, height = image.size
+        from src.components.bubble_partition import partition_area
+        area = partition_area((height, width), region)
+        if area is not None:
+            image = Image.composite(image.convert('RGB'), Image.new('RGB', image.size, 'white'),
+                                    Image.fromarray(area))
         x, y, box_w, box_h = region.bbox
         pad = 8
         crop = image.crop((
@@ -399,12 +406,39 @@ class VlmOcr:
         elif not region.text:
             region.block_type = "noise"
         _clamp_balloon_type(region)
+        self._review_long_sfx(region)
         if region.document:
             if region.block_type=="sign" and len(region.text.split())>=6:
                 region.block_type="narration"
             if not region.text and region.confidence>=self.reread_confidence:
                 self.warnings.append(f"OCR не прочитал документный блок {region.id}")
         return region.text
+
+    def _review_long_sfx(self, region: TextRegion) -> None:
+        """Отделить длинную обычную реплику от звука без влияния шрифта."""
+        words = re.findall(r"[^\W\d_]+", region.text, flags=re.UNICODE)
+        if region.block_type != "sfx" or len(words) < 6 or len({w.casefold() for w in words}) < 4:
+            return
+        schema = {"type": "object", "additionalProperties": False,
+                  "properties": {"type": {"type": "string", "enum": list(BLOCK_TYPES)}},
+                  "required": ["type"]}
+        try:
+            payload = self.client.chat_json(
+                prompt=("Classify the meaning of the source text independently of lettering style. "
+                        "Ordinary spoken sentences and exclamations are dialogue, including large "
+                        "decorative text. Sfx means literal sounds and nonverbal noises. "
+                        "Narrative descriptions are narration. Return only the type. Source text: "
+                        + region.text),
+                schema=schema, schema_name="text_kind", images=[], max_tokens=128,
+            )
+        except Exception as exc:
+            self.warnings.append(f"VLM не проверил тип длинной надписи {region.id}: {type(exc).__name__}")
+            return
+        kind = str(payload.get("type") or "").strip().lower()
+        # Дополнительная классификация не удаляет распознанные буквы
+        # и не переводит их в пропускаемые категории noise/sign.
+        if kind in ("dialogue", "narration", "title"):
+            region.block_type = kind
 
     def _reread_empty(self, image: Image.Image, regions: list[TextRegion]) -> None:
         for region in regions:

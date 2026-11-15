@@ -159,7 +159,13 @@ def _keep_overlap_by_centroid(mask, region, other, overlap):
     cx, cy = _region_centroid(region)
     ox, oy = _region_centroid(other)
     ys, xs = np.nonzero(overlap)
-    if abs(cx - ox) >= abs(cy - oy):
+    x, y, w, h = region.bbox
+    tx, ty, tw, th = other.bbox
+    shared_width = max(0, min(x+w, tx+tw)-max(x, tx))
+    # Почти общая ширина и разные строки означают разделение сверху вниз,
+    # даже если короткая первая строка смещена относительно длинного абзаца.
+    stacked = shared_width >= min(w, tw)*.55 and abs(cy-oy) >= min(h, th)*.35
+    if not stacked and abs(cx - ox) >= abs(cy - oy):
         own, neighbour = np.abs(xs - cx), np.abs(xs - ox)
     else:
         own, neighbour = np.abs(ys - cy), np.abs(ys - oy)

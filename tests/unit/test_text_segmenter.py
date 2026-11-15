@@ -8,6 +8,21 @@ from src.components.text_segmenter import _colors, _outlined_text_mask, apply_st
 from src.models import MaskStroke, TextRegion
 
 
+def test_bound_dialogue_keeps_letter_caps_outside_tight_detector_box():
+    """Бокс срезал верх прописной буквы: контекст восстанавливает её целиком."""
+    rgb = np.full((170, 330, 3), 255, np.uint8)
+    expected = np.zeros(rgb.shape[:2], np.uint8)
+    cv2.ellipse(rgb, (165, 85), (160, 80), 0, 0, 360, (0, 0, 0), 2)
+    for text, y in [('Inventors', 65), ('Listen!', 115)]:
+        cv2.putText(rgb, text, (45, y), cv2.FONT_HERSHEY_SIMPLEX, 1.1, (0, 0, 0), 3)
+        cv2.putText(expected, text, (45, y), cv2.FONT_HERSHEY_SIMPLEX, 1.1, 255, 3)
+    region = TextRegion(1, (40, 46, 235, 75), text='Inventors Listen!',
+                        translation='ИЗОБРЕТАТЕЛИ СЛУШАЙТЕ', block_type='dialogue', bubble_bbox=(3, 3, 324, 164))
+    captured = {}
+    segment_region(rgb, region, capture_ink=captured)
+    assert np.mean(captured[1][expected > 0] > 0) >= .98
+
+
 def test_unbound_light_dialogue_rescues_letters_without_erasing_border_art():
     """Тёмный рисунок у кольца ROI не отменяет буквы светлой реплики."""
     rgb = np.full((125, 220, 3), 255, np.uint8)
@@ -382,3 +397,20 @@ def test_colour_accent_keeps_adjacent_dark_words_on_gray_paper():
     mask = segment_region(rgb, region)
     assert np.mean(mask[dark > 0] > 0) >= .99
     assert np.mean(mask[coloured > 0] > 0) >= .99
+
+
+def test_local_contrast_does_not_replace_confirmed_dark_text_on_paper(monkeypatch):
+    """Неполный дополнительный поиск не отменяет целые тёмные буквы."""
+    import src.components.text_segmenter as segmenter
+    rgb = np.full((140, 400, 3), 225, np.uint8)
+    expected = np.zeros((140, 400), np.uint8)
+    for text, y in [('WAS NOT LOUD', 50), ('ENOUGH TO HEAR', 100)]:
+        cv2.putText(rgb, text, (20, y), cv2.FONT_HERSHEY_SIMPLEX, .8, (30, 30, 30), 2)
+        cv2.putText(expected, text, (20, y), cv2.FONT_HERSHEY_SIMPLEX, .8, 255, 2)
+    monkeypatch.setattr(segmenter, 'contrasted_dark_ink', lambda crop: np.zeros(crop.shape[:2], np.uint8))
+    region = TextRegion(1, (15, 20, 355, 90), text='WAS NOT LOUD ENOUGH TO HEAR',
+                        block_type='dialogue', bubble_bbox=(0, 0, 400, 140))
+    captured = {}
+    mask = segmenter.segment_region(rgb, region, capture_ink=captured)
+    assert np.mean(captured[1][expected > 0] > 0) > .98
+    assert np.mean(mask[expected > 0] > 0) > .98

@@ -162,6 +162,11 @@ def _caption_raster(text, font_path, style, geometry, rows, scale, frozen=None):
     height += 2*float(geometry.get('caption_padding', 0))
     bx, by, bw, bh = geometry['source_bbox']
     ix, iy, iw, ih = geometry['ink_bbox']
+    if abs(float(style.rotation)) < 3:
+        # У ровной плашки шумная исходная строка не должна сдвигать центр
+        # и отнимать место у всего перевода.
+        center = (ix+iw/2, iy+ih/2)
+        width, height = iw, ih
     matrix = cv2.getRotationMatrix2D((bx+bw/2, by+bh/2), float(style.rotation), 1.)
     cx, cy = matrix @ np.array([*center, 1.])
     cosine, sine = abs(matrix[0, 0]), abs(matrix[0, 1])
@@ -170,7 +175,7 @@ def _caption_raster(text, font_path, style, geometry, rows, scale, frozen=None):
     room_x = max(1., min(cx-ix, ix+iw-cx)-pad-2)
     room_y = max(1., min(cy-iy, iy+ih-cy)-pad-2)
     best = None
-    for count in range(1, min(6, len(text.split()))+1):
+    for count in range(1, min(12, len(text.split()))+1):
         lines = _split_lines(text, [width]*count, font, 0)
         if not lines:
             continue

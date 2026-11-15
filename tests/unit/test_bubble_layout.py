@@ -266,3 +266,17 @@ def test_translucent_window_oval_centers_translation_in_ellipse():
     assert abs(float(xs.mean()) - center[0]) <= 18
     assert abs(float(ys.mean()) - center[1]) <= 16
     assert region.style.rotation == 0
+
+
+def test_shifted_short_first_line_splits_overlapping_balloon_vertically():
+    """Смещённая короткая верхняя строка не отнимает левую половину абзаца."""
+    from src.components.bubble_layout import _keep_overlap_by_centroid
+    a = TextRegion(1, (30, 20, 100, 20), translation='Первая')
+    b = TextRegion(2, (50, 30, 140, 70), translation='Вторая')
+    mask = np.full((130, 240), 255, np.uint8)
+    overlap = mask > 0
+    top = _keep_overlap_by_centroid(mask.copy(), a, b, overlap)
+    bottom = _keep_overlap_by_centroid(mask.copy(), b, a, overlap)
+    assert top[25, 180] and not top[80, 35]
+    assert bottom[80, 35] and not bottom[25, 180]
+    assert not np.any((top > 0) & (bottom > 0))

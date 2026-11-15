@@ -335,3 +335,155 @@ def test_small_outlined_speech_cleans_the_whole_dark_edge():
                         block_type='dialogue', bubble_bbox=(8, 15, 100, 35))
     mask = segment_region(rgb, region)
     assert np.mean(mask[expected > 0] > 0) >= .99
+
+
+def test_dark_dialogue_on_translucent_gradient_preserves_background():
+    """У текста на рисунке убираются штрихи, а не вся плашка и её линия."""
+    rgb = np.zeros((150, 500, 3), np.uint8)
+    gradient = np.linspace(125, 215, 500).astype(np.uint8)
+    rgb[:] = gradient[None, :, None]
+    rgb[:, :, 2] = np.minimum(rgb[:, :, 2].astype(int)+15, 255)
+    expected = np.zeros(rgb.shape[:2], np.uint8)
+    for y in (55, 112):
+        cv2.putText(rgb, 'DARK WORDS', (30, y), cv2.FONT_HERSHEY_SIMPLEX, 1.1, (35, 25, 65), 3)
+        cv2.putText(expected, 'DARK WORDS', (30, y), cv2.FONT_HERSHEY_SIMPLEX, 1.1, 255, 3)
+    cv2.line(rgb, (10, 130), (480, 130), (130, 100, 140), 2)
+    region = TextRegion(1, (20, 15, 430, 112), text='DARK WORDS DARK WORDS', translation='ПЕРЕВОД',
+                        block_type='dialogue', bubble_bbox=(5, 5, 485, 135))
+    mask = segment_region(rgb, region)
+    assert np.mean(mask[expected > 0] > 0) >= .99
+    assert np.mean(mask > 0) < .5
+    assert np.mean(mask[129:132] > 0) < .03
+    assert region._retouch_preserve_background
+
+
+def test_coloured_title_preserves_white_picture_between_words():
+    """Белый объект внутри заголовка не входит в согласованную палитру букв."""
+    from PIL import Image
+    from src.config import Config
+    from src.page_pipeline import PagePipeline
+    rgb = np.full((220, 420, 3), (230, 220, 185), np.uint8)
+    expected = np.zeros(rgb.shape[:2], np.uint8)
+    for text, point in [('COLOURED', (30, 55)), ('HEADING', (45, 190))]:
+        cv2.putText(rgb, text, point, cv2.FONT_HERSHEY_SIMPLEX, 1.25, (30, 25, 20), 5)
+        cv2.putText(expected, text, point, cv2.FONT_HERSHEY_SIMPLEX, 1.25, 255, 5)
+        cv2.putText(rgb, text, point, cv2.FONT_HERSHEY_SIMPLEX, 1.25, (230, 150, 25), 3)
+    cv2.ellipse(rgb, (180, 108), (70, 28), 0, 0, 360, (30, 25, 20), -1)
+    cv2.ellipse(rgb, (180, 108), (66, 24), 0, 0, 360, (255, 255, 255), -1)
+    region = TextRegion(1, (20, 15, 360, 185), text='COLOURED HEADING', translation='ЦВЕТНОЙ ЗАГОЛОВОК', block_type='sfx')
+    cfg = Config()
+    cfg.sfx_mode = 'replace'
+    cfg.layout_long_side = 0
+    pipeline = PagePipeline(cfg)
+    pipeline._inpaint = lambda image, mask, warnings, **kwargs: image
+    mask, _ = pipeline.clean(Image.fromarray(rgb), [region])
+    assert np.mean(mask[expected > 0] > 0) >= .98
+    assert not np.any(mask[90:125, 135:225])
+
+
+def test_clipped_letter_recovery_does_not_take_thin_frame_segment():
+    """Короткая линия рамки рядом с текстом не является срезанной буквой."""
+    from src.components.retouch_ink import clipped_dark_ink
+    rgb = np.full((160, 360, 3), 255, np.uint8)
+    cv2.putText(rgb, 'INPUT TEST', (40, 80), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 3)
+    cv2.line(rgb, (50, 40), (90, 40), (0, 0, 0), 1)
+    found = clipped_dark_ink(rgb, (35, 55, 280, 65))
+    assert found is not None
+    ink, (a, b, c, d) = found
+    full = np.zeros(rgb.shape[:2], np.uint8)
+    full[b:d, a:c] = ink
+    assert np.any(full[55:82, 40:70])
+    assert not np.any(full[39:42, 49:92])
+
+
+def test_letter_joined_to_thin_outline_is_recovered_without_following_frame():
+    """Толстая буква отделяется от соединённой с ней тонкой линии облачка."""
+    from src.components.retouch_ink import clipped_dark_ink
+    rgb = np.full((165, 360, 3), 255, np.uint8)
+    expected = np.zeros(rgb.shape[:2], np.uint8)
+    cv2.rectangle(rgb, (10, 10), (345, 150), (0, 0, 0), 3)
+    for index, letter in enumerate('LOOKHERE'):
+        cv2.putText(rgb, letter, (35+index*36, 80), cv2.FONT_HERSHEY_SIMPLEX, .9, (0, 0, 0), 7 if index == 0 else 3)
+    cv2.putText(expected, 'L', (35, 80), cv2.FONT_HERSHEY_SIMPLEX, .9, 255, 7)
+    cv2.line(rgb, (10, 56), (40, 56), (0, 0, 0), 3)
+    found = clipped_dark_ink(rgb, (28, 35, 285, 70))
+    assert found is not None
+    ink, (a, b, c, d) = found
+    full = np.zeros(rgb.shape[:2], np.uint8)
+    full[b:d, a:c] = cv2.dilate(ink, np.ones((5, 5), np.uint8))
+    assert np.mean(full[expected > 0] > 0) >= .95
+    assert not np.any(full[20:135, 8:12])
+
+
+def test_short_coloured_sound_keeps_complete_original_glyphs():
+    """Части короткого цветного звука не заменяют его целую маску."""
+    rgb = np.full((100, 300, 3), (75, 155, 195), np.uint8)
+    expected = np.zeros(rgb.shape[:2], np.uint8)
+    cv2.putText(rgb, 'CLACK', (25, 65), cv2.FONT_HERSHEY_SIMPLEX, 1.3, (15, 20, 25), 9)
+    cv2.putText(expected, 'CLACK', (25, 65), cv2.FONT_HERSHEY_SIMPLEX, 1.3, 255, 9)
+    cv2.putText(rgb, 'CLACK', (25, 65), cv2.FONT_HERSHEY_SIMPLEX, 1.3, (255, 195, 35), 4)
+    region = TextRegion(1, (15, 20, 230, 60), text='CLACK', translation='ХЛОП', block_type='sfx')
+    mask = segment_region(rgb, region)
+    assert np.mean(mask[expected > 0] > 0) >= .99
+    assert not region._retouch_tight_ink
+
+
+def test_tinted_light_letters_keep_outline_on_blue_artwork():
+    """Сиреневые ядра не теряются из-за порога чистого белого."""
+    rgb = np.full((150, 520, 3), (125, 155, 190), np.uint8)
+    expected = np.zeros(rgb.shape[:2], np.uint8)
+    for text, y in [('FLAWLESS', 60), ('WHAT ARE YOU DOING', 115)]:
+        cv2.putText(rgb, text, (20, y), cv2.FONT_HERSHEY_SIMPLEX, .9, (0, 0, 0), 9)
+        cv2.putText(expected, text, (20, y), cv2.FONT_HERSHEY_SIMPLEX, .9, 255, 9)
+        cv2.putText(rgb, text, (20, y), cv2.FONT_HERSHEY_SIMPLEX, .9, (205, 210, 255), 3)
+    ink, outlined = confirmed_light_ink(rgb)
+    assert ink is not None and outlined
+    assert np.mean(ink[expected > 0] > 0) >= .98
+    assert np.mean(ink[:10] > 0) == 0
+
+
+def test_large_tinted_panel_is_not_a_letter_core():
+    """Ослабление порога цвета не превращает светлую плашку в буквы."""
+    rgb = np.full((150, 520, 3), (40, 50, 70), np.uint8)
+    rgb[15:135, 20:500] = (205, 210, 255)
+    ink, _ = confirmed_light_ink(rgb)
+    assert ink is None
+
+
+def test_clipped_thick_initial_touching_thin_frame():
+    """Тесная детекция не теряет первую букву, соединённую с рамкой."""
+    from src.components.retouch_ink import clipped_dark_ink
+    rgb = np.full((520, 500, 3), 255, np.uint8)
+    expected = np.zeros(rgb.shape[:2], np.uint8)
+    cv2.line(rgb, (35, 30), (35, 490), (0, 0, 0), 4)
+    for word, y in [('HUUU', 170), ('UUUU', 310), ('UG!!!', 450)]:
+        cv2.putText(rgb, word, (35, y), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 0), 10)
+        cv2.putText(expected, word, (35, y), cv2.FONT_HERSHEY_SIMPLEX, 2, 255, 10)
+    result = clipped_dark_ink(rgb, (70, 105, 320, 360))
+    assert result is not None
+    ink, (a, b, c, d) = result
+    mask = np.zeros_like(expected)
+    mask[b:d, a:c] = ink
+    assert np.mean(mask[expected > 0] > 0) >= .99
+    assert mask[40, 35] == 0
+    assert mask[480, 35] == 0
+
+
+def test_pastel_halo_includes_wide_shell_of_warm_light_letters():
+    from src.components.retouch_ink import _pastel_letter_halo
+    rgb = np.full((120, 440, 3), (150, 95, 60), np.uint8)
+    shell = np.zeros(rgb.shape[:2], np.uint8)
+    cv2.putText(shell, 'WOULD YOU', (20, 75), cv2.FONT_HERSHEY_SIMPLEX, 1.3, 255, 17)
+    rgb[shell > 0] = (104, 128, 115)
+    cv2.putText(rgb, 'WOULD YOU', (20, 75), cv2.FONT_HERSHEY_SIMPLEX, 1.3, (209, 183, 169), 3)
+    found = _pastel_letter_halo(rgb)
+    assert found is not None
+    assert np.mean(found[shell > 0] > 0) > .97
+    assert not np.any(found[:10])
+
+
+def test_pastel_halo_rejects_flat_coloured_background():
+    from src.components.retouch_ink import _pastel_letter_halo
+    rgb = np.full((120, 440, 3), (104, 128, 115), np.uint8)
+    cv2.putText(rgb, 'WOULD YOU', (20, 75), cv2.FONT_HERSHEY_SIMPLEX, 1.3, (209, 183, 169), 3)
+    assert _pastel_letter_halo(rgb) is None

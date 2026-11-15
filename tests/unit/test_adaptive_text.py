@@ -16,6 +16,56 @@ from src.page_pipeline import _scale_regions
 FONT = Path('src/resources/fonts/Heroika-Regular.otf')
 
 
+@pytest.mark.parametrize('angle', [0, 12])
+def test_contrast_retouch_does_not_reclassify_balloon(monkeypatch, angle):
+    """Контрастная маска ретуши не превращает речь в белую надпись с ореолом."""
+    image = Image.new('RGB', (400, 180), (205, 200, 190))
+    mask = Image.new('L', image.size)
+    ImageDraw.Draw(mask).text((50, 60), 'Several words',
+                             font=ImageFont.truetype(str(FONT), 30), fill=255)
+
+    def measured_ink(_image, region):
+        region._retouch_contrast_ink = True
+        region._retouch_preserve_background = True
+        return image, np.asarray(mask), (0, 0, *image.size)
+
+    monkeypatch.setattr('src.components.adaptive_text.source_ink', measured_ink)
+    monkeypatch.setattr('src.components.adaptive_text.speech_angle',
+                        lambda _ink: (angle, {'reason': 'измеренные строки'}))
+    region = TextRegion(1, (45, 50, 300, 65), text='Several words',
+                        translation='Несколько слов', block_type='dialogue',
+                        bubble_bbox=(10, 10, 380, 160))
+    prepare_regions(image, [region])
+    assert region.auto_layout['kind'] == 'bubble'
+    assert not region.auto_layout.get('readable_caption')
+    assert region.style.fill_rgb == (0, 0, 0)
+    assert region.style.stroke_width == 0
+
+
+def test_white_counters_do_not_shrink_dark_coloured_dialogue(monkeypatch):
+    """Просветы цветных O/B не должны измеряться как отдельные белые буквы."""
+    image = Image.new('RGB', (400, 180), 'white')
+    paint = ImageDraw.Draw(image)
+    font = ImageFont.truetype(str(FONT), 44)
+    for y in (20, 95):
+        paint.text((30, y), 'BOO BOO BOO', font=font, fill=(100, 25, 120))
+    rgb = np.asarray(image)
+    ink = ((rgb.min(axis=2) < 160)*255).astype(np.uint8)
+    def known_ink(_image, region):
+        region._colour_ink = True
+        region._retouch_preserve_background = True
+        return image, ink, (0, 0, image.width, image.height)
+    monkeypatch.setattr('src.components.adaptive_text.source_ink', known_ink)
+    region = TextRegion(1, (20, 10, 360, 155), text='BOO BOO BOO BOO BOO BOO',
+                        translation='ДЛИННАЯ ПЕРЕВЕДЁННАЯ РЕПЛИКА', block_type='dialogue',
+                        bubble_bbox=(5, 5, 390, 170))
+    prepare_regions(image, [region])
+    ys, xs = np.where(ink)
+    box = region.auto_layout['ink_bbox']
+    assert box[2] >= (xs.max()-xs.min()+1)*.95
+    assert box[3] >= (ys.max()-ys.min()+1)*.95
+
+
 def test_source_ink_keeps_outline_joined_across_lines():
     """Соединённый ореол нескольких строк нельзя удалить как высокое пятно."""
     from src.components.adaptive_text import source_ink
@@ -271,7 +321,7 @@ def test_native_outline_survives_working_upscale(background, expected):
     widths = []
     for side in (0, 2000):
         # Проверяется толщина обводки, увеличение букв проверяется отдельно.
-        pipeline = PagePipeline(Config(layout_long_side=side, text_scale=1.0))
+        pipeline = PagePipeline(Config(layout_long_side=side, text_scale=1.0, neutral_text_colors=False))
         rendered, over = pipeline.typeset_image(image, [copy.deepcopy(original)], 'en')
         assert not over
         row = np.asarray(rendered)[120, :, 0]
@@ -534,6 +584,9 @@ def test_coloured_caption_keeps_two_slanted_rows_and_balloon_mask():
     assert region.auto_layout['kind'] == 'free'
     assert region.auto_layout['mask_kind'] == 'bubble'
     assert len(region.auto_layout['source_lines']) == 2
+    assert min(region.style.fill_rgb) >= 220
+    assert region.style.stroke_rgb is not None
+    assert region.auto_layout['caption_padding'] < 15
     assert abs(region.style.rotation + 11) < 2
     assert TextRegion.from_dict(region.to_dict()).auto_layout == region.auto_layout
 
@@ -592,3 +645,43 @@ def test_white_outline_is_not_reintroduced_as_light_letter_core():
     draw.text((30, 95), 'ANOTHER LINE', font=font, fill='black', stroke_width=4, stroke_fill='white')
     found, inverse = _unexplained_light_ink(np.asarray(image))
     assert found is None and not inverse
+
+
+def test_overlapping_translated_boxes_do_not_erase_each_others_mask(monkeypatch):
+    """Защита соседа не вырезает буквы внутри собственной исходной рамки."""
+    import src.components.adaptive_text as adaptive
+    image = Image.new('RGB', (180, 90), (120, 120, 120))
+    regions = [TextRegion(1, (10, 20, 100, 40), translation='Первая', block_type='dialogue'),
+               TextRegion(2, (80, 20, 90, 40), translation='Вторая', block_type='dialogue')]
+    for region in regions:
+        region.auto_layout = dict(kind='free', mask_pad_px=1)
+        region._retouch_tight_ink = True
+    def source(image, region):
+        x, y, w, h = region.bbox
+        ink = np.zeros((h, w), np.uint8)
+        ink[10:30, 5:w-5] = 255
+        return image.crop((x, y, x+w, y+h)), ink, (x, y, x+w, y+h)
+    monkeypatch.setattr(adaptive, 'source_ink', source)
+    empty = np.zeros((90, 180), np.uint8)
+    _, mask = adaptive.adaptive_masks(image, regions, empty, empty)
+    assert np.all(mask[32:48, 85:105] > 0)
+
+
+def test_vertical_cjk_dialogue_preserves_colored_cores_and_balloon(monkeypatch):
+    """Цвет вертикальных букв и широкое тело облачка доступны переводу."""
+    import src.components.adaptive_text as adaptive
+    image = Image.new('RGB', (240, 240), 'white')
+    ink = np.zeros((140, 30), np.uint8)
+    ink[10:130, 8:22] = 255
+    pixels = np.full((140, 30, 3), 255, np.uint8)
+    pixels[ink > 0] = (45, 100, 30)
+    region = TextRegion(1, (100, 50, 30, 140), text='日本語の台詞', translation='Длинная русская реплика',
+                        block_type='dialogue', bubble_bbox=(20, 20, 200, 200))
+    monkeypatch.setattr(adaptive, 'source_ink', lambda image, region:
+                        (Image.fromarray(pixels), ink, (100, 50, 130, 190)))
+    adaptive.prepare_regions(image, [region])
+    assert region.style.fill_rgb == (45, 100, 30)
+    assert region.auto_layout['kind'] == 'bubble'
+    assert region.auto_layout.get('writing_mode') != 'vertical'
+    area = adaptive.geometry_area((240, 240), region)
+    assert np.count_nonzero(area) > 140 * 30 * 3

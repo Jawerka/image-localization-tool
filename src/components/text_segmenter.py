@@ -8,7 +8,7 @@ from PIL import Image
 
 from src.components.bubble_contour import balloon_flood_mask, bubble_interior_mask
 from src.components.sfx_ink import drop_line_components, outlined_glyphs
-from src.components.retouch_ink import boundary_ink, confirmed_light_ink, smooth_light_mask
+from src.components.retouch_ink import boundary_ink, clipped_dark_ink, coherent_colour_ink, confirmed_light_ink, contrasted_dark_ink, smooth_light_mask
 from src.models import MaskStroke, TextRegion
 from src.utils.mask_metrics import otsu_threshold
 
@@ -302,7 +302,10 @@ def segment_region(
     """
     height, width = image_rgb.shape[:2]
     region._retouch_smooth_background = False
+    region._retouch_contrast_ink = False
+    region._retouch_tight_ink = False
     bubble = _bubble_retouch_mask(image_rgb, region, inset_px=bubble_inset_px)
+    safe_bubble = bubble
     full = np.zeros((height, width), dtype=np.uint8)
     x, y, box_w, box_h = region.bbox
     x0 = max(0, x)
@@ -421,6 +424,15 @@ def segment_region(
     if extra_outlined is not None:
         binary = np.maximum(binary, extra_outlined)
         region._outline_ink = True
+    local_dark = (contrasted_dark_ink(crop) if origin == 'dialogue' and has_bubble
+                  and outlined is None and light_confirmed is None
+                  and (light_ink is None or np.percentile(
+                      cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY), 40) < 180) else None)
+    if local_dark is not None:
+        binary = local_dark
+        bubble = balloon = None
+        region._retouch_preserve_background = True
+        region._retouch_contrast_ink = True
     coloured = None if region.document else _saturated_letter_ink(crop)
     if coloured is not None:
         extra = coloured
@@ -432,6 +444,15 @@ def segment_region(
         # один насыщенный акцент не должен удалять соседние чёрные буквы.
         binary = np.maximum(binary, extra)
         region._colour_ink = True
+    palette_ink = (coherent_colour_ink(crop, coloured) if sfx_like
+                   and sum(char.isalnum() for char in region.text) >= 8 else None)
+    if palette_ink is not None:
+        binary = palette_ink
+        bubble = balloon = None
+        glyph_mask = extra_outlined = outlined = light_confirmed = None
+        region._outline_ink = True
+        region._retouch_tight_ink = True
+        region._retouch_preserve_background = True
 
     plain_light = (light_confirmed is not None and not inverse_outline and origin == "dialogue"
                    and float(np.median(cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY))) >= 120
@@ -473,7 +494,9 @@ def segment_region(
     # даже без flood остаётся с отступом от кегля, чтобы не терять ореол.
     tight_ink = region.block_type == "sfx" or region.bubble_bbox is None
     grow = max(0, int(letter_grow_px))
-    if glyph_mask is not None or extra_outlined is not None:
+    if palette_ink is not None:
+        radius = 3 + grow
+    elif glyph_mask is not None or extra_outlined is not None:
         radius = _outline_halo_radius(crop, binary, line_height, grow)
     elif tight_ink:
         radius = _INK_PAD_PX + grow
@@ -526,6 +549,22 @@ def segment_region(
         bounded = np.zeros_like(full)
         bounded[y0:y1, x0:x1] = full[y0:y1, x0:x1]
         return bounded
+    if region.bubble_bbox is not None and origin == 'dialogue':
+        if (safe_bubble is not None and light_confirmed is not None
+                and not getattr(region, '_outline_ink', False)
+                and np.count_nonzero(crop.max(axis=2) < 100) > np.count_nonzero(light_confirmed)*.75):
+            # Просветы тёмных букв иногда выглядят светлой надписью. Их
+            # дополнение не должно стирать подтверждённую рамку облачка.
+            full = np.minimum(full, safe_bubble)
+        extra = clipped_dark_ink(image_rgb, region.bbox,
+                                 include_punctuation=any(ch in region.text for ch in '!?…'))
+        if extra is not None:
+            addition, (aa, bb, cc, dd) = extra
+            expanded = cv2.dilate(addition, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
+            full[bb:dd, aa:cc] = np.maximum(full[bb:dd, aa:cc], expanded)
+            if capture_ink is not None:
+                capture_ink[int(region.id)][bb:dd, aa:cc] = np.maximum(
+                    capture_ink[int(region.id)][bb:dd, aa:cc], addition)
     return full
 
 
@@ -597,5 +636,13 @@ def segment_regions(
             bubble_inset_px=bubble_inset_px,
             letter_grow_px=letter_grow_px,
         )
+        from src.components.bubble_partition import partition_area, partition_retouch_area
+        area = partition_area(rgb.shape, region)
+        if area is not None:
+            retouch = partition_retouch_area(rgb, region, area)
+            part[retouch == 0] = 0
+            part[(retouch > 0) & (area == 0)] = 255
+            if capture_ink is not None and region.id in capture_ink:
+                capture_ink[region.id][area == 0] = 0
         mask = np.maximum(mask, part)
     return mask

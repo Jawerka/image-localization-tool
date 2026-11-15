@@ -1,0 +1,103 @@
+<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Проверка тестовых изображений</title>
+<style>
+:root{color-scheme:dark}body{background:#12141a;color:#e6e8ef;font:16px/1.5 system-ui;margin:0}header{background:#191c25f5;padding:16px 24px;border-bottom:1px solid #363b4b}h1{font-size:22px;margin:0 0 8px}button{cursor:pointer;background:#303749;color:#fff;border:1px solid #535e79;border-radius:7px;padding:8px 14px}header button,footer button{margin:4px 8px 4px 0}footer{padding:20px 24px 32px;border-top:1px solid #363b4b}main{max-width:1080px;margin:auto;padding:24px}article{padding:20px;margin:0 0 36px;background:#1c202a;border:1px solid #343b4c;border-radius:12px}h2{font-size:18px;overflow-wrap:anywhere;margin:0 0 16px}img{display:block;width:100%;height:auto}textarea{box-sizing:border-box;width:100%;background:#141821;color:#eee;border:1px solid #4d566c;border-radius:7px;padding:12px;font:inherit}.stars{display:flex;align-items:center;margin:12px 0}.stars button{background:transparent;border:0;font-size:32px;color:#697185;padding:2px 5px}.stars button.on{color:#ffca62}.stars .reset{font-size:14px;margin-left:18px;color:#afb8cd}.pending,#status{color:#aeb8cd}#json{width:100%;min-height:200px;margin-top:15px}[hidden]{display:none!important}
+progress{display:block;width:100%;max-width:680px;height:16px;margin:8px 0;accent-color:#87a6ff}#eta{color:#b9c5de;margin-bottom:12px}#progress-caption{margin-top:12px;font-weight:600}
+.mark-tools{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:10px 0;color:#aeb8cd;font-size:14px}.mark-tools button[aria-pressed="true"]{background:#24526a;border-color:#66d9ff}.mark-image{position:relative}.mark-image>a{display:block}.mark-image.selecting{cursor:crosshair;touch-action:none;user-select:none}.mark-image img{user-select:none;-webkit-user-drag:none}.mark-box{position:absolute;box-sizing:border-box;border:2px solid #66e0ff;background:#66e0ff20;pointer-events:none}.mark-box.draft{border-style:dashed}
+</style><header><h1>Проверка тестовых изображений</h1><div id="status"></div><div id="progress-caption"></div><progress id="run-progress" aria-label="Прогресс обработки изображений" max="1" value="0"></progress><div id="eta"></div><button id="download">Скачать оценки JSON</button><button id="copy">Копировать JSON</button><button id="show">Показать JSON</button><span id="message" role="status"></span><textarea id="json" readonly hidden></textarea></header><main><!--CARDS--></main><footer><button id="download-bottom">Скачать оценки JSON</button><button id="copy-bottom">Копировать JSON</button><span id="message-bottom" role="status"></span></footer>
+<script>
+const run=/*RUN*/{};
+const manifest=/*MANIFEST*/[];
+let progressState=/*PROGRESS*/{};
+const KEY='ilt-review:'+run.run_id;
+const annotationPainters=new Map();
+let reviews={};try{const saved=JSON.parse(localStorage.getItem(KEY)||'{}');if(saved&&typeof saved==='object'&&!Array.isArray(saved))reviews=saved}catch{}
+function payload(){return {schema_version:1,run_id:run.run_id,exported_at:new Date().toISOString(),images:manifest.map(r=>({image:r.image,result:r.status==='done'?r.id+'/result.png':null,status:r.status,source_sha256:r.source_sha256,result_sha256:r.result_sha256||null,rating:reviews[r.id]?.rating||null,comment:reviews[r.id]?.comment||'',updated_at:reviews[r.id]?.updated_at||null}))}}
+function refresh(){document.querySelector('#status').textContent=`Готово ${manifest.filter(r=>r.status==='done').length} из ${manifest.length}. Оценено ${manifest.filter(r=>reviews[r.id]?.rating).length}. Оценки сохраняются в этом браузере; скачайте JSON для передачи.`;document.querySelector('#json').value=JSON.stringify(payload(),null,2)}
+function duration(seconds){const minutes=Math.max(1,Math.ceil(seconds/60));return minutes<60?`${minutes} мин`:`${Math.floor(minutes/60)} ч ${minutes%60} мин`}
+function paintProgress(){
+  const p=progressState,total=p.total??manifest.length;
+  const finished=(p.done??manifest.filter(r=>r.status==='done').length)+(p.error??manifest.filter(r=>r.status==='error').length);
+  const bar=document.querySelector('#run-progress');bar.max=Math.max(1,total);bar.value=finished;
+  const percent=total?Math.round(finished/total*100):0;
+  const states={completed:'Завершено',completed_with_errors:'Завершено с ошибками',interrupted:'Прервано',stop_failed:'Очередь остановлена',queued:'Ожидает запуска'};
+  document.querySelector('#progress-caption').textContent=`${states[p.state]||'Обработано'}: ${finished} из ${total} · ${percent}%${p.error?` · ошибок: ${p.error}`:''}`;
+  let eta='ETA появится после первой завершённой страницы';
+  if(p.state==='running'&&Number.isFinite(p.remaining_seconds)){
+    const age=Math.max(0,(Date.now()-Date.parse(p.generated_at))/1000)||0;
+    const remaining=Math.max(0,p.remaining_seconds-age);
+    eta=remaining>0?`Примерно осталось ${duration(remaining)} · до ${new Date(Date.now()+remaining*1000).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}`:'Страница обрабатывается дольше среднего — ETA уточняется';
+  }else if(states[p.state])eta=p.state==='queued'?'Оценка времени появится после начала обработки':'Обработка не выполняется';
+  if(p.current_image&&p.state==='running')eta+=` · сейчас: ${p.current_image}`;
+  document.querySelector('#eta').textContent=eta;
+}
+globalThis.iltReviewProgress=data=>{
+  if(data.run_id!==run.run_id)return;
+  progressState=data;
+  for(const page of data.pages||[]){
+    const row=manifest.find(r=>r.id===page.id);if(!row)continue;
+    const wasDone=row.status==='done';Object.assign(row,page);
+    const article=[...document.querySelectorAll('article')].find(a=>a.dataset.id===page.id);
+    const pending=article?.querySelector('.pending');
+    if(pending&&row.status==='done'&&!wasDone){
+      const link=document.createElement('a'),img=document.createElement('img');
+      link.href=`${row.id}/result.png`;link.target='_blank';img.src=link.href;img.alt=row.image;img.loading='lazy';link.appendChild(img);pending.replaceWith(link);setupAnnotation(article);
+    }else if(pending&&row.status==='error')pending.textContent=page.error||'Ошибка обработки';
+  }
+  refresh();paintProgress();
+};
+function pollProgress(){
+  if(['completed','completed_with_errors','interrupted','stop_failed'].includes(progressState.state))return;
+  const script=document.createElement('script');script.src='progress.js?t='+Date.now();
+  script.onload=()=>{script.remove();setTimeout(pollProgress,5000)};
+  script.onerror=()=>{script.remove();setTimeout(pollProgress,10000)};
+  document.head.appendChild(script);
+}
+function feedback(message){document.querySelector('#message').textContent=message;document.querySelector('#message-bottom').textContent=message}
+function save(id,change){reviews[id]={...reviews[id],...change,updated_at:new Date().toISOString()};try{localStorage.setItem(KEY,JSON.stringify(reviews));feedback('Сохранено')}catch{feedback('Не удалось сохранить в браузере — скачайте JSON')}refresh();annotationPainters.get(id)?.()}
+
+function annotationPoint(event,bounds){return {x:Math.max(0,Math.min(100,(event.clientX-bounds.left)/bounds.width*100)),y:Math.max(0,Math.min(100,(event.clientY-bounds.top)/bounds.height*100))}}
+function annotationRect(a,b){return {x1:Math.min(a.x,b.x),y1:Math.min(a.y,b.y),x2:Math.max(a.x,b.x),y2:Math.max(a.y,b.y)}}
+function annotationLine(rect){return `[Область (%): x1=${rect.x1.toFixed(1)}, y1=${rect.y1.toFixed(1)}, x2=${rect.x2.toFixed(1)}, y2=${rect.y2.toFixed(1)}]`}
+function commentRects(comment){
+  const pattern=/\[Область \(%\): x1=(\d+(?:\.\d+)?), y1=(\d+(?:\.\d+)?), x2=(\d+(?:\.\d+)?), y2=(\d+(?:\.\d+)?)\]/g;
+  return [...comment.matchAll(pattern)].map(m=>({x1:+m[1],y1:+m[2],x2:+m[3],y2:+m[4]})).filter(r=>r.x1>=0&&r.y1>=0&&r.x2<=100&&r.y2<=100&&r.x2>r.x1&&r.y2>r.y1);
+}
+function setupAnnotation(article){
+  const image=article.querySelector('img');
+  if(!image?.getBoundingClientRect||annotationPainters.has(article.dataset.id))return;
+  const id=article.dataset.id,note=article.querySelector('textarea'),link=image.parentElement;
+  const tools=document.createElement('div'),button=document.createElement('button'),hint=document.createElement('span'),surface=document.createElement('div');
+  tools.className='mark-tools';button.type='button';button.textContent='Выделить рамку';button.setAttribute('aria-pressed','false');
+  hint.textContent='Координаты в % добавятся в комментарий. Esc — отмена.';
+  tools.appendChild(button);tools.appendChild(hint);surface.className='mark-image';link.before(tools);link.before(surface);surface.appendChild(link);
+  let enabled=false,start=null,pointer=null;
+  function box(rect,draft=false){const node=document.createElement('div');node.className='mark-box'+(draft?' draft':'');Object.assign(node.style,{left:rect.x1+'%',top:rect.y1+'%',width:(rect.x2-rect.x1)+'%',height:(rect.y2-rect.y1)+'%'});surface.appendChild(node)}
+  function paint(){surface.querySelectorAll('.mark-box').forEach(n=>n.remove());commentRects(note.value).forEach(r=>box(r))}
+  function cancel(){start=null;if(pointer!==null&&surface.hasPointerCapture(pointer))surface.releasePointerCapture(pointer);pointer=null;paint()}
+  button.onclick=()=>{cancel();enabled=!enabled;surface.classList.toggle('selecting',enabled);button.setAttribute('aria-pressed',String(enabled))};
+  surface.addEventListener('click',event=>{if(enabled)event.preventDefault()});
+  surface.addEventListener('dragstart',event=>{if(enabled)event.preventDefault()});
+  surface.addEventListener('pointerdown',event=>{
+    if(!enabled||event.button!==0||start)return;
+    const bounds=image.getBoundingClientRect();if(!bounds.width||!bounds.height)return;
+    event.preventDefault();start=annotationPoint(event,bounds);pointer=event.pointerId;surface.setPointerCapture(pointer);
+  });
+  surface.addEventListener('pointermove',event=>{if(!start||event.pointerId!==pointer)return;paint();box(annotationRect(start,annotationPoint(event,image.getBoundingClientRect())),true)});
+  surface.addEventListener('pointerup',event=>{
+    if(!start||event.pointerId!==pointer)return;
+    const bounds=image.getBoundingClientRect(),rect=annotationRect(start,annotationPoint(event,bounds));cancel();
+    if((rect.x2-rect.x1)*bounds.width/100<4||(rect.y2-rect.y1)*bounds.height/100<4)return;
+    note.value+=(note.value&&!note.value.endsWith('\n')?'\n':'')+annotationLine(rect);
+    save(id,{comment:note.value});
+  });
+  surface.addEventListener('pointercancel',cancel);surface.addEventListener('lostpointercapture',()=>{if(start)cancel()});
+  article.addEventListener('keydown',event=>{if(event.key==='Escape'){cancel();enabled=false;surface.classList.toggle('selecting',false);button.setAttribute('aria-pressed','false')}});
+  annotationPainters.set(id,paint);paint();
+}
+document.querySelectorAll('article').forEach(a=>{const id=a.dataset.id;if(!manifest.some(r=>r.id===id)){a.remove();return}const paint=()=>a.querySelectorAll('[data-star]').forEach(b=>b.classList.toggle('on',Number(b.dataset.star)>0&&Number(b.dataset.star)<=(reviews[id]?.rating||0)));paint();a.querySelector('textarea').value=reviews[id]?.comment||'';a.querySelectorAll('[data-star]').forEach(b=>b.onclick=()=>{save(id,{rating:Number(b.dataset.star)||null});paint()});a.querySelector('textarea').oninput=e=>save(id,{comment:e.target.value});setupAnnotation(a)});
+document.querySelector('#download').onclick=()=>{const blob=new Blob([JSON.stringify(payload(),null,2)],{type:'application/json;charset=utf-8'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=run.run_id+'-ratings.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
+document.querySelector('#copy').onclick=async()=>{refresh();try{await navigator.clipboard.writeText(document.querySelector('#json').value);feedback('JSON скопирован')}catch{document.querySelector('#json').hidden=false;document.querySelector('#json').select();feedback('Скопируйте выделенный JSON')}};
+document.querySelector('#download-bottom').onclick=document.querySelector('#download').onclick;
+document.querySelector('#copy-bottom').onclick=document.querySelector('#copy').onclick;
+document.querySelector('#show').onclick=()=>{refresh();document.querySelector('#json').hidden=!document.querySelector('#json').hidden};refresh();paintProgress();setInterval(paintProgress,1000);pollProgress();
+</script></html>

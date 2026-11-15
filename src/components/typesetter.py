@@ -468,10 +468,19 @@ def _layout(
 
 
 def _background_is_complex(image_rgb: np.ndarray, mask: np.ndarray) -> bool:
-    pixels = image_rgb[mask > 0]
-    if pixels.shape[0] < 20:
+    """Локальная фактура под текстом, без плавной заливки и края облачка."""
+    ys, xs = np.nonzero(mask)
+    if len(xs) < 20:
         return False
-    return float(pixels.astype(np.float32).std(axis=0).mean()) > 22
+    y0, y1, x0, x1 = ys.min(), ys.max()+1, xs.min(), xs.max()+1
+    crop = image_rgb[y0:y1, x0:x1].astype(np.float32)
+    inside = cv2.erode(mask[y0:y1, x0:x1], np.ones((7, 7), np.uint8),
+                       borderType=cv2.BORDER_CONSTANT, borderValue=0) > 0
+    if np.count_nonzero(inside) < 20:
+        return False
+    smooth = cv2.GaussianBlur(crop, (0, 0), 3.)
+    detail = np.max(np.abs(crop-smooth), axis=2)[inside]
+    return float(np.percentile(detail, 80)) > 12
 
 
 def _nonwhite_background(image_rgb: np.ndarray, mask: np.ndarray) -> bool:
@@ -1050,6 +1059,7 @@ def _composite_styled_layer(
     layer_bounds: dict[int, tuple[int, int, int, int] | None] | None = None,
     capture: dict | None = None,
     raster_fit: dict | None = None,
+    edge_background: np.ndarray | None = None,
 ) -> tuple[int, int, int, int] | None:
     """Нарисовать блок на слое 2×, скосить, повернуть, поварпить и вклеить в страницу.
 
@@ -1174,10 +1184,35 @@ def _composite_styled_layer(
         world_cx - point[0] + translate_x,
         world_cy - point[1] + translate_y,
     )
+    if edge_background is not None and stroke_width == 0:
+        layer = _edge_contrast_outline(layer, destination, edge_background, fill, size)
     if capture is not None:
         capture["layer"] = layer
         capture["origin"] = destination
     return _paste_rgba(overlay, layer, destination)
+
+
+def _edge_contrast_outline(layer, destination, background, fill, size):
+    """Тонкий обратный край, когда буква попадает с облачка на тёмный рисунок."""
+    x, y = (round(v) for v in destination)
+    a, b = max(0, x), max(0, y)
+    c, d = min(background.shape[1], x+layer.width), min(background.shape[0], y+layer.height)
+    if c <= a or d <= b:
+        return layer
+    alpha = np.asarray(layer.getchannel('A'))[b-y:d-y, a-x:c-x]
+    pixels = background[b:d, a:c].astype(float)
+    light_fill = _relative_luminance(fill) > .5
+    channels = pixels/255.
+    linear = np.where(channels <= .04045, channels/12.92, ((channels+.055)/1.055)**2.4)
+    luminance = linear @ np.array([.2126, .7152, .0722])
+    fill_luminance = _relative_luminance(fill)
+    contrast = (np.maximum(luminance, fill_luminance)+.05)/(np.minimum(luminance, fill_luminance)+.05)
+    bad = contrast < 3.
+    if np.count_nonzero((alpha > 160) & bad) < 3:
+        return layer
+    from src.components.free_text_layout import outline_layer
+    return outline_layer(layer, (0, 0, 0) if light_fill else (255, 255, 255),
+                         max(2, min(8, math.ceil(size*.08))))
 
 
 def _channel_luminance(value: float) -> float:
@@ -1209,6 +1244,20 @@ def _area_color(image_rgb: np.ndarray, area: np.ndarray) -> tuple[int, int, int]
         return (255, 255, 255)
     median = np.median(pixels, axis=0)
     return tuple(int(channel) for channel in median)
+
+
+def _source_paint(region: TextRegion):
+    """Подтверждённые ядро и контрастная обводка важнее медианы фона."""
+    geometry = region.auto_layout or {}
+    fill = geometry.get('source_fill')
+    stroke = region.style.stroke_rgb
+    if (region.style.stroke_mode != 'auto' or region.style.fill_locked
+            or not geometry.get('source_outline') or not isinstance(fill, (list, tuple))
+            or len(fill) != 3 or stroke is None
+            or not all(isinstance(v, (int, float)) and math.isfinite(v) and 0 <= v <= 255 for v in fill)):
+        return None
+    fill = tuple(int(v) for v in fill)
+    return (fill, stroke) if _contrast_ratio(fill, stroke) >= 3 else None
 
 
 def _readable_fill(
@@ -1327,6 +1376,7 @@ class Typesetter:
         margin_ratio: float = 0.0,
         adaptive_text: bool = True,
         font_scale: float = 1.0,
+        neutral_text_colors: bool = False,
     ):
         self.min_font_size = min_font_size
         self.max_font_size = max_font_size
@@ -1335,6 +1385,7 @@ class Typesetter:
         self.margin_ratio = margin_ratio
         self.adaptive_text = adaptive_text
         self.font_scale = float(font_scale)
+        self.neutral_text_colors = bool(neutral_text_colors)
         if not math.isfinite(self.font_scale) or not .5 <= self.font_scale <= 2.0:
             self.font_scale = 1.0
         self.user_fonts = Path(user_fonts) if user_fonts else None
@@ -1346,6 +1397,9 @@ class Typesetter:
 
     def _region_font(self, region: TextRegion) -> Path | None:
         """Пустой ``font_id`` оставляет прежний подбор. Иначе — файл из каталога."""
+        if ((region.auto_layout or {}).get('readable_action') and not region.manual
+                and not region.edited and not region.style.font_size_override and COMIC_FONT.exists()):
+            return COMIC_FONT
         font_id = str(region.style.font_id or "").strip()
         if not font_id:
             return _font_file(region)
@@ -1451,8 +1505,12 @@ class Typesetter:
         size: int,
     ) -> tuple[tuple[int, int, int] | None, int]:
         """На тёмном фоне белые буквы обводятся чёрным, на остальном — белым."""
+        source = _source_paint(region)
+        if source is not None:
+            return source[1], self._fit_stroke_width(region, size, _background_is_complex(image_rgb, area))
         dark = not region.style.fill_locked and _relative_luminance(_area_color(image_rgb, area)) < .08
-        return ((0, 0, 0) if dark else (255, 255, 255)), self._fit_stroke_width(region, size, _nonwhite_background(image_rgb, area))
+        return ((0, 0, 0) if dark else (255, 255, 255)), self._fit_stroke_width(region, size, (_nonwhite_background(image_rgb, area)
+                if region.block_type == "sfx" else _background_is_complex(image_rgb, area)))
 
     def _fit_stroke_width(self, region: TextRegion, size: int, complex_background: bool) -> int:
         """Ширина обводки для подбора кегля без повторного измерения фона."""
@@ -1461,7 +1519,20 @@ class Typesetter:
             return 0
         if mode == "custom" and region.style.stroke_width > 0:
             return max(1, int(round(region.style.stroke_width)))
+        if (mode == 'auto' and region.block_type != 'sfx'
+                and not any(ch.isalnum() for ch in region.translation)
+                and not (region.auto_layout or {}).get('source_outline')):
+            return 0
+        if (mode == "auto" and not complex_background and region.block_type != "sfx"
+                and not region.style.fill_locked and not region.document
+                and (region.auto_layout or {}).get("kind") in ("bubble", "free")
+                and not (region.auto_layout or {}).get("source_outline")):
+            return 0
         width = max(1, int(round(size * max(.06, self.stroke_ratio))))
+        if mode == 'auto' and region.block_type != 'sfx' and size <= 24 and self.stroke_ratio <= .08:
+            # У мелкой речи двойное усиление съедает просветы и место под
+            # перевод; одного пикселя достаточно для контрастного края.
+            return 1
         if mode == 'auto' and complex_background:
             return max(width + 1, int(math.ceil(width * _NONWHITE_STROKE_MULTIPLIER)))
         return width
@@ -1601,11 +1672,19 @@ class Typesetter:
             area_y, area_x = np.nonzero(area)
             paint_rgb = rgb[area_y.min():area_y.max()+1, area_x.min():area_x.max()+1]
             paint_area = area[area_y.min():area_y.max()+1, area_x.min():area_x.max()+1]
-            complex_background = _nonwhite_background(paint_rgb, paint_area)
+            complex_background = (_nonwhite_background(paint_rgb, paint_area) if region.block_type == "sfx"
+                                  else _background_is_complex(paint_rgb, paint_area))
             raster_style = region.style
             free_outline = float((region.auto_layout or {}).get('outline_px', 3))
+            if (not complex_background and region.block_type != 'sfx'
+                    and not region.style.fill_locked
+                    and not (region.auto_layout or {}).get('source_outline')):
+                free_outline = 0.
             if native_free and region.style.stroke_mode == 'auto':
-                if complex_background:
+                if (region.auto_layout or {}).get('readable_action'):
+                    # Короткой ремарке нужен тонкий край, а не ореол крупного SFX.
+                    free_outline /= 3.
+                elif complex_background:
                     free_outline *= _NONWHITE_STROKE_MULTIPLIER
                 # Одна ширина резервируется при подборе свободной надписи
                 # и применяется при рисовании; геометрия проекта не меняется.
@@ -1811,11 +1890,53 @@ class Typesetter:
                     )
                     if shrunk and shrunk_font is not None:
                         placed, chosen_font = shrunk, shrunk_font
+            if (native_bubble and scaled_font and frozen is None and override == 0
+                    and not region.manual and not region.edited and region.id not in overflow):
+                # Общий масштаб шрифта не отменяет ранее проверенную форму.
+                # Повторный подбор сохраняет целые слова и реальную обводку.
+                from src.components.adaptive_text import fit_balloon_shape
+                fitted, fitted_font, fits = fit_balloon_shape(
+                    area, region, text, font_path, self.lang,
+                    min_size=self.min_font_size, max_size=int(chosen_font.size), stroke_pad=stroke_pad)
+                if fits:
+                    placed, chosen_font = fitted, fitted_font
             if (raster_fit is not None and raster_fit.get('caption') and frozen is None
                     and override == 0 and not region.manual and not region.edited):
-                from src.components.slanted_layout import constrain_caption_fit
+                from src.components.slanted_layout import constrain_caption_fit, line_raster
+                # Поле могло быть сужено соседней репликой либо краем страницы.
+                # Подбор растра должен учитывать тот же доступный прямоугольник.
+                caption_geometry = dict(region.auto_layout)
+                ix, iy, iw, ih = caption_geometry['ink_bbox']
+                left, top = max(ix, int(area_x.min())), max(iy, int(area_y.min()))
+                right, bottom = min(ix+iw, int(area_x.max())+1), min(iy+ih, int(area_y.max())+1)
+                xa, ya = max(0, math.ceil(left)), max(0, math.ceil(top))
+                xb, yb = min(area.shape[1], math.floor(right)), min(area.shape[0], math.floor(bottom))
+                if xb > xa and yb > ya:
+                    # Угловой остаток после разделения соседей не задаёт высоту
+                    # всей карточки: берём полные непрерывные полосы поля.
+                    rows = np.flatnonzero(np.all(area[ya:yb, xa:xb] > 0, axis=1))
+                    if len(rows):
+                        groups = np.split(rows, np.flatnonzero(np.diff(rows) > 1)+1)
+                        band = max(groups, key=len)
+                        if len(band) >= (yb-ya)*.25:
+                            top, bottom = ya+int(band[0]), ya+int(band[-1])+1
+                caption_geometry['ink_bbox'] = [left, top, max(1, right-left), max(1, bottom-top)]
+                # После разделения поля заново выбираем переносы и центр блока.
+                # Сжатие прежнего растра оставляло текст у занятого соседом края.
+                bx, by, bw, bh = caption_geometry['source_bbox']
+                center = np.array([left+(right-left)/2, top+(bottom-top)/2, 1.])
+                inverse = cv2.getRotationMatrix2D((bx+bw/2, by+bh/2), -region.style.rotation, 1.)
+                cx, cy = inverse @ center
+                caption_geometry['source_lines'] = [[cx-(right-left)/2, cy-(bottom-top)/2,
+                                                     max(1, right-left), max(1, bottom-top)]]
+                caption_geometry['caption_padding'] = 0
+                rebuilt = line_raster(text, font_path, raster_style, caption_geometry, _LAYER_SCALE)
+                if rebuilt is not None:
+                    raster_fit = rebuilt[1]
+                    if raster_fit['font_size'] < self.min_font_size and region.id not in overflow:
+                        overflow.append(region.id)
                 raster_fit = constrain_caption_fit(
-                    raster_fit, region.auto_layout, region.style.rotation,
+                    raster_fit, caption_geometry, region.style.rotation,
                     free_outline, self.min_font_size, _LAYER_SCALE,
                 )
                 chosen_font = _load_font(font_path, raster_fit['font_size'])
@@ -1835,17 +1956,18 @@ class Typesetter:
             if raster_fit is not None:
                 self._last_layouts[int(region.id)]['raster_fit'] = raster_fit
             stroke, stroke_width = self._stroke_paint(rgb, area, region, size)
+            source = _source_paint(region)
             if native_free and region.style.stroke_mode == 'auto':
-                stroke = (0, 0, 0) if (not region.style.fill_locked and
+                stroke = source[1] if source is not None else (0, 0, 0) if (not region.style.fill_locked and
                          _relative_luminance(_area_color(rgb, area)) < .08) else (255, 255, 255)
-                stroke_width = max(1, round(free_outline))
-            fill = region.style.fill_rgb
-            if ((region.auto_layout or {}).get('readable_caption') and
+                stroke_width = max(0, round(free_outline))
+            fill = source[0] if source is not None else region.style.fill_rgb
+            if (source is None and (region.auto_layout or {}).get('readable_caption') and complex_background and
                     region.style.stroke_mode == 'auto' and not region.style.fill_locked):
                 # На пёстрой карточке толстые белые буквы с тёмным краем
                 # читаются устойчивее тонкого чёрного ядра в белом ореоле.
                 fill, stroke = (255, 255, 255), (0, 0, 0)
-            if (region.style.stroke_mode == 'auto' and not region.style.fill_locked and
+            if (source is None and region.style.stroke_mode == 'auto' and not region.style.fill_locked and
                     _relative_luminance(_area_color(rgb, area)) < .08):
                 fill = (255, 255, 255)
                 region.style.fill_rgb = fill
@@ -1860,6 +1982,23 @@ class Typesetter:
                     _area_color(rgb, area),
                     stroke if stroke_width > 0 else None,
                 )
+                region.style.fill_rgb = fill
+            if (self.neutral_text_colors and region.style.stroke_mode == 'auto'
+                    and not region.style.fill_locked and not region.manual and not region.edited):
+                # Нейтральная палитра не кодирует говорящего. На обычном фоне
+                # предпочитаем чёрное ядро, белый край не съедает его просветы.
+                if stroke_width > 0:
+                    # Контраст выбираем по полю самих букв, а не по большой
+                    # рамке соседнего/прозрачного облачка. Палитра остаётся Ч/Б.
+                    x, y, w, h = region.bbox
+                    field = rgb[max(0, y):min(rgb.shape[0], y+h), max(0, x):min(rgb.shape[1], x+w)]
+                    background = tuple(np.median(field, axis=(0, 1))) if field.size else _area_color(rgb, area)
+                    if _relative_luminance(background) < (.08 if native_bubble else .3):
+                        fill, stroke = (255, 255, 255), (0, 0, 0)
+                    else:
+                        fill, stroke = (0, 0, 0), (255, 255, 255)
+                else:
+                    fill = _readable_fill((0, 0, 0), _area_color(rgb, area))
                 region.style.fill_rgb = fill
             needs_layer = (
                 _style_needs_layer(region.style)
@@ -1877,6 +2016,9 @@ class Typesetter:
                     raster_style, draw, region=region, apply_geometry=apply_geometry,
                     stable_pad=stable_pad, layer_bounds=self._last_layer_bounds,
                     capture=capture, raster_fit=raster_fit,
+                    edge_background=(rgb if region.bubble_bbox is not None
+                        and not region.document and region.style.stroke_mode == 'auto'
+                        and not region.manual and not region.edited else None),
                 )
                 if capture is not None and "layer" in capture:
                     self._last_layer_parts[int(region.id)] = capture
