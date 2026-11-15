@@ -1,16 +1,18 @@
 {
-  "generated_at": "2026-10-25T08:01:53.690037+00:00",
+  "generated_at": "2026-11-15T06:08:40.531745+00:00",
   "code": {
-    "commit": "c498ba2271a2e9470bf2db92774ee2b8719bfbf7",
-    "tracked_code_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "tracked_code_dirty": false,
-    "generator_sha256": "e0072c584e4dd3b5f63827fc1c22430a10d0c5f54af36db4acb136bb4c2ce310"
+    "commit": "55dc35c4005034b9ec5babbfd8424c2ef303e9e2",
+    "tracked_code_diff_sha256": "42dbc7c1732b4f184fcbc211f492e125681691f593620606a34b161333d2a53e",
+    "tracked_code_dirty": true,
+    "generator_sha256": "aa385f745928cdb7ac9c2b40376584548bd9a29ec97cd5279d49b90d13b5f389"
   },
   "python": "3.10.11",
   "platform": "Windows",
   "model": "qwen36-27b-mtp-q6k-2x5060ti",
   "source_lang": "zh",
   "target_lang": "ru",
+  "effective_source_lang": "auto",
+  "run_id": "run-d8f808a6",
   "input_sha256": "48ec51810f4717234278dddcceea8bd2132719bdb7af30130f023f46223a3f4a",
   "crop": null,
   "prepared_input_sha256": "9a175345e5c5a9aff948c5c0d4968b74be664ff463e6a27f3a060ee65cf866ce",
@@ -26,39 +28,43 @@
     "layout_long_side": 2000,
     "vlm_max_side": 1536,
     "llm_thinking": false,
-    "ort_intra_op_threads": 4
+    "ort_intra_op_threads": 4,
+    "neutral_text_colors": true
   },
-  "seconds": 90.96,
+  "seconds": 338.53,
   "ocr_engine": "vlm",
   "translator_engine": "llm",
-  "regions": 7,
-  "warnings": [],
-  "stages_completed": [
-    "load",
-    "detect",
-    "ocr",
-    "translate",
-    "segment",
-    "inpaint",
-    "typeset"
+  "regions": 2,
+  "warnings": [
+    "VLM не подтвердил рамку дополнительного текста",
+    "VLM не подтвердил рамку дополнительного текста",
+    "VLM не подтвердил рамку дополнительного текста",
+    "VLM не подтвердил рамку дополнительного текста",
+    "VLM не подтвердил рамку дополнительного текста",
+    "VLM не подтвердил рамку дополнительного текста",
+    "VLM не подтвердил рамку дополнительного текста",
+    "VLM не подтвердил рамку дополнительного текста",
+    "Пропущены дополнительные надписи: исчерпан бюджет проверки фрагмента",
+    "VLM не подтвердил рамку дополнительного текста",
+    "VLM не подтвердил рамку дополнительного текста"
   ],
   "timings": {
-    "load": 0.098,
-    "detect": 4.402,
-    "ocr": 28.962,
-    "translate": 14.659,
-    "segment": 2.837,
-    "inpaint": 26.658,
-    "typeset": 9.072
+    "load": 0.101,
+    "detect": 4.385,
+    "ocr": 235.525,
+    "translate": 23.049,
+    "segment": 17.466,
+    "inpaint": 9.016,
+    "typeset": 36.169
   },
   "fonts": [
-    "comicz"
+    "Heroika-Regular"
   ],
   "manual_edits": false,
   "artifacts": {
-    "translated/chinese.png": "5ef98a1b3fc6ccee68205c081a572c0ea6ba1d2905753499a932fde06c649b7f",
-    "regions/chinese.json": "d03a49b9f18236113e26e25114a22afe166f591c8e42f12de7c8ce50f6f0047e",
-    "comparisons/chinese.jpg": "f173b690ca553e086ec405b0bd8bc11c49cd9b44fc0410bd5047e5a0ea2f9334",
-    "comparisons/chinese-full.jpg": "002609c8201279dc2d69c1c238b3a6fa690a660aa906eda587ea811a6b0986c6"
+    "translated/chinese.png": "d919ffb264bc68b54c79160748d277cce6425660b19f4516021921807c43158c",
+    "regions/chinese.json": "28f0125e66bac6ed4b269ff1004f7cb593593864483128810aa170f4dc66618b",
+    "comparisons/chinese.jpg": "f452b1b46e06fc12727d0dd5c83beb3aa85f6a38e13ee591b571ac668748edcf",
+    "comparisons/chinese-full.jpg": "049449349c6fc4fdac81ed08009beecdcd1a8673fcae6c3b74c6092677a12a49"
   }
 }

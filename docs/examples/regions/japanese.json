@@ -5,14 +5,17 @@
   "translator_engine": "llm",
   "timings": {
     "load": 0.013,
-    "detect": 0.544,
-    "ocr": 36.823,
-    "translate": 16.276,
-    "segment": 0.212,
-    "inpaint": 1.714,
-    "typeset": 5.213
+    "detect": 0.484,
+    "ocr": 64.402,
+    "translate": 47.707,
+    "segment": 3.211,
+    "inpaint": 9.737,
+    "typeset": 7.938
   },
-  "warnings": [],
+  "warnings": [
+    "VLM не подтвердил рамку дополнительного звука",
+    "Текст не влез полностью: [1, 4, 5, 7, 8]"
+  ],
   "regions": [
     {
       "id": 1,
@@ -25,9 +28,9 @@
       "class_name": "text_bubble",
       "confidence": 0.9006,
       "text": "ホントどうしようもなく空気読めませんねこの子は",
-      "translation": "Эта девочка совсем не умеет считывать атмосферу.",
+      "translation": "Эта девочка совсем не умеет считывать атмосферу. Просто ужас.",
       "type": "dialogue",
-      "speaker": "girl with short hair",
+      "speaker": "Девушка с косой",
       "speaker_gender": "female",
       "bubble_bbox": [
         46,
@@ -39,7 +42,7 @@
       "skip": false,
       "manual": false,
       "edited": false,
-      "overflow": false,
+      "overflow": true,
       "translation_locked": false,
       "document": false,
       "text_position": null,
@@ -51,10 +54,10 @@
         ],
         "fill_locked": false,
         "stroke_rgb": null,
-        "font_size": 9,
+        "font_size": 11,
         "alignment": "center",
         "uppercase": false,
-        "line_height": 18,
+        "line_height": 6,
         "font_size_override": 0,
         "font_id": "Heroika-Regular",
         "stroke_mode": "auto",
@@ -88,13 +91,14 @@
           62,
           44,
           53,
-          95
+          94
         ],
         "outline_px": 3.0,
         "mask_pad_px": 8.0,
+        "source_outline": false,
         "contour": [
           [
-            60.48,
+            60.84,
             42.48
           ],
           [
@@ -115,11 +119,11 @@
           ],
           [
             50.4,
-            128.16
+            127.8
           ],
           [
-            56.52,
-            133.92
+            55.08,
+            132.84
           ],
           [
             61.56,
@@ -146,24 +150,16 @@
             141.48
           ],
           [
-            90,
-            143.64
+            91.08,
+            144.36
           ],
           [
-            92.16,
-            145.08
-          ],
-          [
-            95.4,
-            146.16
-          ],
-          [
-            91.8,
-            142.92
+            93.6,
+            144.72
           ],
           [
             91.44,
-            141.84
+            142.56
           ],
           [
             92.16,
@@ -174,36 +170,44 @@
             139.68
           ],
           [
-            100.8,
-            138.6
+            105.84,
+            136.44
           ],
           [
             107.28,
             136.44
           ],
           [
-            111.24,
-            134.28
+            108.72,
+            135.36
           ],
           [
             112.32,
             134.28
           ],
           [
-            115.2,
-            132.48
+            119.52,
+            129.24
           ],
           [
-            122.04,
-            127.08
+            120.96,
+            127.44
           ],
           [
-            124.56,
-            124.2
+            121.68,
+            127.44
+          ],
+          [
+            126,
+            121.68
+          ],
+          [
+            126.36,
+            119.52
           ],
           [
             129.24,
-            113.04
+            112.68
           ],
           [
             129.6,
@@ -215,7 +219,7 @@
           ],
           [
             130.32,
-            105.84
+            105.48
           ],
           [
             131.4,
@@ -226,12 +230,20 @@
             98.28
           ],
           [
-            132.48,
-            93.24
+            132.12,
+            95.76
           ],
           [
             132.84,
-            82.8
+            86.76
+          ],
+          [
+            132.12,
+            66.6
+          ],
+          [
+            131.4,
+            65.16
           ],
           [
             131.4,
@@ -244,6 +256,14 @@
           [
             130.32,
             55.8
+          ],
+          [
+            129.24,
+            53.28
+          ],
+          [
+            129.24,
+            51.84
           ],
           [
             127.08,
@@ -266,10 +286,10 @@
       ],
       "class_name": "text_bubble",
       "confidence": 0.9284,
-      "text": "一度ならず二度までもやっちゃうんだもんな！",
-      "translation": "Она сделает это снова и снова!",
+      "text": "一度ならず 二度までも やっちゃ うんだ もんなー",
+      "translation": "Она ведь уже раз так делала. И снова повторит.",
       "type": "dialogue",
-      "speaker": "girl with short hair",
+      "speaker": "Девушка с короткими волосами",
       "speaker_gender": "female",
       "bubble_bbox": [
         262,
@@ -293,17 +313,17 @@
         ],
         "fill_locked": false,
         "stroke_rgb": null,
-        "font_size": 11,
+        "font_size": 10,
         "alignment": "center",
         "uppercase": false,
-        "line_height": 18,
+        "line_height": 6,
         "font_size_override": 0,
         "font_id": "Heroika-Regular",
         "stroke_mode": "auto",
         "stroke_width": 0.0,
-        "letter_spacing": 0.0,
-        "line_spacing": 0.0,
-        "rotation": 0.0,
+        "letter_spacing": -0.792,
+        "line_spacing": -1.512,
+        "rotation": -35.0,
         "skew_x": 0.0,
         "warp": {
           "version": 1,
@@ -316,11 +336,12 @@
       "auto_layout": {
         "version": 1,
         "kind": "bubble",
-        "angle": 0.0,
+        "angle": -35.0,
         "evidence": {
-          "raw_angle": 0,
-          "gain": 1.0,
-          "reason": "недостаточная уверенность"
+          "raw_angle": -35.0,
+          "gain": 1.069,
+          "reason": "проекция строк",
+          "glyph_count": 19
         },
         "source_bbox": [
           274,
@@ -329,13 +350,14 @@
           69
         ],
         "ink_bbox": [
-          273,
+          280,
           47,
-          75,
-          67
+          67,
+          58
         ],
         "outline_px": 3.0,
         "mask_pad_px": 8.0,
+        "source_outline": false,
         "contour": [
           [
             270,
@@ -402,12 +424,8 @@
             106.56
           ],
           [
-            286.56,
-            108.72
-          ],
-          [
-            288.72,
-            110.52
+            291.96,
+            112.32
           ],
           [
             294.12,
@@ -514,10 +532,10 @@
       ],
       "class_name": "text_bubble",
       "confidence": 0.6521,
-      "text": "もしここで答えたら…",
+      "text": "もし ここで 答えたら…",
       "translation": "Если я отвечу здесь...",
-      "type": "narration",
-      "speaker": "girl with pigtails",
+      "type": "dialogue",
+      "speaker": "Девушка с короткими волосами",
       "speaker_gender": "female",
       "bubble_bbox": [
         363,
@@ -535,16 +553,16 @@
       "text_position": null,
       "style": {
         "fill_rgb": [
-          0,
-          0,
-          0
+          255,
+          255,
+          255
         ],
         "fill_locked": false,
         "stroke_rgb": null,
-        "font_size": 13,
+        "font_size": 11,
         "alignment": "center",
         "uppercase": false,
-        "line_height": 18,
+        "line_height": 6,
         "font_size_override": 0,
         "font_id": "Heroika-Regular",
         "stroke_mode": "auto",
@@ -575,149 +593,142 @@
           92
         ],
         "ink_bbox": [
-          367,
+          366,
           46,
-          53,
+          54,
           86
         ],
         "outline_px": 3.0,
         "mask_pad_px": 8.0,
+        "source_outline": false,
         "contour": [
           [
-            364.32,
-            41.4
+            392.4,
+            40.68
           ],
           [
-            364.32,
-            134.28
+            387,
+            42.12
           ],
           [
-            364.32,
-            130.68
-          ],
-          [
-            365.04,
-            129.96
-          ],
-          [
-            368.28,
-            129.96
-          ],
-          [
-            370.08,
-            131.4
-          ],
-          [
-            372.6,
-            132.12
+            381.6,
+            45
           ],
           [
             375.48,
-            134.28
+            50.76
           ],
           [
-            380.88,
-            128.88
+            371.16,
+            56.52
           ],
           [
-            382.68,
-            128.16
+            367.92,
+            63
           ],
           [
-            387.36,
-            124.2
+            365.04,
+            71.64
           ],
           [
-            390.6,
-            123.12
+            363.24,
+            83.16
           ],
           [
-            391.68,
-            122.04
+            363.24,
+            92.16
           ],
           [
-            395.64,
-            120.24
+            364.32,
+            100.8
           ],
           [
-            397.8,
-            120.24
+            367.56,
+            111.96
+          ],
+          [
+            372.24,
+            120.96
+          ],
+          [
+            374.4,
+            123.84
+          ],
+          [
+            381.6,
+            130.68
+          ],
+          [
+            387,
+            133.56
+          ],
+          [
+            392.4,
+            135
           ],
           [
             398.16,
-            120.96
+            135
           ],
           [
-            399.24,
-            120.96
+            403.56,
+            133.56
           ],
           [
-            400.68,
-            120.24
+            411.84,
+            128.52
           ],
           [
-            402.48,
-            120.24
+            416.16,
+            123.84
           ],
           [
-            402.84,
-            119.52
+            419.76,
+            118.44
           ],
           [
-            404.28,
-            119.16
+            423,
+            111.96
           ],
           [
-            408.24,
-            119.52
+            426.24,
+            100.8
+          ],
+          [
+            427.32,
+            92.16
+          ],
+          [
+            427.32,
+            83.16
+          ],
+          [
+            425.52,
+            71.64
+          ],
+          [
+            422.64,
+            63
+          ],
+          [
+            418.32,
+            54.72
+          ],
+          [
+            413.64,
+            48.96
           ],
           [
             408.96,
-            120.96
+            45
           ],
           [
-            408.24,
-            121.68
+            403.56,
+            42.12
           ],
           [
-            403.2,
-            122.4
-          ],
-          [
-            402.12,
-            123.48
-          ],
-          [
-            398.52,
-            124.2
-          ],
-          [
-            395.28,
-            126.36
-          ],
-          [
-            392.76,
-            127.08
-          ],
-          [
-            389.16,
-            129.6
-          ],
-          [
-            388.08,
-            129.6
-          ],
-          [
-            382.68,
-            134.28
-          ],
-          [
-            426.6,
-            134.28
-          ],
-          [
-            426.6,
-            41.4
+            398.16,
+            40.68
           ]
         ]
       }
@@ -733,9 +744,9 @@
       "class_name": "text_bubble",
       "confidence": 0.5059,
       "text": "まずい…",
-      "translation": "Плохо...",
-      "type": "narration",
-      "speaker": "girl with pigtails",
+      "translation": "Нехорошо...",
+      "type": "dialogue",
+      "speaker": "Девушка с короткими волосами",
       "speaker_gender": "female",
       "bubble_bbox": [
         465,
@@ -747,7 +758,7 @@
       "skip": false,
       "manual": false,
       "edited": false,
-      "overflow": false,
+      "overflow": true,
       "translation_locked": false,
       "document": false,
       "text_position": null,
@@ -759,10 +770,10 @@
         ],
         "fill_locked": false,
         "stroke_rgb": null,
-        "font_size": 8,
+        "font_size": 11,
         "alignment": "center",
         "uppercase": false,
-        "line_height": 18,
+        "line_height": 6,
         "font_size_override": 0,
         "font_id": "Heroika-Regular",
         "stroke_mode": "auto",
@@ -793,113 +804,122 @@
           80
         ],
         "ink_bbox": [
-          479,
-          84,
-          9,
-          32
+          473,
+          46,
+          15,
+          70
         ],
         "outline_px": 3.0,
         "mask_pad_px": 8.0,
+        "source_outline": false,
         "contour": [
           [
-            465.84,
+            478.44,
+            40.32
+          ],
+          [
+            476.28,
             41.4
           ],
           [
-            465.84,
-            121.32
-          ],
-          [
-            470.88,
-            122.04
+            473.04,
+            45
           ],
           [
             471.6,
-            123.12
-          ],
-          [
-            471.24,
-            124.2
+            47.52
           ],
           [
             468.72,
-            124.56
+            55.8
+          ],
+          [
+            467.28,
+            61.92
           ],
           [
             465.84,
-            123.48
+            72.36
           ],
           [
-            465.84,
-            127.44
+            465.48,
+            91.08
           ],
           [
-            471.6,
-            127.44
-          ],
-          [
-            469.44,
-            126.72
+            466.92,
+            104.76
           ],
           [
             468.72,
-            126
-          ],
-          [
-            469.08,
-            124.92
+            112.68
           ],
           [
             470.88,
-            124.92
-          ],
-          [
-            473.4,
-            126.36
+            119.16
           ],
           [
             473.76,
-            125.64
+            124.56
           ],
           [
-            475.92,
-            126.36
-          ],
-          [
-            479.16,
-            126.36
-          ],
-          [
-            483.48,
-            124.2
-          ],
-          [
-            487.8,
-            124.92
-          ],
-          [
-            487.44,
-            126.36
-          ],
-          [
-            485.64,
-            126.36
-          ],
-          [
-            485.28,
+            476.28,
             127.08
           ],
           [
-            483.48,
-            127.44
+            478.44,
+            128.16
           ],
           [
-            491.76,
-            127.44
+            480.6,
+            128.16
           ],
           [
-            491.76,
+            482.76,
+            127.08
+          ],
+          [
+            486.72,
+            122.4
+          ],
+          [
+            490.32,
+            112.68
+          ],
+          [
+            492.12,
+            104.76
+          ],
+          [
+            493.2,
+            96.12
+          ],
+          [
+            493.56,
+            77.76
+          ],
+          [
+            492.84,
+            68.76
+          ],
+          [
+            491.4,
+            60.12
+          ],
+          [
+            487.44,
+            47.52
+          ],
+          [
+            485.28,
+            43.92
+          ],
+          [
+            482.76,
             41.4
+          ],
+          [
+            480.6,
+            40.32
           ]
         ]
       }
@@ -914,10 +934,10 @@
       ],
       "class_name": "text_bubble",
       "confidence": 0.9307,
-      "text": "状況に流されてスルズル傍観してましたけど",
-      "translation": "Я просто плыла по течению и бездумно наблюдала.",
+      "text": "状況に流されて スルズル傍観 してましたけど",
+      "translation": "Я просто плыла по течению и безучастно наблюдала.",
       "type": "dialogue",
-      "speaker": "girl with cap",
+      "speaker": "Девушка с косой",
       "speaker_gender": "female",
       "bubble_bbox": [
         46,
@@ -925,11 +945,11 @@
         56,
         102
       ],
-      "order": 8,
+      "order": 7,
       "skip": false,
       "manual": false,
       "edited": false,
-      "overflow": false,
+      "overflow": true,
       "translation_locked": false,
       "document": false,
       "text_position": null,
@@ -941,10 +961,10 @@
         ],
         "fill_locked": false,
         "stroke_rgb": null,
-        "font_size": 7,
+        "font_size": 11,
         "alignment": "center",
         "uppercase": false,
-        "line_height": 18,
+        "line_height": 6,
         "font_size_override": 0,
         "font_id": "Heroika-Regular",
         "stroke_mode": "auto",
@@ -975,13 +995,14 @@
           89
         ],
         "ink_bbox": [
-          53,
-          361,
-          37,
-          69
+          52,
+          360,
+          40,
+          83
         ],
         "outline_px": 3.0,
         "mask_pad_px": 8.0,
+        "source_outline": false,
         "contour": [
           [
             89.64,
@@ -996,12 +1017,12 @@
             449.28
           ],
           [
-            54.72,
-            452.52
+            52.2,
+            451.08
           ],
           [
-            59.04,
-            453.96
+            56.16,
+            453.24
           ],
           [
             62.64,
@@ -1009,47 +1030,39 @@
           ],
           [
             64.08,
-            456.84
-          ],
-          [
-            64.08,
-            457.92
-          ],
-          [
-            65.16,
-            459
-          ],
-          [
-            65.88,
-            459
-          ],
-          [
-            65.16,
-            458.64
+            457.56
           ],
           [
             65.52,
-            455.04
+            457.56
           ],
           [
-            66.96,
-            454.32
+            65.16,
+            455.4
           ],
           [
-            71.28,
-            453.96
+            65.88,
+            454.68
           ],
           [
-            78.84,
-            450.36
+            72.72,
+            453.6
           ],
           [
-            80.28,
-            450.36
+            77.76,
+            450.72
           ],
           [
-            87.48,
-            445.68
+            82.44,
+            449.28
+          ],
+          [
+            82.8,
+            448.56
+          ],
+          [
+            87.12,
+            446.04
           ],
           [
             92.16,
@@ -1081,19 +1094,23 @@
           ],
           [
             97.56,
-            391.32
+            403.2
+          ],
+          [
+            97.2,
+            388.44
           ],
           [
             96.48,
-            385.92
+            386.28
           ],
           [
             96.48,
-            381.24
+            381.6
           ],
           [
             95.4,
-            377.64
+            378
           ],
           [
             95.4,
@@ -1139,7 +1156,7 @@
       "text": "あの…",
       "translation": "Эм...",
       "type": "dialogue",
-      "speaker": "girl with cap",
+      "speaker": "Девушка с косой",
       "speaker_gender": "female",
       "bubble_bbox": [
         174,
@@ -1147,7 +1164,7 @@
         33,
         58
       ],
-      "order": 7,
+      "order": 6,
       "skip": false,
       "manual": false,
       "edited": false,
@@ -1163,10 +1180,10 @@
         ],
         "fill_locked": false,
         "stroke_rgb": null,
-        "font_size": 9,
+        "font_size": 10,
         "alignment": "center",
         "uppercase": false,
-        "line_height": 18,
+        "line_height": 6,
         "font_size_override": 0,
         "font_id": "Heroika-Regular",
         "stroke_mode": "auto",
@@ -1204,66 +1221,103 @@
         ],
         "outline_px": 3.0,
         "mask_pad_px": 8.0,
+        "source_outline": false,
         "contour": [
           [
-            182.16,
-            359.28
+            189,
+            356.4
           ],
           [
-            181.08,
-            360
+            183.96,
+            358.56
           ],
           [
-            180.36,
-            361.44
+            180,
+            362.52
+          ],
+          [
+            177.84,
+            366.12
+          ],
+          [
+            176.04,
+            370.44
+          ],
+          [
+            174.24,
+            378
+          ],
+          [
+            173.88,
+            389.16
+          ],
+          [
+            175.32,
+            397.44
           ],
           [
             179.28,
-            365.76
+            406.8
           ],
           [
-            178.2,
-            367.56
-          ],
-          [
-            178.2,
-            392.76
-          ],
-          [
-            180.36,
-            400.32
-          ],
-          [
-            184.32,
-            405.36
-          ],
-          [
-            186.84,
-            407.16
-          ],
-          [
-            191.16,
-            408.96
-          ],
-          [
-            190.8,
-            411.12
-          ],
-          [
-            192.24,
+            181.44,
             409.68
           ],
           [
-            201.24,
-            410.4
+            185.04,
+            412.56
           ],
           [
-            203.4,
-            408.24
+            189,
+            414
           ],
           [
-            203.4,
-            359.64
+            191.88,
+            414
+          ],
+          [
+            196.92,
+            411.84
+          ],
+          [
+            199.44,
+            409.68
+          ],
+          [
+            202.32,
+            405.72
+          ],
+          [
+            204.12,
+            401.76
+          ],
+          [
+            206.28,
+            394.56
+          ],
+          [
+            207,
+            389.16
+          ],
+          [
+            207,
+            381.24
+          ],
+          [
+            204.84,
+            370.44
+          ],
+          [
+            200.88,
+            362.52
+          ],
+          [
+            195.84,
+            357.84
+          ],
+          [
+            191.88,
+            356.4
           ]
         ]
       }
@@ -1278,10 +1332,10 @@
       ],
       "class_name": "text_bubble",
       "confidence": 0.9103,
-      "text": "知ってるんでしょ？大丈夫ここは答えていい状況よ",
-      "translation": "Ты же знаешь? Всё в порядке, здесь можно ответить.",
+      "text": "知ってるん でしょう？ 大丈夫 ここは答えて いい状況よ",
+      "translation": "Ты ведь знаешь? Всё в порядке, здесь можно отвечать.",
       "type": "dialogue",
-      "speaker": "girl with short hair",
+      "speaker": "Девушка с короткими волосами",
       "speaker_gender": "female",
       "bubble_bbox": [
         349,
@@ -1289,11 +1343,11 @@
         89,
         69
       ],
-      "order": 5,
+      "order": 4,
       "skip": false,
       "manual": false,
       "edited": false,
-      "overflow": false,
+      "overflow": true,
       "translation_locked": false,
       "document": false,
       "text_position": null,
@@ -1305,10 +1359,10 @@
         ],
         "fill_locked": false,
         "stroke_rgb": null,
-        "font_size": 8,
+        "font_size": 11,
         "alignment": "center",
         "uppercase": false,
-        "line_height": 18,
+        "line_height": 6,
         "font_size_override": 0,
         "font_id": "Heroika-Regular",
         "stroke_mode": "auto",
@@ -1332,7 +1386,8 @@
         "evidence": {
           "raw_angle": 0,
           "gain": 1.0,
-          "reason": "недостаточная уверенность"
+          "reason": "недостаточная уверенность",
+          "glyph_count": 22
         },
         "source_bbox": [
           358,
@@ -1342,12 +1397,13 @@
         ],
         "ink_bbox": [
           363,
-          361,
-          59,
-          59
+          360,
+          60,
+          51
         ],
         "outline_px": 3.0,
         "mask_pad_px": 8.0,
+        "source_outline": false,
         "contour": [
           [
             356.76,
@@ -1356,6 +1412,14 @@
           [
             355.32,
             363.96
+          ],
+          [
+            355.32,
+            366.12
+          ],
+          [
+            354.24,
+            368.28
           ],
           [
             354.24,
@@ -1375,23 +1439,19 @@
           ],
           [
             352.08,
-            381.24
+            381.6
           ],
           [
             352.08,
-            392.4
-          ],
-          [
-            352.44,
-            394.2
+            392.04
           ],
           [
             353.16,
-            394.56
+            395.28
           ],
           [
-            353.16,
-            398.16
+            353.52,
+            400.32
           ],
           [
             354.24,
@@ -1423,7 +1483,7 @@
           ],
           [
             378.36,
-            416.52
+            416.16
           ],
           [
             375.84,
@@ -1432,14 +1492,6 @@
           [
             375.48,
             414.36
-          ],
-          [
-            379.8,
-            413.28
-          ],
-          [
-            382.32,
-            413.28
           ],
           [
             383.76,
@@ -1463,18 +1515,18 @@
           ],
           [
             380.16,
-            416.88
+            417.24
           ],
           [
             380.52,
             418.68
           ],
           [
-            382.32,
+            382.68,
             419.4
           ],
           [
-            396,
+            396.36,
             419.4
           ],
           [
@@ -1486,20 +1538,20 @@
             422.28
           ],
           [
-            397.8,
+            398.88,
+            420.12
+          ],
+          [
+            408.6,
             420.48
           ],
           [
-            407.88,
-            420.48
-          ],
-          [
-            415.08,
+            414,
             418.32
           ],
           [
-            418.32,
-            416.52
+            415.44,
+            418.32
           ],
           [
             423.36,
@@ -1512,6 +1564,10 @@
           [
             430.56,
             402.84
+          ],
+          [
+            431.28,
+            399.24
           ],
           [
             432.36,
@@ -1530,16 +1586,12 @@
             388.44
           ],
           [
-            434.16,
-            387.36
-          ],
-          [
             434.52,
             384.84
           ],
           [
             434.16,
-            373.32
+            373.68
           ],
           [
             433.44,
@@ -1579,9 +1631,9 @@
       "class_name": "text_bubble",
       "confidence": 0.9262,
       "text": "ホラホラ\nさつさと\nはかないと\nヘッド\nロックが\nきつく\nなるわよ",
-      "translation": "Давай-давай, если не ответишь, я затяну тебе голову.",
+      "translation": "Ну же, ну же. Если не ответишь быстро, я затяну удавку.",
       "type": "dialogue",
-      "speaker": "girl with short hair",
+      "speaker": "Девушка с короткими волосами",
       "speaker_gender": "female",
       "bubble_bbox": [
         323,
@@ -1589,11 +1641,11 @@
         111,
         76
       ],
-      "order": 9,
+      "order": 8,
       "skip": false,
       "manual": false,
       "edited": false,
-      "overflow": false,
+      "overflow": true,
       "translation_locked": false,
       "document": false,
       "text_position": null,
@@ -1605,10 +1657,10 @@
         ],
         "fill_locked": false,
         "stroke_rgb": null,
-        "font_size": 8,
+        "font_size": 11,
         "alignment": "center",
         "uppercase": false,
-        "line_height": 18,
+        "line_height": 6,
         "font_size_override": 0,
         "font_id": "Heroika-Regular",
         "stroke_mode": "auto",
@@ -1632,7 +1684,8 @@
         "evidence": {
           "raw_angle": 0,
           "gain": 1.0,
-          "reason": "недостаточная уверенность"
+          "reason": "недостаточная уверенность",
+          "glyph_count": 36
         },
         "source_bbox": [
           329,
@@ -1642,24 +1695,21 @@
         ],
         "ink_bbox": [
           332,
-          525,
-          95,
-          60
+          524,
+          90,
+          55
         ],
         "outline_px": 3.0,
         "mask_pad_px": 8.0,
+        "source_outline": false,
         "contour": [
           [
-            330.12,
-            525.96
+            328.32,
+            529.2
           ],
           [
             328.32,
-            529.56
-          ],
-          [
-            328.32,
-            532.08
+            531.72
           ],
           [
             327.24,
@@ -1683,7 +1733,7 @@
           ],
           [
             329.4,
-            565.2
+            565.56
           ],
           [
             330.84,
@@ -1726,10 +1776,6 @@
             589.32
           ],
           [
-            370.08,
-            588.24
-          ],
-          [
             371.52,
             588.24
           ],
@@ -1742,16 +1788,8 @@
             591.12
           ],
           [
-            371.16,
-            592.56
-          ],
-          [
-            371.52,
-            593.28
-          ],
-          [
-            372.96,
-            592.56
+            370.44,
+            594.36
           ],
           [
             376.2,
@@ -1762,7 +1800,7 @@
             589.32
           ],
           [
-            382.32,
+            381.96,
             590.4
           ],
           [
@@ -1790,28 +1828,24 @@
             586.44
           ],
           [
-            415.44,
-            584.28
+            416.52,
+            583.56
           ],
           [
-            419.4,
-            580.68
+            422.28,
+            577.44
           ],
           [
-            423.36,
-            575.64
-          ],
-          [
-            425.16,
-            571.32
+            424.44,
+            573.48
           ],
           [
             425.52,
             567.72
           ],
           [
-            426.24,
-            566.64
+            427.32,
+            562.32
           ],
           [
             427.68,
@@ -1834,12 +1868,20 @@
             536.4
           ],
           [
-            427.68,
-            535.32
+            427.32,
+            533.88
+          ],
+          [
+            427.32,
+            531.72
           ],
           [
             426.24,
-            528.48
+            529.56
+          ],
+          [
+            426.24,
+            528.12
           ],
           [
             424.44,
@@ -1856,6 +1898,10 @@
           [
             333,
             522.36
+          ],
+          [
+            331.2,
+            524.16
           ]
         ]
       }
@@ -1865,18 +1911,18 @@
       "bbox": [
         212,
         359,
-        95,
-        32
+        91,
+        21
       ],
       "class_name": "text_free",
       "confidence": 0.6,
       "text": "ぶん ぶん",
-      "translation": "Вжж",
+      "translation": "Вжж-вжж",
       "type": "sfx",
       "speaker": "",
       "speaker_gender": "unknown",
       "bubble_bbox": null,
-      "order": 6,
+      "order": 5,
       "skip": false,
       "manual": false,
       "edited": false,
@@ -1886,9 +1932,9 @@
       "text_position": null,
       "style": {
         "fill_rgb": [
-          18,
-          18,
-          18
+          0,
+          0,
+          0
         ],
         "fill_locked": false,
         "stroke_rgb": [
@@ -1896,12 +1942,12 @@
           255,
           255
         ],
-        "font_size": 41,
+        "font_size": 18,
         "alignment": "center",
         "uppercase": false,
-        "line_height": 18,
+        "line_height": 6,
         "font_size_override": 0,
-        "font_id": "impact",
+        "font_id": "Jupiteroid-Light",
         "stroke_mode": "auto",
         "stroke_width": 3.0,
         "letter_spacing": 0.0,
@@ -1928,179 +1974,19 @@
         "source_bbox": [
           212,
           359,
-          95,
-          32
+          91,
+          21
         ],
         "ink_bbox": [
           211,
-          357,
-          98,
-          34
-        ],
-        "outline_px": 3.0,
-        "mask_pad_px": 8.0
-      }
-    },
-    {
-      "id": 10,
-      "bbox": [
-        431,
-        359,
-        45,
-        61
-      ],
-      "class_name": "text_free",
-      "confidence": 0.6,
-      "text": "知ってるんでしょ？\n大丈夫\nここは答えて\nいい状況よ",
-      "translation": "Ты же знаешь? Всё в порядке, здесь можно ответить.",
-      "type": "narration",
-      "speaker": "girl with pigtails",
-      "speaker_gender": "female",
-      "bubble_bbox": null,
-      "order": 4,
-      "skip": false,
-      "manual": false,
-      "edited": false,
-      "overflow": false,
-      "translation_locked": false,
-      "document": false,
-      "text_position": null,
-      "style": {
-        "fill_rgb": [
-          18,
-          18,
-          18
-        ],
-        "fill_locked": false,
-        "stroke_rgb": [
-          255,
-          255,
-          255
-        ],
-        "font_size": 10,
-        "alignment": "center",
-        "uppercase": false,
-        "line_height": 18,
-        "font_size_override": 0,
-        "font_id": "comicz",
-        "stroke_mode": "auto",
-        "stroke_width": 3.0,
-        "letter_spacing": 0.0,
-        "line_spacing": 0.0,
-        "rotation": 0.0,
-        "skew_x": 0.0,
-        "warp": {
-          "version": 1,
-          "kind": "none",
-          "bend": 0.0,
-          "quad": null,
-          "mesh": null
-        }
-      },
-      "auto_layout": {
-        "version": 1,
-        "kind": "free",
-        "angle": 0.0,
-        "evidence": {
-          "raw_angle": 0,
-          "gain": 1.0,
-          "reason": "недостаточная уверенность"
-        },
-        "source_bbox": [
-          431,
-          359,
-          45,
-          61
-        ],
-        "ink_bbox": [
-          430,
-          357,
-          47,
-          63
-        ],
-        "outline_px": 3.0,
-        "mask_pad_px": 8.0
-      }
-    },
-    {
-      "id": 11,
-      "bbox": [
-        212,
-        523,
-        95,
-        61
-      ],
-      "class_name": "text_free",
-      "confidence": 0.6,
-      "text": "ブッブー",
-      "translation": "Бзз",
-      "type": "sfx",
-      "speaker": "",
-      "speaker_gender": "unknown",
-      "bubble_bbox": null,
-      "order": 10,
-      "skip": false,
-      "manual": false,
-      "edited": false,
-      "overflow": false,
-      "translation_locked": false,
-      "document": false,
-      "text_position": null,
-      "style": {
-        "fill_rgb": [
-          18,
-          18,
-          18
-        ],
-        "fill_locked": false,
-        "stroke_rgb": [
-          255,
-          255,
-          255
-        ],
-        "font_size": 65,
-        "alignment": "center",
-        "uppercase": false,
-        "line_height": 18,
-        "font_size_override": 0,
-        "font_id": "impact",
-        "stroke_mode": "auto",
-        "stroke_width": 3.0,
-        "letter_spacing": 0.0,
-        "line_spacing": 0.0,
-        "rotation": 0.0,
-        "skew_x": 0.0,
-        "warp": {
-          "version": 1,
-          "kind": "none",
-          "bend": 0.0,
-          "quad": null,
-          "mesh": null
-        }
-      },
-      "auto_layout": {
-        "version": 1,
-        "kind": "free",
-        "angle": 0.0,
-        "evidence": {
-          "raw_angle": 2,
-          "gain": 1.012,
-          "reason": "недостаточная уверенность"
-        },
-        "source_bbox": [
-          212,
-          523,
-          95,
-          61
-        ],
-        "ink_bbox": [
-          216,
-          527,
+          358,
           93,
-          58
+          23
         ],
         "outline_px": 3.0,
-        "mask_pad_px": 8.0
+        "mask_pad_px": 10.0,
+        "source_outline": false,
+        "allow_vertical": true
       }
     }
   ]

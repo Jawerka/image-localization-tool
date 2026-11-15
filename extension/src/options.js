@@ -307,6 +307,8 @@ if (verboseEl && globalThis.iltLog) {
 }
 
 storageGet("serverUrl").then((data) => {
+  // Отложенная загрузка настроек не должна отменять начатое сопряжение.
+  if (statusGen !== 0) return;
   const serverUrl = data && typeof data.serverUrl === "string" && data.serverUrl ? data.serverUrl : DEFAULT_SERVER;
   check(serverUrl);
 }).catch(() => {});

@@ -110,6 +110,8 @@ venv/Scripts/python.exe scripts/test_images.py gallery --output output/full-revi
 
 ## Проверка инструмента
 
+Публичные примеры README проходят через эту же очередь. Подготовка фиксированных входов и импорт готовых сравнений описаны в [examples/README.md](examples/README.md). Их опубликованные превью, регионы и отчёты — отдельный лицензированный демонстрационный набор; локальные пользовательские тесты и настройки в git не переносятся.
+
 ```powershell
 venv/Scripts/python.exe -m pytest tests/unit/test_test_images.py -q
 node tests/js/test_review_gallery.mjs

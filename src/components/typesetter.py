@@ -792,8 +792,14 @@ def _placed_ink_bounds(
     """AABB нарисованных строк с запасом 2px под слой, без клипа к своему боксу."""
     bounds = None
     pad = max(0, int(stroke_width))
+    # Проверяем тот же растр 2×, который затем рисует слой: hinting шрифта
+    # DejaVu на Linux отличается от измерения при конечном кегле.
+    scale = _LAYER_SCALE if hasattr(font, 'font_variant') else 1
+    measured_font = font.font_variant(size=font.size * scale) if scale > 1 else font
     for line, x, y in placed:
-        box = draw.textbbox((x, y), line, font=font, stroke_width=pad)
+        raw = draw.textbbox((0, 0), line, font=measured_font, stroke_width=pad * scale)
+        box = (x + math.floor(raw[0] / scale), y + math.floor(raw[1] / scale),
+               x + math.ceil(raw[2] / scale), y + math.ceil(raw[3] / scale))
         extra = int(math.ceil(abs(letter_spacing) * max(0, len(line) - 1))) + 2
         bounds = _union_bounds(
             bounds, (box[0] - extra, box[1] - 2, box[2] + extra, box[3] + 2),
@@ -849,7 +855,7 @@ def _document_hits_neighbours(
     for other in regions:
         if other.id == region.id or other.skip or not other.translation.strip():
             continue
-        if _hits_neighbour_beyond_own(bounds, region.bbox, other.bbox):
+        if _hits_neighbour_beyond_own(bounds, region.bbox, other.bbox, slack=0):
             return True
     return False
 
@@ -1879,6 +1885,14 @@ class Typesetter:
                     and not region.manual and not region.edited
                     and placed and chosen_font is not None):
                 size_now = int(getattr(chosen_font, "size", self.min_font_size))
+                # Увеличение от края выравнивания может вынести верх букв
+                # за колонку. Если растр помещается, сдвигаем его целиком.
+                bounds = _placed_ink_bounds(placed, chosen_font, draw, stroke_pad(size_now), letter_spacing)
+                if bounds is not None:
+                    x, y, w, h = region.bbox
+                    dx = min(max(0, x - bounds[0]), x + w - bounds[2]) if bounds[2] - bounds[0] <= w else 0
+                    dy = min(max(0, y - bounds[1]), y + h - bounds[3]) if bounds[3] - bounds[1] <= h else 0
+                    placed = [(line, px + dx, py + dy) for line, px, py in placed]
                 if _document_hits_neighbours(
                     placed, chosen_font, draw, stroke_pad(size_now),
                     letter_spacing, region, regions, page_size=image.size,

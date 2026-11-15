@@ -113,6 +113,7 @@ def test_windows_second_deploy_replaces_single_backup(tmp_path):
     assert data.read_bytes() == b"user project"
 
 
+@pytest.mark.skipif(os.name != 'nt', reason='Проверяется PowerShell Windows')
 def test_windows_incomplete_backup_blocks_code_changes_even_with_zero_exit_code(tmp_path):
     """Ложный успех копирования не должен разрешать запись поверх установки."""
     scripts = tmp_path/'scripts'

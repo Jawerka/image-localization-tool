@@ -4,13 +4,13 @@
   "ocr_engine": "vlm",
   "translator_engine": "llm",
   "timings": {
-    "load": 0.125,
-    "detect": 0.474,
-    "ocr": 25.803,
-    "translate": 10.194,
-    "segment": 1.011,
-    "inpaint": 1.171,
-    "typeset": 8.017
+    "load": 0.068,
+    "detect": 0.638,
+    "ocr": 37.921,
+    "translate": 17.842,
+    "segment": 3.06,
+    "inpaint": 4.861,
+    "typeset": 9.481
   },
   "warnings": [],
   "regions": [
@@ -78,7 +78,8 @@
         "evidence": {
           "raw_angle": 0,
           "gain": 1.0,
-          "reason": "недостаточная уверенность"
+          "reason": "недостаточная уверенность",
+          "glyph_count": 47
         },
         "source_bbox": [
           158,
@@ -87,28 +88,29 @@
           467
         ],
         "ink_bbox": [
-          195,
+          196,
           1176,
-          1149,
-          365
+          1147,
+          364
         ],
         "outline_px": 3.0,
         "mask_pad_px": 8.0,
+        "source_outline": false,
         "contour": [
           [
             64,
-            903
+            902
           ],
           [
-            65,
+            64,
             1872
           ],
           [
             1429,
-            1871
+            1872
           ],
           [
-            1428,
+            1429,
             902
           ]
         ]
@@ -151,7 +153,7 @@
         ],
         "fill_locked": false,
         "stroke_rgb": null,
-        "font_size": 117,
+        "font_size": 118,
         "alignment": "center",
         "uppercase": false,
         "line_height": 18,
@@ -176,9 +178,10 @@
         "kind": "bubble",
         "angle": 0.0,
         "evidence": {
-          "raw_angle": 0,
-          "gain": 1.0,
-          "reason": "недостаточная уверенность"
+          "raw_angle": -1,
+          "gain": 1.005,
+          "reason": "недостаточная уверенность",
+          "glyph_count": 25
         },
         "source_bbox": [
           112,
@@ -190,25 +193,26 @@
           144,
           5293,
           927,
-          233
+          232
         ],
         "outline_px": 3.0,
         "mask_pad_px": 8.0,
+        "source_outline": false,
         "contour": [
           [
             64,
-            5172
+            5171
           ],
           [
-            65,
+            64,
             5707
           ],
           [
             1158,
-            5706
+            5707
           ],
           [
-            1157,
+            1158,
             5171
           ]
         ]
@@ -278,7 +282,8 @@
         "evidence": {
           "raw_angle": 0,
           "gain": 1.0,
-          "reason": "недостаточная уверенность"
+          "reason": "недостаточная уверенность",
+          "glyph_count": 32
         },
         "source_bbox": [
           763,
@@ -287,28 +292,29 @@
           302
         ],
         "ink_bbox": [
-          794,
+          795,
           6654,
-          1126,
+          1124,
           233
         ],
         "outline_px": 3.0,
         "mask_pad_px": 8.0,
+        "source_outline": false,
         "contour": [
           [
             672,
-            6503
+            6502
           ],
           [
-            673,
+            672,
             7020
           ],
           [
             1971,
-            7019
+            7020
           ],
           [
-            1970,
+            1971,
             6502
           ]
         ]

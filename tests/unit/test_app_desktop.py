@@ -475,7 +475,7 @@ def test_extension_job_inherits_server_sfx_mode(mode):
     """Удалённая страница получает режим сервера в обычном задании воркера."""
     from src.app.desktop import DesktopApp
     settings = AppSettings(sfx_mode=mode)
-    app = SimpleNamespace(_remote_lock=threading.Lock(), _remote_slots={},
+    app = SimpleNamespace(_remote_lock=threading.Lock(), _remote_slots={}, remote_api=None,
                           _remote_source_path=lambda project_id, page_id: '')
     def submit(kind, project_id, *, page_id, settings, payload):
         assert kind == 'translate_page'
@@ -486,6 +486,6 @@ def test_extension_job_inherits_server_sfx_mode(mode):
         slot['event'].set()
     app.state = SimpleNamespace(settings=settings, queue=SimpleNamespace(submit=submit),
                                 store=SimpleNamespace(root='unused'))
-    job = SimpleNamespace(id='remote-test', source_lang='en', target_lang='ru')
+    job = SimpleNamespace(id='remote-test', source_lang='en', target_lang='ru', cancelled=threading.Event())
     assert DesktopApp._wait_remote_page(app, job, 'project', 'page') == b'result'
     assert not app._remote_slots

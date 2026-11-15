@@ -147,6 +147,12 @@ def can_merge_collinear(a: TextRegion, b: TextRegion) -> bool:
         return False
     if a.bubble_bbox is not None and b.bubble_bbox is not None:
         return False
+    if a.bubble_bbox is not None or b.bubble_bbox is not None:
+        speech, loose = (a, b) if a.bubble_bbox is not None else (b, a)
+        # До OCR свободный звук или мысль ещё имеют тип narration.
+        # Близость к строке не разрешает втягивать их в чужое облачко.
+        if overlap_ratio(loose.bbox, speech.bubble_bbox) < .85:
+            return False
     if (a.block_type == "sfx" and b.bubble_bbox is not None) or (
         b.block_type == "sfx" and a.bubble_bbox is not None
     ):

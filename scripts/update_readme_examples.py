@@ -4,12 +4,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import platform
 import subprocess
 import sys
-import time
-from datetime import datetime, timezone
+import shutil
+from dataclasses import asdict
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
@@ -120,75 +119,107 @@ def git_revision() -> dict:
             "tracked_code_dirty": bool(diff), "generator_sha256": digest(Path(__file__))}
 
 
-def render(case: dict, manifest: dict, pipeline, model: str) -> None:
-    """Один сквозной запуск без ручной правки OCR, масок, перевода или вёрстки."""
-    name = case["id"]
-    work = ROOT / "output/readme-examples" / name
-    work.mkdir(parents=True, exist_ok=True)
-    input_path = work / "input.png"
-    prepared_image(case).save(input_path)
-    started = time.perf_counter()
-    result = pipeline.process(str(input_path), source_lang=case["source_lang"],
-                              target_lang=case["target_lang"], debug_dir=work / "debug")
-    translated = EXAMPLES / "translated" / (name + ".png")
-    translated.parent.mkdir(parents=True, exist_ok=True)
-    result.save(str(translated))
-    payload = result.regions_payload()
-    payload["source_path"] = case["input"]
-    write_json(EXAMPLES / "regions" / (name + ".json"), payload)
-    compose(case)
-    artifacts = [f"translated/{name}.png", f"regions/{name}.json",
-                 f"comparisons/{name}.jpg", f"comparisons/{name}-full.jpg"]
-    report = {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "code": git_revision(), "python": platform.python_version(), "platform": platform.system(),
-        "model": model, "source_lang": case["source_lang"], "target_lang": case["target_lang"],
-        "input_sha256": case["sha256"], "crop": case.get("crop"),
-        "prepared_input_sha256": digest(input_path), "settings": manifest["settings"],
-        "seconds": round(time.perf_counter() - started, 2),
-        "ocr_engine": result.ocr_engine, "translator_engine": result.translator_engine,
-        "regions": len(result.regions), "warnings": result.warnings,
-        "stages_completed": result.stages_completed, "timings": result.timings,
-        "fonts": sorted({region.style.font_id for region in result.regions if region.style.font_id}),
-        "manual_edits": False, "artifacts": {path: digest(EXAMPLES / path) for path in artifacts},
-    }
-    write_json(EXAMPLES / "runs" / (name + ".json"), report)
-    print(f"DONE {name}: {report['regions']} regions, {report['seconds']}s", flush=True)
+def prepare_run(folder: Path, cases: list[dict], manifest: dict, config_path: Path) -> None:
+    """Подготовить фиксированные входы для общей очереди test_images.py."""
+    from src.config import Config
+    if not config_path.is_file():
+        raise ValueError(f'Нужен существующий файл настроек: {config_path}')
+    installed = Config.load(config_path)
+    config = Config(**manifest['settings'], source_lang='auto', target_lang='ru',
+                    llm_base_url=installed.llm_base_url, llm_model=installed.llm_model,
+                    models_dir=installed.models_dir, llm_api_key='')
+    if folder.exists():
+        raise ValueError(f'Для нового прогона нужна новая папка: {folder}')
+    (folder / 'inputs').mkdir(parents=True)
+    for case in cases:
+        prepared_image(case).save(folder / 'inputs' / (case['id'] + '.png'))
+    write_json(folder / 'config.json', {k: str(v) if isinstance(v, Path) else v
+                                      for k, v in asdict(config).items() if not k.startswith('_')})
+    write_json(folder / 'preparation.json', dict(code=git_revision(), cases=[c['id'] for c in cases]))
+
+
+def import_run(folder: Path, cases: list[dict], manifest: dict) -> None:
+    """Опубликовать неизменённые результаты общей очереди и их происхождение."""
+    run = json.loads((folder / 'run' / 'manifest.json').read_text('utf-8'))
+    summary = json.loads((folder / 'run' / 'summary.json').read_text('utf-8'))
+    if summary['state'] not in ('completed', 'completed_with_errors'):
+        raise ValueError('Дождитесь завершения очереди')
+    preparation = json.loads((folder / 'preparation.json').read_text('utf-8'))
+    rows = json.loads((folder / 'run' / 'report.json').read_text('utf-8'))['images']
+    if any(run['config'].get(k) != v for k, v in manifest['settings'].items()):
+        raise ValueError('Настройки очереди отличаются от манифеста примеров')
+    ready = []
+    for case in cases:
+        name = case['id']
+        row = next(r for r in rows if r['image'] == name + '.png')
+        if row['status'] != 'done':
+            raise ValueError(f'Пример не завершён: {name}')
+        source = folder / 'inputs' / (name + '.png')
+        if digest(source) != row['source_sha256']:
+            raise ValueError(f'Вход изменился после запуска: {name}')
+        with Image.open(source) as image:
+            expected = prepared_image(case)
+            if image.size != expected.size or image.convert('RGB').tobytes() != expected.tobytes():
+                raise ValueError(f'Вход не соответствует публичному манифесту: {name}')
+        page = folder / 'run' / row['id']
+        if digest(page / 'result.png') != row['result_sha256']:
+            raise ValueError(f'Результат изменился: {name}')
+        with Image.open(page / 'result.png') as result:
+            if result.size != expected.size:
+                raise ValueError(f'Размер результата изменился: {name}')
+        payload = json.loads((page / 'regions.json').read_text('utf-8'))
+        ready.append((case, row, page, payload))
+    # Проверить весь набор до первой замены публичных артефактов.
+    for case, row, page, payload in ready:
+        name = case['id']
+        target = EXAMPLES / 'translated' / (name + '.png')
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(page / 'result.png', target)
+        payload['source_path'] = case['input']
+        write_json(EXAMPLES / 'regions' / (name + '.json'), payload)
+        compose(case)
+        artifacts = [f'translated/{name}.png', f'regions/{name}.json',
+                     f'comparisons/{name}.jpg', f'comparisons/{name}-full.jpg']
+        report = dict(generated_at=summary['updated_at'], code=preparation['code'],
+                      python=platform.python_version(), platform=platform.system(),
+                      model=run['config']['llm_model'], source_lang=case['source_lang'], target_lang='ru',
+                      effective_source_lang=run['config']['source_lang'], run_id=run['run_id'],
+                      input_sha256=case['sha256'], crop=case.get('crop'),
+                      prepared_input_sha256=row['source_sha256'], settings=manifest['settings'],
+                      seconds=row['seconds'], ocr_engine=row['ocr'], translator_engine=row['translator'],
+                      regions=row['regions'], warnings=row['warnings'], timings=payload.get('timings', {}),
+                      fonts=sorted({r['style']['font_id'] for r in payload['regions'] if r['style']['font_id']}),
+                      manual_edits=False, artifacts={p: digest(EXAMPLES / p) for p in artifacts})
+        write_json(EXAMPLES / 'runs' / (name + '.json'), report)
+    verify_outputs(cases, manifest)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
-    mode.add_argument("--render", action="store_true", help="Повторить OCR, перевод, LaMa и вёрстку")
+    mode.add_argument("--render", action="store_true", help="Устаревший вход: выводит инструкцию перехода")
     mode.add_argument("--verify", action="store_true", help="Проверить хеши без моделей и сети")
+    mode.add_argument('--prepare-run', type=Path, help='Подготовить входы стандартной очереди')
+    mode.add_argument('--import-run', type=Path, help='Перенести готовые результаты стандартной очереди')
+    parser.add_argument('--config', type=Path, help='Настройки сервера для подготовки очереди')
     parser.add_argument("--case", choices=("chinese", "korean", "japanese", "english"))
-    parser.add_argument("--llm-url", default=os.environ.get("ILT_LLM_URL", ""))
-    parser.add_argument("--llm-model", default=os.environ.get("ILT_LLM_MODEL", ""))
-    parser.add_argument("--models-dir", type=Path, default=ROOT / "models")
     args = parser.parse_args()
     manifest = json.loads((EXAMPLES / "manifest.json").read_text("utf-8"))
     cases = [case for case in manifest["cases"] if not args.case or case["id"] == args.case]
     verify_sources(cases)
+    if args.prepare_run:
+        if not args.config:
+            parser.error('--prepare-run требует --config')
+        prepare_run(args.prepare_run.resolve(), cases, manifest, args.config)
+        return
+    if args.import_run:
+        import_run(args.import_run.resolve(), cases, manifest)
+        return
     if args.verify:
         verify_outputs(cases, manifest)
         return
-    if not args.llm_url:
-        parser.error("Укажите --llm-url или ILT_LLM_URL; адрес и ключ не сохраняются в отчётах")
-    from src.config import Config
-    from src.page_pipeline import PagePipeline
-    from src.utils.llm_client import LlmClient
-
-    key = os.environ.get("ILT_LLM_API_KEY", "")
-    client = LlmClient(args.llm_url, model=args.llm_model, api_key=key)
-    model = client.resolve_model()
-    config = Config(**manifest["settings"], llm_base_url=args.llm_url, llm_model=model,
-                    llm_api_key=key, models_dir=str(args.models_dir.resolve()))
-    pipeline = PagePipeline(config)
-    # LLM обслуживает только один запрос за раз.
-    for case in cases:
-        print(f"START {case['id']}", flush=True)
-        render(case, manifest, pipeline, model)
-    verify_outputs(cases, manifest)
+    parser.error('--render заменён общей очередью: используйте --prepare-run, '
+                 'scripts/test_images.py run и --import-run; см. docs/examples/README.md')
 
 
 if __name__ == "__main__":

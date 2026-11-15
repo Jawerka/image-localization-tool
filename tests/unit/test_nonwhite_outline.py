@@ -11,8 +11,8 @@ from src.models import TextRegion, TextStyle
 
 
 @pytest.mark.parametrize('color', [(0, 0, 0), (120, 120, 120), (170, 190, 230), (252, 235, 180)])
-def test_uniform_nonwhite_background_gets_thicker_outline(color):
-    region = TextRegion(1, (20, 20, 180, 70), translation='Привет')
+def test_uniform_nonwhite_background_gets_thicker_sfx_outline(color):
+    region = TextRegion(1, (20, 20, 180, 70), translation='Привет', block_type='sfx')
     setter = Typesetter(stroke_ratio=.08)
     mask = np.full((110, 220), 255, np.uint8)
     white = np.full((110, 220, 3), 255, np.uint8)

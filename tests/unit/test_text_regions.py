@@ -120,6 +120,28 @@ def test_collinear_slanted_fragments_merge_even_if_types_differ():
     assert not can_merge_collinear(distant, other)
 
 
+def test_unclassified_free_text_outside_balloon_never_merges_into_speech():
+    """Мысль и звук не теряются до OCR из-за общего типа narration."""
+    speech = TextRegion(1, (650, 1050, 200, 120), block_type='dialogue',
+                        bubble_bbox=(648, 1038, 217, 150))
+    sound = TextRegion(2, (433, 1055, 210, 110), block_type='narration')
+    assert not can_merge_collinear(speech, sound)
+    assert not can_merge_collinear(sound, speech)
+    assert len(merge_collinear([sound, speech])) == 2
+    speech = TextRegion(3, (544, 122, 160, 112), block_type='dialogue',
+                        bubble_bbox=(526, 78, 201, 169))
+    thought = TextRegion(4, (738, 145, 118, 80), block_type='narration')
+    assert not can_merge_collinear(speech, thought)
+    assert len(merge_collinear([speech, thought])) == 2
+
+
+def test_balloon_containment_still_allows_fragments_of_same_line():
+    speech = TextRegion(1, (20, 40, 120, 40), bubble_bbox=(10, 20, 240, 90))
+    fragment = TextRegion(2, (145, 40, 80, 40), block_type='narration')
+    assert can_merge_collinear(speech, fragment)
+    assert len(merge_collinear([speech, fragment])) == 1
+
+
 def test_side_by_side_dialogue_blocks_do_not_merge():
     """Перекрывающиеся AABB двух реплик не склеиваются в одну надпись."""
     left = TextRegion(1, bbox=(640, 20, 639, 261))

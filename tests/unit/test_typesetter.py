@@ -2,6 +2,7 @@
 
 import cv2
 import numpy as np
+import pytest
 from PIL import Image, ImageDraw
 
 from src.components import typesetter as typesetter_module
@@ -978,7 +979,20 @@ def test_document_font_scale_stays_on_the_page():
     assert words.replace(" ", "").replace("-", "") == region.translation.replace(" ", "")
 
 
-def test_document_title_shrinks_before_body_bbox_after_font_scale():
+@pytest.fixture(params=['system', 'dejavu'])
+def document_font(request, monkeypatch):
+    """Проверяем также Linux-метрики, если DejaVu доступен на машине."""
+    if request.param == 'dejavu':
+        from pathlib import Path
+        from PIL import ImageFont
+        try:
+            font = ImageFont.truetype('DejaVuSans.ttf', 20)
+        except OSError:
+            pytest.skip('DejaVu Sans не установлен')
+        monkeypatch.setattr(typesetter_module, '_font_file', lambda region: Path(font.path))
+
+
+def test_document_title_shrinks_before_body_bbox_after_font_scale(document_font):
     """После fit и 1.1 заголовок не заходит в bbox абзаца, текст и пол 10 сохраняются."""
     import copy
     image = Image.new('RGB', (420, 280), 'white')
@@ -1007,7 +1021,7 @@ def test_document_title_shrinks_before_body_bbox_after_font_scale():
     assert bounds[2] <= bx or bounds[0] >= bx + bw or bounds[3] <= by or bounds[1] >= by + bh
 
 
-def test_automatic_font_scale_increases_size_once_and_preserves_words():
+def test_automatic_font_scale_increases_size_once_and_preserves_words(document_font):
     """Общее увеличение не теряет строки и повторно не растит снимок."""
     import copy
     image = Image.new('RGB', (420, 160), 'white')

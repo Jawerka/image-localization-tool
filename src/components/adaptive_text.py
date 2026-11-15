@@ -454,14 +454,17 @@ def source_ink(image, region):
     capture = {}
     segment_regions(crop, [local], capture_ink=capture)
     ink = capture.get(local.id, np.zeros((crop.height, crop.width), np.uint8))
-    # Короткий CJK-звук на бумаге может не иметь различимого ореола.
+    # CJK-звук и угловатые латинские буквы на бумаге могут не иметь ореола.
     # Замкнутые тёмные ядра сохраняются целиком: фильтр линий иначе
     # отбрасывает толстый крюк буквы как фрагмент рисунка.
     chars = [ch for ch in region.text if ch.isalnum()]
-    if (region.block_type == 'sfx' and 2 <= len(chars) <= 6 and
-            all('\u3040' <= ch <= '\u9fff' for ch in chars)):
-        gray = cv2.cvtColor(np.asarray(crop.convert('RGB')), cv2.COLOR_RGB2GRAY)
-        if np.mean(gray > 180) >= .6:
+    cjk_sound = 2 <= len(chars) <= 6 and all('\u3040' <= ch <= '\u9fff' for ch in chars)
+    latin_sound = 3 <= len(chars) <= 24 and all('A' <= ch <= 'Z' for ch in chars)
+    if region.block_type == 'sfx' and (cjk_sound or latin_sound):
+        pixels = np.asarray(crop.convert('RGB'))
+        gray = cv2.cvtColor(pixels, cv2.COLOR_RGB2GRAY)
+        white_paper = np.mean(pixels.min(axis=2) > 235) >= .65
+        if np.mean(gray > 180) >= (.7 if latin_sound else .6) and (cjk_sound or white_paper):
             count, labels, stats, _ = cv2.connectedComponentsWithStats((gray < 80).astype(np.uint8))
             cores = [i for i in range(1,count) if stats[i,4] >= 8 and
                      stats[i,0] > 0 and stats[i,1] > 0 and
@@ -469,6 +472,11 @@ def source_ink(image, region):
                      stats[i,2] <= w*.9 and stats[i,3] <= h*1.1]
             large = [i for i in cores if stats[i,2] >= w*.05 and stats[i,3] >= h*.15]
             if len(large) >= 2:
+                if latin_sound:
+                    # Соединённые угловатые буквы не имеют светлой обводки.
+                    # Маленькие куски рисунка рядом не дополняют их маску.
+                    typical = float(np.percentile([stats[i,3] for i in large], 75))
+                    cores = [i for i in cores if stats[i,3] >= typical*.35]
                 ink = np.maximum(ink, np.isin(labels, cores).astype(np.uint8)*255)
 
     if getattr(local, "_outline_ink", False):

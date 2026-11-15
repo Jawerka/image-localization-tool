@@ -16,7 +16,8 @@
     "layout_long_side": 2000,
     "vlm_max_side": 1536,
     "llm_thinking": false,
-    "ort_intra_op_threads": 4
+    "ort_intra_op_threads": 4,
+    "neutral_text_colors": true
   },
   "cases": [
     {

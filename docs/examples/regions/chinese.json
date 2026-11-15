@@ -4,15 +4,27 @@
   "ocr_engine": "vlm",
   "translator_engine": "llm",
   "timings": {
-    "load": 0.098,
-    "detect": 4.402,
-    "ocr": 28.962,
-    "translate": 14.659,
-    "segment": 2.837,
-    "inpaint": 26.658,
-    "typeset": 9.072
+    "load": 0.101,
+    "detect": 4.385,
+    "ocr": 235.525,
+    "translate": 23.049,
+    "segment": 17.466,
+    "inpaint": 9.016,
+    "typeset": 36.169
   },
-  "warnings": [],
+  "warnings": [
+    "VLM не подтвердил рамку дополнительного текста",
+    "VLM не подтвердил рамку дополнительного текста",
+    "VLM не подтвердил рамку дополнительного текста",
+    "VLM не подтвердил рамку дополнительного текста",
+    "VLM не подтвердил рамку дополнительного текста",
+    "VLM не подтвердил рамку дополнительного текста",
+    "VLM не подтвердил рамку дополнительного текста",
+    "VLM не подтвердил рамку дополнительного текста",
+    "Пропущены дополнительные надписи: исчерпан бюджет проверки фрагмента",
+    "VLM не подтвердил рамку дополнительного текста",
+    "VLM не подтвердил рамку дополнительного текста"
+  ],
   "regions": [
     {
       "id": 1,
@@ -78,7 +90,7 @@
       "class_name": "text_free",
       "confidence": 0.7629,
       "text": "按例呈銀准\n如所請\n以七月朔始\n年終止\n書例詳載七月\n朔申報\n坿頁中覆按可得也\n茲將希\n夷子所書八六尺大壽字各一\n挂唐氏\n六如先生所書八六尺大虎字各\n一挂以\n及種種符籙寄交上海公所分別\n懸示任\n人觀覽求書宜速過期不書等\n因分予\n餘潤藉仙心佛手以爲功哺彼哀\n嗷如玉\n液瓊漿之遙貺行道則有福盡\n人以回\n天是所望於惻隱君子焉",
-      "translation": "По обычаю представлено на утверждение. Как и просили, с первого числа седьмого месяца до конца года. Подробности в седьмом месяце. В приложении можно найти. Теперь передаём в Шанхайское общество для развешивания и обозрения. Просьба поторопиться, после срока не пишем. Остаток средств пойдёт на благотворительность, чтобы помочь нуждающимся. Это то, чего ждут от милосердных людей.",
+      "translation": "По обычаю представлено на утверждение. Как и просили, с первого числа седьмого месяца до конца года. Подробности в седьмом месяце. В приложении можно найти. Теперь передаём в Шанхайское общество для развешивания и обозрения: восемь больших иероглифов «долгоденствие», написанных Си И-цзы, и шесть больших иероглифов «тигр», написанных господином Лю-ру. Также различные талисманы. Просьба поторопиться, после срока не пишем. Остаток средств пойдёт на благотворительность. Пусть божественное сердце и буддийская рука принесут пользу. Как нектар и драгоценный напиток, дарованные издалека. Кто идёт по пути, тот получит благодать. Пусть все вернутся к небу. Это ожидание от сострадательных джентльменов.",
       "type": "narration",
       "speaker": "",
       "speaker_gender": "unknown",
@@ -93,9 +105,9 @@
       "text_position": null,
       "style": {
         "fill_rgb": [
-          18,
-          18,
-          18
+          0,
+          0,
+          0
         ],
         "fill_locked": false,
         "stroke_rgb": [
@@ -103,12 +115,12 @@
           255,
           255
         ],
-        "font_size": 49,
+        "font_size": 41,
         "alignment": "center",
         "uppercase": false,
         "line_height": 18,
         "font_size_override": 0,
-        "font_id": "comicz",
+        "font_id": "Heroika-Regular",
         "stroke_mode": "auto",
         "stroke_width": 3.0,
         "letter_spacing": 0.0,
@@ -139,418 +151,25 @@
           673
         ],
         "ink_bbox": [
-          207,
-          134,
-          1549,
-          646
+          -118.5,
+          -173.5,
+          2193.0,
+          1275.0
         ],
         "outline_px": 3.0,
-        "mask_pad_px": 8.0
-      }
-    },
-    {
-      "id": 3,
-      "bbox": [
-        193,
-        1991,
-        37,
-        89
-      ],
-      "class_name": "text_free",
-      "confidence": 0.6,
-      "text": "社",
-      "translation": "Общество",
-      "type": "narration",
-      "speaker": "",
-      "speaker_gender": "unknown",
-      "bubble_bbox": null,
-      "order": 6,
-      "skip": false,
-      "manual": false,
-      "edited": false,
-      "overflow": false,
-      "translation_locked": false,
-      "document": false,
-      "text_position": null,
-      "style": {
-        "fill_rgb": [
-          18,
-          18,
-          18
+        "mask_pad_px": 10.0,
+        "source_outline": false,
+        "allow_vertical": false,
+        "source_lines": [
+          [
+            189.0,
+            137.0,
+            1578.0,
+            615.0
+          ]
         ],
-        "fill_locked": false,
-        "stroke_rgb": [
-          255,
-          255,
-          255
-        ],
-        "font_size": 10,
-        "alignment": "center",
-        "uppercase": false,
-        "line_height": 18,
-        "font_size_override": 0,
-        "font_id": "comicz",
-        "stroke_mode": "auto",
-        "stroke_width": 3.0,
-        "letter_spacing": 0.0,
-        "line_spacing": 0.0,
-        "rotation": 24.0,
-        "skew_x": 0.0,
-        "warp": {
-          "version": 1,
-          "kind": "none",
-          "bend": 0.0,
-          "quad": null,
-          "mesh": null
-        }
-      },
-      "auto_layout": {
-        "version": 1,
-        "kind": "free",
-        "angle": 24.0,
-        "evidence": {
-          "raw_angle": 24,
-          "gain": 1.178,
-          "reason": "проекция строк"
-        },
-        "source_bbox": [
-          193,
-          1991,
-          37,
-          89
-        ],
-        "ink_bbox": [
-          190,
-          1988,
-          43,
-          95
-        ],
-        "outline_px": 3.0,
-        "mask_pad_px": 8.0
-      }
-    },
-    {
-      "id": 4,
-      "bbox": [
-        230,
-        1962,
-        39,
-        89
-      ],
-      "class_name": "text_free",
-      "confidence": 0.6,
-      "text": "香",
-      "translation": "Аромат",
-      "type": "narration",
-      "speaker": "",
-      "speaker_gender": "unknown",
-      "bubble_bbox": null,
-      "order": 4,
-      "skip": false,
-      "manual": false,
-      "edited": false,
-      "overflow": false,
-      "translation_locked": false,
-      "document": false,
-      "text_position": null,
-      "style": {
-        "fill_rgb": [
-          18,
-          18,
-          18
-        ],
-        "fill_locked": false,
-        "stroke_rgb": [
-          255,
-          255,
-          255
-        ],
-        "font_size": 13,
-        "alignment": "center",
-        "uppercase": false,
-        "line_height": 18,
-        "font_size_override": 0,
-        "font_id": "comicz",
-        "stroke_mode": "auto",
-        "stroke_width": 3.0,
-        "letter_spacing": 0.0,
-        "line_spacing": 0.0,
-        "rotation": 9.0,
-        "skew_x": 0.0,
-        "warp": {
-          "version": 1,
-          "kind": "none",
-          "bend": 0.0,
-          "quad": null,
-          "mesh": null
-        }
-      },
-      "auto_layout": {
-        "version": 1,
-        "kind": "free",
-        "angle": 9.0,
-        "evidence": {
-          "raw_angle": 9,
-          "gain": 1.223,
-          "reason": "проекция строк"
-        },
-        "source_bbox": [
-          230,
-          1962,
-          39,
-          89
-        ],
-        "ink_bbox": [
-          227,
-          1963,
-          45,
-          91
-        ],
-        "outline_px": 3.0,
-        "mask_pad_px": 8.0
-      }
-    },
-    {
-      "id": 5,
-      "bbox": [
-        269,
-        1932,
-        38,
-        89
-      ],
-      "class_name": "text_free",
-      "confidence": 0.6,
-      "text": "分",
-      "translation": "Распространяется",
-      "type": "narration",
-      "speaker": "",
-      "speaker_gender": "unknown",
-      "bubble_bbox": null,
-      "order": 5,
-      "skip": false,
-      "manual": false,
-      "edited": false,
-      "overflow": false,
-      "translation_locked": false,
-      "document": false,
-      "text_position": null,
-      "style": {
-        "fill_rgb": [
-          18,
-          18,
-          18
-        ],
-        "fill_locked": false,
-        "stroke_rgb": [
-          255,
-          255,
-          255
-        ],
-        "font_size": 5,
-        "alignment": "center",
-        "uppercase": false,
-        "line_height": 18,
-        "font_size_override": 0,
-        "font_id": "comicz",
-        "stroke_mode": "auto",
-        "stroke_width": 3.0,
-        "letter_spacing": 0.0,
-        "line_spacing": 0.0,
-        "rotation": 5.0,
-        "skew_x": 0.0,
-        "warp": {
-          "version": 1,
-          "kind": "none",
-          "bend": 0.0,
-          "quad": null,
-          "mesh": null
-        }
-      },
-      "auto_layout": {
-        "version": 1,
-        "kind": "free",
-        "angle": 5.0,
-        "evidence": {
-          "raw_angle": 5,
-          "gain": 1.377,
-          "reason": "проекция строк"
-        },
-        "source_bbox": [
-          269,
-          1932,
-          38,
-          89
-        ],
-        "ink_bbox": [
-          266,
-          1929,
-          44,
-          90
-        ],
-        "outline_px": 3.0,
-        "mask_pad_px": 8.0
-      }
-    },
-    {
-      "id": 6,
-      "bbox": [
-        307,
-        1902,
-        39,
-        89
-      ],
-      "class_name": "text_free",
-      "confidence": 0.6,
-      "text": "雲",
-      "translation": "Облака",
-      "type": "narration",
-      "speaker": "",
-      "speaker_gender": "unknown",
-      "bubble_bbox": null,
-      "order": 2,
-      "skip": false,
-      "manual": false,
-      "edited": false,
-      "overflow": false,
-      "translation_locked": false,
-      "document": false,
-      "text_position": null,
-      "style": {
-        "fill_rgb": [
-          18,
-          18,
-          18
-        ],
-        "fill_locked": false,
-        "stroke_rgb": [
-          255,
-          255,
-          255
-        ],
-        "font_size": 15,
-        "alignment": "center",
-        "uppercase": false,
-        "line_height": 18,
-        "font_size_override": 0,
-        "font_id": "comicz",
-        "stroke_mode": "auto",
-        "stroke_width": 3.0,
-        "letter_spacing": 0.0,
-        "line_spacing": 0.0,
-        "rotation": 26.0,
-        "skew_x": 0.0,
-        "warp": {
-          "version": 1,
-          "kind": "none",
-          "bend": 0.0,
-          "quad": null,
-          "mesh": null
-        }
-      },
-      "auto_layout": {
-        "version": 1,
-        "kind": "free",
-        "angle": 26.0,
-        "evidence": {
-          "raw_angle": 26,
-          "gain": 1.432,
-          "reason": "проекция строк"
-        },
-        "source_bbox": [
-          307,
-          1902,
-          39,
-          89
-        ],
-        "ink_bbox": [
-          304,
-          1912,
-          45,
-          82
-        ],
-        "outline_px": 3.0,
-        "mask_pad_px": 8.0
-      }
-    },
-    {
-      "id": 7,
-      "bbox": [
-        346,
-        1872,
-        39,
-        90
-      ],
-      "class_name": "text_free",
-      "confidence": 0.6,
-      "text": "駐",
-      "translation": "Останавливаются",
-      "type": "narration",
-      "speaker": "",
-      "speaker_gender": "unknown",
-      "bubble_bbox": null,
-      "order": 3,
-      "skip": false,
-      "manual": false,
-      "edited": false,
-      "overflow": false,
-      "translation_locked": false,
-      "document": false,
-      "text_position": null,
-      "style": {
-        "fill_rgb": [
-          18,
-          18,
-          18
-        ],
-        "fill_locked": false,
-        "stroke_rgb": [
-          255,
-          255,
-          255
-        ],
-        "font_size": 6,
-        "alignment": "center",
-        "uppercase": false,
-        "line_height": 18,
-        "font_size_override": 0,
-        "font_id": "comicz",
-        "stroke_mode": "auto",
-        "stroke_width": 3.0,
-        "letter_spacing": 0.0,
-        "line_spacing": 0.0,
-        "rotation": 24.0,
-        "skew_x": 0.0,
-        "warp": {
-          "version": 1,
-          "kind": "none",
-          "bend": 0.0,
-          "quad": null,
-          "mesh": null
-        }
-      },
-      "auto_layout": {
-        "version": 1,
-        "kind": "free",
-        "angle": 24.0,
-        "evidence": {
-          "raw_angle": 24,
-          "gain": 2.345,
-          "reason": "проекция строк"
-        },
-        "source_bbox": [
-          346,
-          1872,
-          39,
-          90
-        ],
-        "ink_bbox": [
-          343,
-          1870,
-          45,
-          95
-        ],
-        "outline_px": 3.0,
-        "mask_pad_px": 8.0
+        "readable_caption": true,
+        "caption_padding": 307.5
       }
     }
   ]

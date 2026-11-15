@@ -16,6 +16,23 @@ from src.page_pipeline import _scale_regions
 FONT = Path('src/resources/fonts/Heroika-Regular.otf')
 
 
+def test_plain_latin_sound_restores_components_missing_from_outline_mask(monkeypatch):
+    from src.components.adaptive_text import source_ink
+    rgb = np.full((150, 260, 3), 255, np.uint8)
+    cv2.putText(rgb, 'AAAK', (30, 95), cv2.FONT_HERSHEY_SIMPLEX, 1.7, (0, 0, 0), 6)
+    expected = rgb.min(axis=2) < 80
+    # Имитируем обводочный фильтр, оставивший только середину слова.
+    def partial(image, regions, capture_ink):
+        mask = np.zeros((image.height, image.width), np.uint8)
+        mask[50:60, 70:80] = 255
+        capture_ink[regions[0].id] = mask
+    monkeypatch.setattr('src.components.adaptive_text.segment_regions', partial)
+    region = TextRegion(1, (20, 35, 210, 75), text='AAAK', block_type='sfx')
+    _, ink, (a, b, c, d) = source_ink(Image.fromarray(rgb), region)
+    assert np.mean(ink[expected[b:d, a:c]] > 0) > .99
+    assert not np.any(ink[:5])
+
+
 @pytest.mark.parametrize('angle', [0, 12])
 def test_contrast_retouch_does_not_reclassify_balloon(monkeypatch, angle):
     """Контрастная маска ретуши не превращает речь в белую надпись с ореолом."""

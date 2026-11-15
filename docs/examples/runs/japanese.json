@@ -1,16 +1,18 @@
 {
-  "generated_at": "2026-10-25T08:03:46.161364+00:00",
+  "generated_at": "2026-11-15T06:08:40.531745+00:00",
   "code": {
-    "commit": "c498ba2271a2e9470bf2db92774ee2b8719bfbf7",
-    "tracked_code_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "tracked_code_dirty": false,
-    "generator_sha256": "e0072c584e4dd3b5f63827fc1c22430a10d0c5f54af36db4acb136bb4c2ce310"
+    "commit": "55dc35c4005034b9ec5babbfd8424c2ef303e9e2",
+    "tracked_code_diff_sha256": "42dbc7c1732b4f184fcbc211f492e125681691f593620606a34b161333d2a53e",
+    "tracked_code_dirty": true,
+    "generator_sha256": "aa385f745928cdb7ac9c2b40376584548bd9a29ec97cd5279d49b90d13b5f389"
   },
   "python": "3.10.11",
   "platform": "Windows",
   "model": "qwen36-27b-mtp-q6k-2x5060ti",
   "source_lang": "ja",
   "target_lang": "ru",
+  "effective_source_lang": "auto",
+  "run_id": "run-d8f808a6",
   "input_sha256": "21fdf31f8b378991711e4e5c5c981088aeefd1f3bc9321dd9d0db2cc0842249a",
   "crop": null,
   "prepared_input_sha256": "aa3110ef8bc105cdb72be551d00248ee5ee77bb72c03661cafa51dc3b52eb8f1",
@@ -26,41 +28,35 @@
     "layout_long_side": 2000,
     "vlm_max_side": 1536,
     "llm_thinking": false,
-    "ort_intra_op_threads": 4
+    "ort_intra_op_threads": 4,
+    "neutral_text_colors": true
   },
-  "seconds": 61.73,
+  "seconds": 134.59,
   "ocr_engine": "vlm",
   "translator_engine": "llm",
-  "regions": 11,
-  "warnings": [],
-  "stages_completed": [
-    "load",
-    "detect",
-    "ocr",
-    "translate",
-    "segment",
-    "inpaint",
-    "typeset"
+  "regions": 9,
+  "warnings": [
+    "VLM не подтвердил рамку дополнительного звука",
+    "Текст не влез полностью: [1, 4, 5, 7, 8]"
   ],
   "timings": {
     "load": 0.013,
-    "detect": 0.544,
-    "ocr": 36.823,
-    "translate": 16.276,
-    "segment": 0.212,
-    "inpaint": 1.714,
-    "typeset": 5.213
+    "detect": 0.484,
+    "ocr": 64.402,
+    "translate": 47.707,
+    "segment": 3.211,
+    "inpaint": 9.737,
+    "typeset": 7.938
   },
   "fonts": [
     "Heroika-Regular",
-    "comicz",
-    "impact"
+    "Jupiteroid-Light"
   ],
   "manual_edits": false,
   "artifacts": {
-    "translated/japanese.png": "c68e5873519dbdf6cbabf2d0365a2ac9935be7d5d2e8b0156bb225092259db4a",
-    "regions/japanese.json": "7001cdb3a6134934e69f22c785ac4a235c8a81f71f6ca4763380cfdf33adbac1",
-    "comparisons/japanese.jpg": "4521cd94be78e0b5bd7f94cc801699640601eae33e529b105f68365a24818de3",
-    "comparisons/japanese-full.jpg": "92dbe6d9d32161bbaf8b758587c24ea42a84fc584837c97e83f66ca1c42899aa"
+    "translated/japanese.png": "78a6dd47596ced084d36645e4fb6021fc2e21553ffd1ec84b3c1ade7894358df",
+    "regions/japanese.json": "5eec62c120041fcf03b04dc84200b5e0beb4930bcf8681deb8dda78bce9a17fc",
+    "comparisons/japanese.jpg": "5d765082c4f0b9eda4c20637a9054e1ff34e47351bb2899eb3c0c56319a75e3b",
+    "comparisons/japanese-full.jpg": "f97d3c81325dfc9004b97059231e070725a7da28e1c8a03cedbbd70a8098a9b0"
   }
 }
