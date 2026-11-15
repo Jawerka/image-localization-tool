@@ -2,6 +2,15 @@
 
 Совместимые исправления автоматического OCR, ретуши, вёрстки и расширения браузера. Предыдущие релизы и их архивы сохраняются.
 
+## Готовые поставки
+
+- [Полный Windows x64 ZIP с CPU-моделями](https://github.com/Jawerka/image-localization-tool/releases/download/v1.0.3/ImageLocalizationTool-1.0.3-windows-x64-portable-cpu-full.zip).
+- [Полный Docker-пакет для офлайн-загрузки](https://github.com/Jawerka/image-localization-tool/releases/download/v1.0.3/ImageLocalizationTool-1.0.3-docker-cpu-full.zip).
+- Образ Linux amd64: `ghcr.io/jawerka/image-localization-tool:1.0.3-cpu-full`.
+- В релизе также доступны лёгкий Windows ZIP, серверные архивы Windows/Linux, расширения Chromium/Firefox, каталоги компонентов и SHA256.
+
+Запуск и обновление: [DISTRIBUTIONS.md](DISTRIBUTIONS.md). Паспорт приёмки точных архивов: [ACCEPTANCE_1.0.3.json](ACCEPTANCE_1.0.3.json).
+
 ## Изменения
 
 - Добавлено быстрое окно Flutter для FastStone: последовательная очередь через LAN, масштабирование, копирование, повтор и открытие в редакторе.

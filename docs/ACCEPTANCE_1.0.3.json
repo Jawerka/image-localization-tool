@@ -1,0 +1,242 @@
+{
+  "kind": "ilt-acceptance-passport",
+  "version": "1.0.3",
+  "source_sha": "29456bb43623100564f8732804a5ab1f3571a662",
+  "artifact_sha256": "09d72391fe5a940b2c35f53f025a42bd7999699c8b19d3891c91d85ea4a47de4",
+  "image_digest": "ghcr.io/jawerka/image-localization-tool@sha256:e1b1f8fdab1774d521359ddb9381daae1c5d23c039b67fc195968616d618849d",
+  "assets": [
+    {
+      "name": "ImageLocalizationTool-1.0.3-windows-x64-portable.zip",
+      "sha256": "cf888711eaafe3b098d1453ceb6d3c515ddb6baf0bed624a861351035640f5ec",
+      "size": 105960356
+    },
+    {
+      "name": "ImageLocalizationTool-1.0.3-server-win64.zip",
+      "sha256": "673f000c231735440b92b197a36c1ad024250aacd0e6937887a290328fabfa93",
+      "size": 92871307
+    },
+    {
+      "name": "ImageLocalizationTool-1.0.3-server-linux-x64.tar.gz",
+      "sha256": "bbadbd0c59e53f2346c732b2abae7a37ec65b1cef171d172c62cdb80fe97ba09",
+      "size": 141113801
+    },
+    {
+      "name": "ilt-runtime-manifest-1.0.3.json",
+      "sha256": "223bf6a9bc47201bfcb78f297356b6fd5c5ea0c30e8bef6f4ff5828afa1490fb",
+      "size": 63722
+    },
+    {
+      "name": "ilt-component-manifest-1.0.3.json",
+      "sha256": "ff114a819a68403c5b63d0a8a0bf9a26a2d3f342ad18108821be5ff5ce06ec4b",
+      "size": 7082
+    },
+    {
+      "name": "ilt-extension-chromium-1.0.3.zip",
+      "sha256": "9eba51dd96ed41f565a506ccb1a084e8421a5300fafd5c2f997ea4a165e3956d",
+      "size": 62036
+    },
+    {
+      "name": "ilt-extension-firefox-1.0.3.zip",
+      "sha256": "a2643d90780de54aea351acb8aa6c715a2f180de8ad1073cb20cd2978e89409b",
+      "size": 62039
+    },
+    {
+      "name": "ImageLocalizationTool-1.0.3-windows-x64-portable-cpu-full.zip",
+      "sha256": "09d72391fe5a940b2c35f53f025a42bd7999699c8b19d3891c91d85ea4a47de4",
+      "size": 907378421
+    },
+    {
+      "name": "ImageLocalizationTool-1.0.3-docker-cpu-full.zip",
+      "sha256": "3e69f7a0fbc80403b2667a6834014cc07adf330ad99d7645e171a500807d6ce7",
+      "size": 1260578255
+    },
+    {
+      "name": "GHCR-DIGEST.txt",
+      "sha256": "2be55365e19bc7d291da8d0578982c67add83741583b4ce40022dd7a981bc157",
+      "size": 112
+    },
+    {
+      "name": "compose.ghcr.yaml",
+      "sha256": "ea2ed2d1343ff9b2f56c455ec0940064583a07fa4dbb7bb2f1c8b7109aed8020",
+      "size": 545
+    }
+  ],
+  "notes": "Published https://github.com/Jawerka/image-localization-tool/releases/tag/v1.0.3 on 2026-11-15 from exact source 29456bb43623100564f8732804a5ab1f3571a662. CI 43687854167, Linux 43687874456, Docker 43687876517; GitHub-reported SHA256 digests and sizes of every asset matched the accepted local candidate. All 180 anonymous dependency URLs passed. Acceptance used generated pages and isolated ZIP/Compose installations. Local quality reviews remain local. No production deployments.",
+  "checks": [
+    {
+      "id": "T01",
+      "status": "tested",
+      "command": "Flutter 3.47.7 analyze + 210 tests; CI 43687854167",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "T03",
+      "status": "tested",
+      "command": "Local unit suite: 1253 passed, 6 skipped; CI Python 3.10–3.13; final full ZIP offline functional + desktop smoke",
+      "result": "pass",
+      "constraints": "Platform-specific and optional tests are explicitly skipped; final locale fix additionally covered by 32 local tests and green Windows CI."
+    },
+    {
+      "id": "T04",
+      "status": "tested",
+      "command": "Page document contract Python/JavaScript/Dart tests in final CI",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "T06",
+      "status": "tested",
+      "command": "Web access, remote auth, portable project unit tests; real browser origin rejection smoke",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "Q01",
+      "status": "tested",
+      "command": "53-image full review and accepted public README examples; docs/BENCHMARK_RESULTS.md; final unit regression",
+      "result": "pass",
+      "constraints": "53-image review predates final English mask and document font corrections; those corrections have targeted tests. User ratings describe this local corpus, not arbitrary-image accuracy."
+    },
+    {
+      "id": "C03",
+      "status": "tested",
+      "command": "Final JavaScript suite and required Chromium extension/browser E2E in CI 43687854167",
+      "result": "pass",
+      "constraints": "Firefox is experimental."
+    },
+    {
+      "id": "U07",
+      "status": "tested",
+      "command": "Final full ZIP: smoke-portable-desktop.py launched actual Flutter EXE + frozen sidecar; real translation/export",
+      "result": "pass",
+      "constraints": "API-driven desktop acceptance plus Flutter widget tests; not a manual inspection of every native dialog."
+    },
+    {
+      "id": "Q02",
+      "status": "tested",
+      "command": "Final full ZIP offline en↔ru pipeline; final Docker functional with --network none; accepted four-language LLM README examples",
+      "result": "pass",
+      "constraints": "External LLM is optional. Full offline profile guarantees en↔ru; complex SFX and overflow warnings remain documented."
+    },
+    {
+      "id": "Q05",
+      "status": "tested",
+      "command": "Typesetter suite on Windows and Linux, including DejaVu raster bounds and font scale regressions",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "U08",
+      "status": "tested",
+      "command": "Final Chromium ZIP paired through SSH tunnel with actual release Docker backend; health and real image replacement passed",
+      "result": "pass",
+      "constraints": "LAN API tested via --headless --remote in separate test data; default container starts browser --server. Firefox not claimed."
+    },
+    {
+      "id": "T02",
+      "status": "tested",
+      "command": "Required browser E2E + smoke-web-server.py --browser against final Docker image: upload, pipeline, edit, export, project",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "Q06",
+      "status": "tested",
+      "command": "Actual full ZIP Flutter startup 2.906s; pipeline 20.703s/10.235s/9.937s; peak host+children RSS 3071160320 bytes; data 321851 bytes",
+      "result": "pass",
+      "constraints": "Three observations on one generated page, not a statistically reliable p95 or a performance guarantee."
+    },
+    {
+      "id": "T05",
+      "status": "tested",
+      "command": "release_candidate.py validate-passport on this passport and exact candidate hashes",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "H02",
+      "status": "tested",
+      "command": "v1.0.1 history bundle and tree archive verified still present; v1.0.0–v1.0.2 preserved",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "P07",
+      "status": "tested",
+      "command": "Both OpenCV distributions 4.13.0.92 verified in release venv, clean clone and actual release container",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "P08",
+      "status": "tested",
+      "command": "Final full ZIP license inventory, third-party notices, fonts and Argos wheel notices verified; Docker packaging and unit tests",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "P09",
+      "status": "tested",
+      "command": "CLI/unit coverage and final frozen sidecar real functional pipeline; Linux release workflow 43687874456",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "P02",
+      "status": "tested",
+      "command": "Final light ZIP smoke-components.py in clean build/release-103-light-smoke: deploy CPU, prepare offline, real functional translation",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "P01",
+      "status": "tested",
+      "command": "Final full ZIP offline en↔ru; actual Flutter translate/export; save/close/load .ilt.zip with page count and clean package status",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "P03",
+      "status": "tested",
+      "command": "Published v1.0.2 light ZIP SHA256 29a015da… -> exact v1.0.3 light ZIP in isolated build folder; dry run, full backup, update health, user data/project hashes preserved",
+      "result": "pass",
+      "constraints": "Production installation unchanged. Full ZIP follows fresh-folder plus data-copy contract."
+    },
+    {
+      "id": "P04",
+      "status": "tested",
+      "command": "Final Linux release workflow 43687874456: frozen server and deployment fixtures",
+      "result": "pass",
+      "constraints": "Production LAN service was not updated."
+    },
+    {
+      "id": "P05",
+      "status": "tested",
+      "command": "Isolated Compose: published 1.0.2 digest -> exact 1.0.3 digest; dry runs, configuration+data backup, old project/marker retained, health, browser processing, restart persistence",
+      "result": "pass",
+      "constraints": "Production containers unchanged; temporary acceptance container stopped after checks, data/backup retained."
+    },
+    {
+      "id": "H01",
+      "status": "tested",
+      "command": "CHANGELOG, RELEASE_NOTES_1.0.3, README accepted examples, APP and benchmark documentation; public download pointers updated after publication",
+      "result": "pass",
+      "constraints": ""
+    },
+    {
+      "id": "H03",
+      "status": "tested",
+      "command": "Anonymous clean clone at 29456bb, fresh Python 3.10 venv + requirements-release, regenerated catalogs and PyInstaller sidecar build succeeded",
+      "result": "pass",
+      "constraints": "Reproducible source build, not bit-for-bit determinism of ZIP timestamps."
+    },
+    {
+      "id": "P06",
+      "status": "deferred",
+      "command": "CUDA not claimed",
+      "result": "deferred",
+      "constraints": "CPU-only release"
+    }
+  ]
+}

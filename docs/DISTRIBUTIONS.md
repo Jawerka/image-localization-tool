@@ -2,7 +2,7 @@
 
 Два канала используют один пайплайн v2: Linux amd64 CPU-контейнер с браузерным редактором и Windows x64 portable CPU с Flutter-окном. Профиль включает детектор, RapidOCR, LaMa, шрифты, Torch CPU, Argos и языковые модели en↔ru. LLM подключается отдельно. CUDA и ARM не входят в этот профиль.
 
-Опубликованная линия — **1.0.2**. Теги `v1.0.0` и `v1.0.1` и их архивы не перезаписываются. Живой образ — `ghcr.io/jawerka/image-localization-tool:1.0.2-cpu-full` (тот же digest, что `cpu-full`: `sha256:a4d874bd9bd072dfcb3306cc63401d2b496b5ebaf6d7fbb5237dd260cb1dd1c4`). Образ и релиз 1.0.1 сохранены для отката.
+Опубликованная линия — **1.0.3**. Полный CPU-образ: `ghcr.io/jawerka/image-localization-tool:1.0.3-cpu-full`, принятый digest — `sha256:e1b1f8fdab1774d521359ddb9381daae1c5d23c039b67fc195968616d618849d`. После публикации этот же образ получает тег `cpu-full`. Релизы и образы 1.0.0–1.0.2 сохраняются; опубликованные архивы не перезаписываются. Проверки и хеши: [ACCEPTANCE_1.0.3.json](ACCEPTANCE_1.0.3.json).
 
 ## Матрица поверхностей
 
@@ -21,12 +21,12 @@
 Отдельно от заявленной поставки:
 
 - **Firefox.** Сборка `ilt-extension-firefox-*.zip` существует. Живая приёмка и магазин не заявлены; не считать канал равным Chromium.
-- **CUDA.** Профиль не заявлен в поставке 1.0.2 (P06 deferred). Исторический `--deploy cuda` / `--torch-cuda` не входит в полный ZIP и Docker. Аппаратный прогон cu128/cu130 нужен только если поддержку снова заявят.
+- **CUDA.** Профиль не заявлен в поставке 1.0.3 (P06 deferred). Исторический `--deploy cuda` / `--torch-cuda` не входит в полный ZIP и Docker. Аппаратный прогон cu128/cu130 нужен только если поддержку снова заявят.
 - **Окно из исходников.** `python -m src.app` — pywebview + WebView2. Готовое окно — Flutter-хост и сайдкар `--api`.
 
 ## Windows portable CPU full
 
-После выпуска распакуйте `ImageLocalizationTool-1.0.2-windows-x64-portable-cpu-full.zip` в доступную на запись папку. Запустите `ImageLocalizationTool/desktop/ImageLocalizationTool.exe`.
+После выпуска распакуйте `ImageLocalizationTool-1.0.3-windows-x64-portable-cpu-full.zip` в доступную на запись папку. Запустите `ImageLocalizationTool/desktop/ImageLocalizationTool.exe`.
 
 Системный Python, установка библиотек и первоначальная загрузка моделей не требуются. Локальные библиотеки Visual C++ находятся также рядом с Flutter EXE. Для RAR/CBR в полном пакете предусмотрены 7z.exe, 7z.dll и лицензия в `tools/7zip`; загрузчик предпочитает их системным распаковщикам. Настройки, проекты, журнал и ключи создаются в `data` рядом с приложением.
 
@@ -47,7 +47,7 @@
 - `-UsePreparedStage` повторно использует компоненты `build/portable-full/ImageLocalizationTool`, обновляет код/Flutter/web из актуального dist и проверяет готовность перед ZIP. Личные файлы в staging data приводят к отказу.
 
 ```powershell
-venv/Scripts/python scripts/smoke-components.py --portable dist/ImageLocalizationTool-1.0.2-windows-x64-portable-cpu-full.zip --prepared
+venv/Scripts/python scripts/smoke-components.py --portable dist/ImageLocalizationTool-1.0.3-windows-x64-portable-cpu-full.zip --prepared
 venv/Scripts/python scripts/smoke-portable-desktop.py --app build/frozen-smoke-<digest>/ImageLocalizationTool
 ```
 
@@ -59,17 +59,17 @@ venv/Scripts/python scripts/smoke-portable-desktop.py --app build/frozen-smoke-<
 
 ### Из готового образа
 
-Готовый `ImageLocalizationTool-1.0.2-docker-cpu-full.zip` содержит образ `.tar.gz`, Compose без стадии сборки и README. Распакуйте его и выполняйте команды в этой папке. Исходники и пользовательские данные в пакет не входят.
+Готовый `ImageLocalizationTool-1.0.3-docker-cpu-full.zip` содержит образ `.tar.gz`, Compose без стадии сборки и README. Распакуйте его и выполняйте команды в этой папке. Исходники и пользовательские данные в пакет не входят.
 
 ```sh
-docker load -i ImageLocalizationTool-1.0.2-linux-amd64-cpu-full.tar.gz
+docker load -i ImageLocalizationTool-1.0.3-linux-amd64-cpu-full.tar.gz
 docker compose up -d --no-build
 ```
 
 Сборка такого ZIP из уже экспортированного образа:
 
 ```powershell
-venv/Scripts/python scripts/package-docker.py --image-archive dist/ImageLocalizationTool-1.0.2-linux-amd64-cpu-full.tar.gz
+venv/Scripts/python scripts/package-docker.py --image-archive dist/ImageLocalizationTool-1.0.3-linux-amd64-cpu-full.tar.gz
 ```
 
 Откройте `http://localhost:8080`. Новая схема необязательного входа описана ниже. Ранее опубликованные архивы сохраняют поведение своей версии до обновления образа.
