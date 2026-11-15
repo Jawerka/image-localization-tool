@@ -58,7 +58,7 @@ jobs:
           python-version: "3.12"
       - name: Check Windows deployment protection
         run: |
-          python -m pip install pytest
+          python -m pip install pytest Pillow
           python -m pytest tests/unit/test_deploy_scripts.py -q
       - name: Run synthetic updater harness
         shell: pwsh
@@ -117,11 +117,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Целевой pin хоста — Flutter >= 3.47.7 stable;
-      # CI берёт текущий stable (сборка exe требует VS 2022 Desktop C++).
+      # Та же проверенная версия SDK, что используется для релизного EXE.
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.47.7'
           channel: stable
           cache: true
 
